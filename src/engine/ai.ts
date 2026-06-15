@@ -160,23 +160,44 @@ function tryDefense(
 
 const EXPAND_MIN_STACK = 5;
 
+// PRD §4.1 rule #2 + §4.2: source = any own tile with count ≥ 5; target = any
+// empty (count=0) non-own tile adjacent to faction territory. Source need not
+// itself neighbour the target — BFS path through the own corridor is enough.
+// This is what unblocks chain expansion past the castle's immediate neighbours.
 function tryExpand(
   state: GameState,
   faction: FactionId,
   rng: Rng,
 ): GameState | null {
-  type Pair = { readonly source: Province; readonly target: Province };
-  const pairs: Pair[] = [];
-  for (const own of findOwnTiles(state, faction)) {
+  const ownTiles = findOwnTiles(state, faction);
+  const sources: Province[] = [];
+  for (const own of ownTiles) {
     if (own.count < EXPAND_MIN_STACK) continue;
     if (own.isCastle && own.count <= 1) continue;
+    sources.push(own);
+  }
+  if (sources.length === 0) return null;
+
+  const targetIds = new Set<TileId>();
+  const targets: Province[] = [];
+  for (const own of ownTiles) {
     for (const nb of neighborsOf(state, own.id)) {
       if (nb.owner === faction) continue;
       if (nb.count !== 0) continue;
-      pairs.push({ source: own, target: nb });
+      if (targetIds.has(nb.id)) continue;
+      targetIds.add(nb.id);
+      targets.push(nb);
     }
   }
-  if (pairs.length === 0) return null;
+  if (targets.length === 0) return null;
+
+  type Pair = { readonly source: Province; readonly target: Province };
+  const pairs: Pair[] = [];
+  for (const source of sources) {
+    for (const target of targets) {
+      pairs.push({ source, target });
+    }
+  }
   shuffleInPlace(rng, pairs);
   for (const pair of pairs) {
     const res = dispatch(state, {

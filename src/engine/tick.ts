@@ -1,4 +1,5 @@
 import { stepAi } from "./ai";
+import { applyClaimPhase } from "./claim";
 import {
   applyDrainDeductions,
   resolveAdjacentCombat,
@@ -20,9 +21,13 @@ export function step(state: GameState): GameState {
   s = cr.state;
   const su = updateStalemates(s.stalemates, cr.pairs);
   s = applyDrainDeductions({ ...s, stalemates: su.nextMap }, su.drainDeductions);
-  // §3.2 step 3: occupation/defeat conversion. Must run before produce so a
-  // castle captured this tick can't push out an extra count from the dying
-  // faction.
+  // PRD §3.2 step 3b + §3.6.1: adjacent-empty claim runs after drain so
+  // freshly-emptied tiles can flip ownership in the same tick rather than
+  // waiting a tick. Must precede applyDefeats so a claim that captures the
+  // last castle of a faction is visible to the defeat check.
+  s = applyClaimPhase(s);
+  // §3.2 step 3c: castle captured this tick triggers faction defeat. Runs
+  // before produce so a dying faction can't push out an extra count.
   s = applyDefeats(s);
   s = produce(s);
   // §3.2 step 5 (tier upgrade) is implicit — deriveTier is recomputed on read.

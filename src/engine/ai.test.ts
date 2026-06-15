@@ -232,6 +232,35 @@ describe("rule priority", () => {
     expect((out.provinces.get(tileId(0, 1)) as Province).count).toBe(2);
   });
 
+  it("rule #2 (expansion) chains through own corridor when frontier empties are non-adjacent to the only ≥5 source", () => {
+    // PRD §4.2: filter sources (count≥5), iterate until a deployable empty-target
+    // combo is found — adjacency between source and target is not required, only
+    // BFS-reachability. Castle (0,0) is the only ≥5 source; its direct neighbors
+    // (0,1) and (1,0) are own count=2 corridor tiles; the frontier empties at
+    // (0,2)/(1,1)/(2,0) sit one hop further out. Rule #2 must still fire.
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 6, true),
+        makeProvince(0, 1, "TOKUGAWA", 2),
+        makeProvince(1, 0, "TOKUGAWA", 2),
+        makeProvince(0, 2, "NEUTRAL", 0),
+        makeProvince(1, 1, "NEUTRAL", 0),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      tick: 1,
+    });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(1);
+    const stack = out.marchingStacks[0] as MarchingStack;
+    expect(stack.faction).toBe("TOKUGAWA");
+    // 50% of 6 = 3 dispatched; castle keeps 3 (still respects min-1 invariant).
+    expect(stack.count).toBe(3);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+    expect(stack.path[0]).toBe(tileId(0, 0));
+    const dest = stack.path[stack.path.length - 1] as TileId;
+    expect([tileId(0, 2), tileId(1, 1), tileId(2, 0)]).toContain(dest);
+  });
+
   it("rule #2 (expansion) fires when count ≥ 5 and adjacent empty exists, no threat", () => {
     const state = buildState({
       provinces: [
