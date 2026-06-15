@@ -1,6 +1,13 @@
-import { tileId } from "./state";
+import { pairKey, tileId } from "./state";
 import { deriveTier } from "./upgrade";
-import type { GameState, Province, Tier, TileId } from "./types";
+import type {
+  GameState,
+  PairKey,
+  Province,
+  StalemateMap,
+  Tier,
+  TileId,
+} from "./types";
 
 export const POWER_PER_TIER: Readonly<Record<Tier, number>> = {
   SOLDIER: 1,
@@ -73,4 +80,47 @@ export function resolveAdjacentCombat(state: GameState): CombatResult {
   }
 
   return { state: { ...state, provinces: next }, pairs };
+}
+
+export const STALEMATE_DRAIN_THRESHOLD = 5;
+
+export type StalemateUpdate = {
+  readonly nextMap: StalemateMap;
+  readonly drainDeductions: ReadonlyMap<TileId, number>;
+};
+
+export function updateStalemates(
+  prev: StalemateMap,
+  combatPairs: readonly CombatPair[],
+): StalemateUpdate {
+  const nextMap = new Map<PairKey, number>();
+  const drain = new Map<TileId, number>();
+  for (const { a, b, lossA, lossB } of combatPairs) {
+    const key = pairKey(a, b);
+    // PRD §3.7.1: counter only ticks up on a true 0-loss stalemate; any real
+    // damage resets it. Pairs absent from combatPairs (dissolved) are
+    // naturally dropped because we only ever write keys we saw this tick.
+    const prevCount = prev.get(key) ?? 0;
+    const nextCount = lossA === 0 && lossB === 0 ? prevCount + 1 : 0;
+    nextMap.set(key, nextCount);
+    if (nextCount >= STALEMATE_DRAIN_THRESHOLD) {
+      drain.set(a, (drain.get(a) ?? 0) + 1);
+      drain.set(b, (drain.get(b) ?? 0) + 1);
+    }
+  }
+  return { nextMap, drainDeductions: drain };
+}
+
+export function applyDrainDeductions(
+  state: GameState,
+  deductions: ReadonlyMap<TileId, number>,
+): GameState {
+  if (deductions.size === 0) return state;
+  const next = new Map<TileId, Province>(state.provinces);
+  for (const [id, drop] of deductions) {
+    const p = next.get(id);
+    if (p === undefined) continue;
+    next.set(id, { ...p, count: Math.max(0, p.count - drop) });
+  }
+  return { ...state, provinces: next };
 }

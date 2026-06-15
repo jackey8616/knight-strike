@@ -1,17 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   POWER_PER_TIER,
+  STALEMATE_DRAIN_THRESHOLD,
+  applyDrainDeductions,
   computeLoss,
   resolveAdjacentCombat,
   tilePower,
+  updateStalemates,
 } from "./combat";
-import { tileId } from "./state";
+import type { CombatPair } from "./combat";
+import { pairKey, tileId } from "./state";
 import { deriveTier } from "./upgrade";
 import type {
   AiMode,
   FactionId,
   GameState,
+  PairKey,
   Province,
+  StalemateMap,
   TileId,
 } from "./types";
 
@@ -329,5 +335,186 @@ describe("resolveAdjacentCombat", () => {
     // No count change.
     expect(after.provinces.get(tileId(0, 0))?.count).toBe(3);
     expect(after.provinces.get(tileId(1, 0))?.count).toBe(3);
+  });
+});
+
+describe("updateStalemates + applyDrainDeductions", () => {
+  const A = tileId(0, 0);
+  const B = tileId(1, 0);
+  const C = tileId(2, 0);
+  const KEY_AB: PairKey = pairKey(A, B);
+  const KEY_BC: PairKey = pairKey(B, C);
+  const stalematePair = (a: TileId, b: TileId): CombatPair => ({
+    a,
+    b,
+    lossA: 0,
+    lossB: 0,
+  });
+  const damagingPair = (
+    a: TileId,
+    b: TileId,
+    lossA: number,
+    lossB: number,
+  ): CombatPair => ({ a, b, lossA, lossB });
+
+  function advanceStalemate(
+    map: StalemateMap,
+    pairs: readonly CombatPair[],
+  ): StalemateMap {
+    return updateStalemates(map, pairs).nextMap;
+  }
+
+  it("drain threshold matches PRD §3.7.1 (5)", () => {
+    expect(STALEMATE_DRAIN_THRESHOLD).toBe(5);
+  });
+
+  it("counter starts at 0 and increments by 1 on every 0/0 tick", () => {
+    let map: StalemateMap = new Map();
+    for (let i = 1; i <= 4; i++) {
+      const result = updateStalemates(map, [stalematePair(A, B)]);
+      expect(result.nextMap.get(KEY_AB)).toBe(i);
+      expect(result.drainDeductions.size).toBe(0);
+      map = result.nextMap;
+    }
+  });
+
+  it("counter reset to 0 when either side takes any loss", () => {
+    let map: StalemateMap = new Map([[KEY_AB, 4]]);
+    map = advanceStalemate(map, [damagingPair(A, B, 1, 0)]);
+    expect(map.get(KEY_AB)).toBe(0);
+
+    map = new Map([[KEY_AB, 4]]);
+    map = advanceStalemate(map, [damagingPair(A, B, 0, 2)]);
+    expect(map.get(KEY_AB)).toBe(0);
+  });
+
+  it("pair absent from current combatPairs is dropped (counter discarded)", () => {
+    // PRD §3.7.1: pair dissolves (tile clears / changes owner / non-adjacent) →
+    // counter dropped; next time the pair reappears it counts from 0.
+    const map: StalemateMap = new Map([[KEY_AB, 3]]);
+    const result = updateStalemates(map, [stalematePair(B, C)]);
+    expect(result.nextMap.has(KEY_AB)).toBe(false);
+    expect(result.nextMap.get(KEY_BC)).toBe(1);
+  });
+
+  it("drain mode triggers exactly when counter reaches 5", () => {
+    let map: StalemateMap = new Map();
+    for (let i = 1; i <= 4; i++) {
+      const r = updateStalemates(map, [stalematePair(A, B)]);
+      expect(r.drainDeductions.size).toBe(0);
+      map = r.nextMap;
+    }
+    const fifth = updateStalemates(map, [stalematePair(A, B)]);
+    expect(fifth.nextMap.get(KEY_AB)).toBe(5);
+    expect(fifth.drainDeductions.get(A)).toBe(1);
+    expect(fifth.drainDeductions.get(B)).toBe(1);
+  });
+
+  it("drain mode persists past threshold (counter keeps climbing)", () => {
+    let map: StalemateMap = new Map([[KEY_AB, 5]]);
+    for (let expected = 6; expected <= 8; expected++) {
+      const r = updateStalemates(map, [stalematePair(A, B)]);
+      expect(r.nextMap.get(KEY_AB)).toBe(expected);
+      expect(r.drainDeductions.get(A)).toBe(1);
+      expect(r.drainDeductions.get(B)).toBe(1);
+      map = r.nextMap;
+    }
+  });
+
+  it("loss>0 resets counter even if it was already above threshold (no drain that tick)", () => {
+    const map: StalemateMap = new Map([[KEY_AB, 9]]);
+    const r = updateStalemates(map, [damagingPair(A, B, 2, 1)]);
+    expect(r.nextMap.get(KEY_AB)).toBe(0);
+    expect(r.drainDeductions.size).toBe(0);
+  });
+
+  it("multiple drained pairs accumulate deductions per tile", () => {
+    // Tile B is in stalemate with both A and C → suffers 2 drain in this tick.
+    const map: StalemateMap = new Map([
+      [KEY_AB, 5],
+      [KEY_BC, 5],
+    ]);
+    const r = updateStalemates(map, [
+      stalematePair(A, B),
+      stalematePair(B, C),
+    ]);
+    expect(r.drainDeductions.get(A)).toBe(1);
+    expect(r.drainDeductions.get(B)).toBe(2);
+    expect(r.drainDeductions.get(C)).toBe(1);
+  });
+
+  it("applyDrainDeductions clamps count at 0 and returns new state", () => {
+    const before = buildState([
+      makeProvince(0, 0, "TOKUGAWA", 1),
+      makeProvince(1, 0, "TAKEDA", 3),
+    ]);
+    const after = applyDrainDeductions(
+      before,
+      new Map([
+        [A, 1],
+        [B, 1],
+      ]),
+    );
+    expect(after).not.toBe(before);
+    expect(after.provinces.get(A)?.count).toBe(0);
+    expect(after.provinces.get(B)?.count).toBe(2);
+    // Original untouched.
+    expect(before.provinces.get(A)?.count).toBe(1);
+  });
+
+  it("applyDrainDeductions with empty map is a no-op (same state reference)", () => {
+    const before = buildState([makeProvince(0, 0, "TOKUGAWA", 5)]);
+    expect(applyDrainDeductions(before, new Map())).toBe(before);
+  });
+
+  it("[AC-19] 3v3 stalemate: advance(4) still 3, advance(5)=2, advance(6)=1, advance(7)=0", () => {
+    // Full integration of resolveAdjacentCombat → updateStalemates →
+    // applyDrainDeductions, matching the headless AC-19 procedure.
+    let state = buildState([
+      makeProvince(0, 0, "TOKUGAWA", 3),
+      makeProvince(1, 0, "TAKEDA", 3),
+    ]);
+    let stalemates: StalemateMap = state.stalemates;
+
+    function advance(): void {
+      const combat = resolveAdjacentCombat(state);
+      const stale = updateStalemates(stalemates, combat.pairs);
+      stalemates = stale.nextMap;
+      state = applyDrainDeductions(combat.state, stale.drainDeductions);
+    }
+
+    advance(); // tick 1: counter 1, no drain
+    advance(); // tick 2: counter 2
+    advance(); // tick 3: counter 3
+    advance(); // tick 4: counter 4, still no drain
+    expect(state.provinces.get(A)?.count).toBe(3);
+    expect(state.provinces.get(B)?.count).toBe(3);
+
+    advance(); // tick 5: counter 5, drain → 3→2 each
+    expect(state.provinces.get(A)?.count).toBe(2);
+    expect(state.provinces.get(B)?.count).toBe(2);
+
+    advance(); // tick 6: counter 6, drain → 2→1 each
+    expect(state.provinces.get(A)?.count).toBe(1);
+    expect(state.provinces.get(B)?.count).toBe(1);
+
+    advance(); // tick 7: counter 7, drain → 1→0 each
+    expect(state.provinces.get(A)?.count).toBe(0);
+    expect(state.provinces.get(B)?.count).toBe(0);
+  });
+
+  it("AC-19 follow-up: once a tile hits 0 the pair dissolves and counter is dropped", () => {
+    // After both drain to 0, neither side fights (count 0 short-circuit in
+    // resolveAdjacentCombat), so the pair disappears from combatPairs.
+    const drained = buildState([
+      makeProvince(0, 0, "TOKUGAWA", 0),
+      makeProvince(1, 0, "TAKEDA", 0),
+    ]);
+    const stalemates: StalemateMap = new Map([[KEY_AB, 7]]);
+    const combat = resolveAdjacentCombat(drained);
+    expect(combat.pairs).toHaveLength(0);
+    const r = updateStalemates(stalemates, combat.pairs);
+    expect(r.nextMap.size).toBe(0);
+    expect(r.drainDeductions.size).toBe(0);
   });
 });
