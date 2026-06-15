@@ -235,9 +235,10 @@ describe("rule priority", () => {
   it("rule #2 (expansion) chains through own corridor when frontier empties are non-adjacent to the only ≥5 source", () => {
     // PRD §4.2: filter sources (count≥5), iterate until a deployable empty-target
     // combo is found — adjacency between source and target is not required, only
-    // BFS-reachability. Castle (0,0) is the only ≥5 source; its direct neighbors
-    // (0,1) and (1,0) are own count=2 corridor tiles; the frontier empties at
-    // (0,2)/(1,1)/(2,0) sit one hop further out. Rule #2 must still fire.
+    // BFS-reachability. Castle (0,0) is the only eligible source under the v0.8
+    // tiered reserve: Knight (count=6) sends `min(floor(6*0.25), 6-5) = 1`,
+    // keeping source at 5. Direct neighbours (0,1)/(1,0) are own corridor;
+    // frontier empties at (0,2)/(1,1)/(2,0) sit one hop further out.
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 6, true),
@@ -253,18 +254,19 @@ describe("rule priority", () => {
     expect(out.marchingStacks.length).toBe(1);
     const stack = out.marchingStacks[0] as MarchingStack;
     expect(stack.faction).toBe("TOKUGAWA");
-    // 50% of 6 = 3 dispatched; castle keeps 3 (still respects min-1 invariant).
-    expect(stack.count).toBe(3);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+    expect(stack.count).toBe(1);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(5);
     expect(stack.path[0]).toBe(tileId(0, 0));
     const dest = stack.path[stack.path.length - 1] as TileId;
     expect([tileId(0, 2), tileId(1, 1), tileId(2, 0)]).toContain(dest);
   });
 
-  it("rule #2 (expansion) fires when count ≥ 5 and adjacent empty exists, no threat", () => {
+  it("rule #2 (expansion) fires when castle ≥ 6 and adjacent empty exists, no threat", () => {
+    // count=5 castle is a Knight at the reserve floor — sends 0, so we bump to
+    // 6 to exercise the dispatch path. send = min(floor(6*0.25), 6-5) = 1.
     const state = buildState({
       provinces: [
-        makeProvince(0, 0, "TOKUGAWA", 5, true),
+        makeProvince(0, 0, "TOKUGAWA", 6, true),
         makeProvince(1, 0, "NEUTRAL", 0),
         makeProvince(0, 1, "NEUTRAL", 0),
       ],
@@ -273,18 +275,16 @@ describe("rule priority", () => {
     const out = stepAi(state);
     expect(out.marchingStacks.length).toBe(1);
     const stack = out.marchingStacks[0] as MarchingStack;
-    // 50% of 5 = 2; castle min-1 keeps source ≥ 1, dispatched count = 2.
-    expect(stack.count).toBe(2);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+    expect(stack.count).toBe(1);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(5);
     const dest = stack.path[stack.path.length - 1] as TileId;
     expect([tileId(1, 0), tileId(0, 1)]).toContain(dest);
   });
 
-  it("rule #3 (attack) fires when reachable enemy castle within 4 hops and power ≥ 1.5×", () => {
-    // Own (3,0) count=20 (Queen, power=240); enemy castle (4,0) count=3 (Soldier).
-    // Castle (0,0) kept far from the enemy so rule #1 stays silent. (1,0) and
-    // (2,0) are own count=0 corridor tiles to ensure BFS passability and avoid
-    // empty-target rule #2 spurious pairs.
+  it("rule #3 (attack) fires when reachable enemy castle within ATTACK_RANGE_HOPS and power ≥ 1.5×", () => {
+    // Own (3,0) count=20 (Queen). PRD v0.8 §3.5.1 AI rule #3 keeps 1 troop on
+    // source, so effectiveCount = 19 (still Queen, power 228). Target castle
+    // count=3 (Soldier, power 3). Distance 1 hop. Send count=19.
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
@@ -299,7 +299,8 @@ describe("rule priority", () => {
     expect(out.marchingStacks.length).toBe(1);
     const stack = out.marchingStacks[0] as MarchingStack;
     expect(stack.faction).toBe("TOKUGAWA");
-    expect(stack.count).toBe(20);
+    expect(stack.count).toBe(19);
+    expect((out.provinces.get(tileId(3, 0)) as Province).count).toBe(1);
     expect(stack.path[stack.path.length - 1]).toBe(tileId(4, 0));
   });
 
@@ -319,14 +320,83 @@ describe("rule priority", () => {
     expect(out.marchingStacks.length).toBe(0);
   });
 
-  it("rule #3 skipped when enemy castle is farther than 4 hops", () => {
-    // Source at (1,0), enemy castle at (6,0) → 5 hops, exceeds ATTACK_RANGE_HOPS.
+  it("rule #3 skipped when enemy castle is farther than ATTACK_RANGE_HOPS (8)", () => {
+    // PRD v0.8: ATTACK_RANGE_HOPS = 8. Source (1,0) → enemy (10,0) is 9 hops
+    // through own corridor (2,0)..(9,0). 9 > 8 → skip.
     const provinces: Province[] = [
       makeProvince(0, 0, "TOKUGAWA", 1, true),
       makeProvince(1, 0, "TOKUGAWA", 50),
     ];
-    for (let x = 2; x <= 5; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
-    provinces.push(makeProvince(6, 0, "TAKEDA", 3, true));
+    for (let x = 2; x <= 9; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
+    provinces.push(makeProvince(10, 0, "TAKEDA", 3, true));
+    const state = buildState({ provinces, tick: 1 });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(0);
+  });
+
+  it("[AC-27] castle Knight tier sends min(floor(c*0.25), c-5), source keeps ≥ 5", () => {
+    // PRD v0.8 §4.1 rule #2: Knight castle count=8 → send min(2, 3)=2, source=6.
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 8, true),
+        makeProvince(1, 0, "NEUTRAL", 0),
+      ],
+      tick: 1,
+    });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(1);
+    const stack = out.marchingStacks[0] as MarchingStack;
+    expect(stack.count).toBe(2);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(6);
+  });
+
+  it("[AC-28] castle Soldier tier (count < 5) blocks rule #2 entirely", () => {
+    // No marching stack emerges: castle is the only source, Soldier-tier (<5)
+    // is frozen by §4.1 reserve. No other rule fires (no threat, no enemy
+    // castle in range), so fallthrough to rule #4 hoarding.
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 4, true),
+        makeProvince(1, 0, "NEUTRAL", 0),
+        makeProvince(0, 1, "NEUTRAL", 0),
+      ],
+      tick: 1,
+    });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(0);
+  });
+
+  it("[AC-29] rule #3 fires at distance = 7 hops (≤ 8); source.count → 1", () => {
+    // PRD v0.8 §4.1: ATTACK_RANGE_HOPS = 8. Source (3,0) Knight count=10
+    // (power=40); target TAKEDA castle (10,0) count=3 (power=3). Path through
+    // own corridor (4,0)..(9,0) has length 8 (7 hops). 7 ≤ 8, power 40 > 4.5.
+    const provinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 1, true),
+      makeProvince(1, 0, "TOKUGAWA", 0),
+      makeProvince(2, 0, "TOKUGAWA", 0),
+      makeProvince(3, 0, "TOKUGAWA", 10),
+    ];
+    for (let x = 4; x <= 9; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
+    provinces.push(makeProvince(10, 0, "TAKEDA", 3, true));
+    const state = buildState({ provinces, tick: 1 });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(1);
+    const stack = out.marchingStacks[0] as MarchingStack;
+    expect(stack.count).toBe(9); // 10 - 1 reserve
+    expect((out.provinces.get(tileId(3, 0)) as Province).count).toBe(1);
+    expect(stack.path[stack.path.length - 1]).toBe(tileId(10, 0));
+    // Path length = 8 tiles (7 hops).
+    expect(stack.path.length).toBe(8);
+  });
+
+  it("[AC-30] rule #3 skipped at distance = 9 hops (> 8)", () => {
+    // Same shape as AC-29 but source pushed one tile back so distance = 9.
+    const provinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 1, true),
+      makeProvince(1, 0, "TOKUGAWA", 10),
+    ];
+    for (let x = 2; x <= 9; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
+    provinces.push(makeProvince(10, 0, "TAKEDA", 3, true));
     const state = buildState({ provinces, tick: 1 });
     const out = stepAi(state);
     expect(out.marchingStacks.length).toBe(0);
@@ -337,10 +407,11 @@ describe("[AC-22] AI evaluation is deterministic under rngSeed + factionId + tic
   function scenarioWithChoices(seed: number): GameState {
     // Castle has four adjacent empty NEUTRAL tiles → four valid rule #2 pairs,
     // shuffle order picks which one fires. Centre placement guarantees four
-    // neighbors, exercising the RNG every time.
+    // neighbors, exercising the RNG every time. count=6 so PRD v0.8 §4.1
+    // Knight reserve permits dispatch (sends 1, source keeps 5).
     return buildState({
       provinces: [
-        makeProvince(5, 5, "TOKUGAWA", 5, true),
+        makeProvince(5, 5, "TOKUGAWA", 6, true),
         makeProvince(4, 5, "NEUTRAL", 0),
         makeProvince(6, 5, "NEUTRAL", 0),
         makeProvince(5, 4, "NEUTRAL", 0),

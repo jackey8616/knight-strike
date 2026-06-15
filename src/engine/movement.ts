@@ -82,6 +82,12 @@ export type DispatchCommand = {
   readonly from: TileId;
   readonly to: TileId;
   readonly ratio: DispatchRatio;
+  // AI-internal escape hatch: when set, the exact count to dispatch overrides
+  // the ratio-derived value. Used by §4.1 rule #2 castle-tier branching and
+  // rule #3 "all but 1" attack. Player-facing dispatches never set this and
+  // keep the ratio-only semantic (so AC-16's 100% behaviour is unchanged).
+  // Castle-min-1 still applies on top.
+  readonly forceCount?: number;
 };
 
 export type DispatchFailureReason =
@@ -122,8 +128,13 @@ export function dispatch(state: GameState, cmd: DispatchCommand): DispatchResult
     return { ok: false, state, reason: "no-path" };
   }
 
-  let toSend = Math.max(1, Math.floor(source.count * cmd.ratio));
-  toSend = Math.min(toSend, source.count);
+  let toSend: number;
+  if (cmd.forceCount !== undefined) {
+    toSend = Math.max(1, Math.min(cmd.forceCount, source.count));
+  } else {
+    toSend = Math.max(1, Math.floor(source.count * cmd.ratio));
+    toSend = Math.min(toSend, source.count);
+  }
   if (source.isCastle) {
     toSend = Math.min(toSend, source.count - 1);
   }

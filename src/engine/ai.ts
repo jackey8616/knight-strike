@@ -160,21 +160,52 @@ function tryDefense(
 
 const EXPAND_MIN_STACK = 5;
 
-// PRD §4.1 rule #2 + §4.2: source = any own tile with count ≥ 5; target = any
-// empty (count=0) non-own tile adjacent to faction territory. Source need not
-// itself neighbour the target — BFS path through the own corridor is enough.
-// This is what unblocks chain expansion past the castle's immediate neighbours.
+// PRD §3.4 tier thresholds — re-exported as named reserve constants so the
+// castle-tier branching reads "reserve ≥ Knight floor" rather than magic 5.
+export const KNIGHT_RESERVE = 5;
+export const QUEEN_RESERVE = 15;
+export const KING_THRESHOLD = 30;
+
+// Returns the count to dispatch from `source` under PRD §4.1 rule #2, or null
+// when the source is ineligible (tier-protection or insufficient surplus).
+function expandSendCount(source: Province): number | null {
+  if (!source.isCastle) {
+    if (source.count < EXPAND_MIN_STACK) return null;
+    return Math.max(1, Math.floor(source.count * 0.5));
+  }
+  // Castle: tiered reserve — count must exceed the tier floor before any
+  // surplus can leave, otherwise the castle never climbs to the next tier.
+  const c = source.count;
+  if (c < KNIGHT_RESERVE) return null; // Soldier — frozen until ≥ 5
+  if (c < QUEEN_RESERVE) {
+    const send = Math.min(Math.floor(c * 0.25), c - KNIGHT_RESERVE);
+    return send >= 1 ? send : null;
+  }
+  if (c < KING_THRESHOLD) {
+    // 0.33 from PRD; floor-truncated to integer count.
+    const send = Math.min(Math.floor(c * 0.33), c - QUEEN_RESERVE);
+    return send >= 1 ? send : null;
+  }
+  // King — full siphon, no reserve. dispatch() still enforces castle-min-1.
+  return Math.max(1, Math.floor(c * 0.5));
+}
+
+// PRD §4.1 rule #2 + §4.2: source = any own tile that passes expandSendCount
+// (non-castle ≥ 5, castle gated by tier reserve). Target = any empty (count=0)
+// non-own tile adjacent to faction territory. Source need not itself neighbour
+// the target — BFS path through the own corridor is enough.
 function tryExpand(
   state: GameState,
   faction: FactionId,
   rng: Rng,
 ): GameState | null {
   const ownTiles = findOwnTiles(state, faction);
-  const sources: Province[] = [];
+  type Source = { readonly tile: Province; readonly sendCount: number };
+  const sources: Source[] = [];
   for (const own of ownTiles) {
-    if (own.count < EXPAND_MIN_STACK) continue;
-    if (own.isCastle && own.count <= 1) continue;
-    sources.push(own);
+    const send = expandSendCount(own);
+    if (send === null) continue;
+    sources.push({ tile: own, sendCount: send });
   }
   if (sources.length === 0) return null;
 
@@ -191,7 +222,7 @@ function tryExpand(
   }
   if (targets.length === 0) return null;
 
-  type Pair = { readonly source: Province; readonly target: Province };
+  type Pair = { readonly source: Source; readonly target: Province };
   const pairs: Pair[] = [];
   for (const source of sources) {
     for (const target of targets) {
@@ -201,16 +232,19 @@ function tryExpand(
   shuffleInPlace(rng, pairs);
   for (const pair of pairs) {
     const res = dispatch(state, {
-      from: pair.source.id,
+      from: pair.source.tile.id,
       to: pair.target.id,
       ratio: 0.5 as DispatchRatio,
+      forceCount: pair.source.sendCount,
     });
     if (res.ok) return res.state;
   }
   return null;
 }
 
-const ATTACK_RANGE_HOPS = 4;
+// PRD v0.8 §4.1 rule #3: hops 4 → 8 so 11x11 mid-board frontier can reach
+// enemy castle range. Power ratio threshold (1.5×) unchanged.
+export const ATTACK_RANGE_HOPS = 8;
 const ATTACK_POWER_RATIO = 1.5;
 
 function tryAttack(
@@ -225,7 +259,9 @@ function tryAttack(
   const pairs: Pair[] = [];
   for (const own of findOwnTiles(state, faction)) {
     if (own.count <= 1) continue;
-    const effectiveCount = own.isCastle ? own.count - 1 : own.count;
+    // PRD §3.5.1 (v0.8): rule #3 keeps 1 troop on source even for non-castle
+    // tiles — power check has to mirror what will actually march out.
+    const effectiveCount = own.count - 1;
     if (effectiveCount <= 0) continue;
     const ownPower = tilePower(effectiveCount);
     for (const target of targets) {
@@ -243,6 +279,7 @@ function tryAttack(
       from: pair.source.id,
       to: pair.target.id,
       ratio: 1.0 as DispatchRatio,
+      forceCount: pair.source.count - 1,
     });
     if (res.ok) return res.state;
   }
