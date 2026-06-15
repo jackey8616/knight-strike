@@ -24,7 +24,7 @@ function makeProvince(
   count: number,
   isCastle = false,
 ): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle };
+  return { id: tileId(x, y), x, y, owner, count, isCastle, lastClaimedAtTick: null };
 }
 
 type BuildOpts = {
@@ -190,6 +190,128 @@ describe("§3.6.1 negative cases", () => {
     const b = out.provinces.get(tileId(1, 0)) as Province;
     expect(b.owner).toBe("TAKEDA");
     expect(b.count).toBe(2);
+  });
+});
+
+describe("[AC-26] claim hysteresis: 3-tick protection window", () => {
+  // T at (1,0) starts owned by TOKUGAWA count=0. Neighbour TAKEDA at (2,0)
+  // has stronger Knight stack (power 20) so under v0.6 §3.6.1 it would
+  // claim T immediately. Under v0.7 we enforce a 3-tick freeze after the
+  // first claim.
+  function setupStrongerTakedaAdj(
+    tick: number,
+    tile: Province,
+  ): GameState {
+    return buildState({
+      provinces: [
+        tile,
+        makeProvince(2, 0, "TAKEDA", 5), // Knight, power 20
+        makeProvince(0, 0, "TOKUGAWA", 3), // Soldier, power 3
+        makeProvince(1, 1, "NEUTRAL", 0),
+      ],
+      tick,
+    });
+  }
+
+  it("tick 1: T claimed by TAKEDA, lastClaimedAtTick = 1", () => {
+    const t0 = {
+      id: tileId(1, 0),
+      x: 1,
+      y: 0,
+      owner: "TOKUGAWA" as FactionId,
+      count: 0,
+      isCastle: false,
+      lastClaimedAtTick: null,
+    };
+    const s1 = setupStrongerTakedaAdj(1, t0);
+    const out = applyClaimPhase(s1);
+    const t = out.provinces.get(tileId(1, 0)) as Province;
+    expect(t.owner).toBe("TAKEDA");
+    expect(t.lastClaimedAtTick).toBe(1);
+  });
+
+  it("tick 2 and 3: frozen — even if TOKUGAWA power flips ahead, owner does not change", () => {
+    // Tile already shows lastClaimedAtTick=1 (set previous tick). Now we
+    // give TOKUGAWA the stronger Knight stack so the raw §3.6.1 power
+    // arbitration would flip back; hysteresis must keep it on TAKEDA.
+    const t = {
+      id: tileId(1, 0),
+      x: 1,
+      y: 0,
+      owner: "TAKEDA" as FactionId,
+      count: 0,
+      isCastle: false,
+      lastClaimedAtTick: 1,
+    };
+    const reverseAdj = (tick: number): GameState =>
+      buildState({
+        provinces: [
+          t,
+          makeProvince(2, 0, "TAKEDA", 3), // Soldier, power 3
+          makeProvince(0, 0, "TOKUGAWA", 5), // Knight, power 20
+          makeProvince(1, 1, "NEUTRAL", 0),
+        ],
+        tick,
+      });
+
+    for (const tick of [2, 3]) {
+      const out = applyClaimPhase(reverseAdj(tick));
+      const r = out.provinces.get(tileId(1, 0)) as Province;
+      expect(r.owner).toBe("TAKEDA");
+      expect(r.lastClaimedAtTick).toBe(1);
+    }
+  });
+
+  it("tick 4: protection lifts (4 − 1 = 3, NOT < 3) — TOKUGAWA re-claims", () => {
+    const t = {
+      id: tileId(1, 0),
+      x: 1,
+      y: 0,
+      owner: "TAKEDA" as FactionId,
+      count: 0,
+      isCastle: false,
+      lastClaimedAtTick: 1,
+    };
+    const state = buildState({
+      provinces: [
+        t,
+        makeProvince(2, 0, "TAKEDA", 3),
+        makeProvince(0, 0, "TOKUGAWA", 5),
+        makeProvince(1, 1, "NEUTRAL", 0),
+      ],
+      tick: 4,
+    });
+    const out = applyClaimPhase(state);
+    const r = out.provinces.get(tileId(1, 0)) as Province;
+    expect(r.owner).toBe("TOKUGAWA");
+    expect(r.lastClaimedAtTick).toBe(4);
+  });
+
+  it("count change inside protection window is allowed (claim only freezes owner)", () => {
+    // PRD: count by other rules (combat, arrival) still mutates; only owner
+    // is frozen by hysteresis. This test exercises the negative path: claim
+    // is the no-op, the surrounding tick logic is unaffected.
+    const t = {
+      id: tileId(1, 0),
+      x: 1,
+      y: 0,
+      owner: "TAKEDA" as FactionId,
+      count: 0,
+      isCastle: false,
+      lastClaimedAtTick: 1,
+    };
+    const state = buildState({
+      provinces: [
+        t,
+        makeProvince(0, 0, "TOKUGAWA", 5),
+        makeProvince(2, 0, "NEUTRAL", 0),
+        makeProvince(1, 1, "NEUTRAL", 0),
+      ],
+      tick: 2,
+    });
+    const out = applyClaimPhase(state);
+    // No-op branch returns the same state reference.
+    expect(out).toBe(state);
   });
 });
 

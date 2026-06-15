@@ -33,7 +33,7 @@ function makeProvince(
   count: number,
   isCastle = false,
 ): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle };
+  return { id: tileId(x, y), x, y, owner, count, isCastle, lastClaimedAtTick: null };
 }
 
 type BuildOpts = {

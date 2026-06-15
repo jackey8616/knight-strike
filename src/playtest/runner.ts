@@ -184,6 +184,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
         owner: "NEUTRAL",
         count: 0,
         isCastle: false,
+        lastClaimedAtTick: null,
       });
     }
   }
@@ -196,6 +197,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       owner: t.owner,
       count: t.count,
       isCastle: t.isCastle,
+      lastClaimedAtTick: null,
     });
   }
   const aiConfig: Record<FactionId, AiMode> = {

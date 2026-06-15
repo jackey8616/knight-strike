@@ -13,6 +13,11 @@ export type Province = {
   readonly owner: FactionId;
   readonly count: number;
   readonly isCastle: boolean;
+  // PRD §3.6.1 hysteresis: tick at which §3.6.1 last flipped this tile's
+  // owner; null = never claimed. Used to enforce the 3-tick protection
+  // window. Other ownership changes (dispatch arrival, defeat conversion)
+  // do not touch this field.
+  readonly lastClaimedAtTick: number | null;
 };
 
 export type MarchingStack = {

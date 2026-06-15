@@ -41,6 +41,10 @@ function neighbours(
   return out;
 }
 
+// PRD §3.6.1 hysteresis window: a freshly-claimed tile is frozen for this
+// many ticks to prevent power-fluctuation-induced ownership oscillation.
+export const CLAIM_PROTECTION_TICKS = 3;
+
 // PRD §3.6.1 — runs after combat + drain, before defeats. Pure function:
 // returns a new state when at least one tile flips, same reference otherwise.
 export function applyClaimPhase(state: GameState): GameState {
@@ -48,6 +52,17 @@ export function applyClaimPhase(state: GameState): GameState {
 
   for (const tile of state.provinces.values()) {
     if (tile.count !== 0) continue;
+
+    // PRD §3.6.1 hysteresis: skip tiles still inside the protection window.
+    // tick semantics match the rest of the engine (`state.tick` at the time
+    // of the action is the timestamp value stored — same convention as
+    // MarchingStack.dispatchedAtTick).
+    if (
+      tile.lastClaimedAtTick !== null &&
+      state.tick - tile.lastClaimedAtTick < CLAIM_PROTECTION_TICKS
+    ) {
+      continue;
+    }
 
     // Gather claimants and their summed power. §3.6.1 excludes NEUTRAL,
     // defeated factions, and the tile's own owner from claiming.
@@ -96,7 +111,11 @@ export function applyClaimPhase(state: GameState): GameState {
     if (winner === tile.owner) continue;
 
     if (next === null) next = new Map<TileId, Province>(state.provinces);
-    next.set(tile.id, { ...tile, owner: winner });
+    next.set(tile.id, {
+      ...tile,
+      owner: winner,
+      lastClaimedAtTick: state.tick,
+    });
   }
 
   if (next === null) return state;
