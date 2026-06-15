@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.8
+**Version**: v0.9
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -11,6 +11,7 @@
 - v0.6 — 新增 §3.6.1 相鄰勢力空格佔領規則；明確 §3.2 步驟 3 的兩階段 claim；補 AC-23/24/25。修復 M1.11 smoke 100% 卡 500 tick stalemate 的問題
 - v0.7 — §3.6.1 補 hysteresis 規則（claim 後 3 ticks 保護期）；Province 新增 lastClaimedAtTick 欄位；新增 AC-26
 - v0.8 — §4.1 Rule #2 分階累積保護避免主城被抽乾；Rule #3 ATTACK_RANGE_HOPS 4→8；§3.5.1 補 AI 派遣下限規則；新增 AC-27/28/29/30
+- v0.9 — §3.4 Tier 閾值降為 5/12/25；§4.1 ATTACK_POWER_RATIO 1.5→1.0；§4.1 Rule #3 castle source 保留 5 兵；§4.1 Rule #2 castle 分階閾值同步更新；新增 AC-31/32。M1 收斂導向，戰場累積機制議題保留至 M2 再議
 
 ## 1. 願景與背景
 
@@ -84,13 +85,13 @@
 - 每格的單位狀態為 `(tier, count)`，整格作為一個單位顯示。
 - Tier 由 count 推導（純函數，無狀態）：
   - `count < 5` → Soldier
-  - `5 ≤ count < 15` → Knight
-  - `15 ≤ count < 30` → Queen
-  - `count ≥ 30` → King
+  - `5 ≤ count < 12` → Knight
+  - `12 ≤ count < 25` → Queen
+  - `count ≥ 25` → King
 - Tier 升級 / 降級為**隱含結果**：count 變動後即時更新 tier。畫面上顯示對應 sprite + 數字。
 - 同一格只能由單一勢力擁有；不同勢力進入同一格 = 戰鬥而非合併。
 
-> 閾值 5 / 15 / 30 為初稿，待 playtest 微調。預期一場遊戲中段才會看到 Queen、後段才會看到 King。
+> 閾值 5 / 12 / 25（v0.9 從原 5/15/30 下調）。v0.9 將 Queen / King 閾值從 15/30 降為 12/25，原因：v0.8 playtest 顯示戰場 tile 累積速率不足，non-castle source 從未跨越 Queen 閾值 (power 60+) → rule #3 無法 fire → 遊戲無法收斂。降低閾值讓戰場兵在合理時間內能達高 tier，並讓 castle 也能在 200 ticks 內穩定升 Queen。此調整為 M1 收斂導向，M2 之後若戰場累積機制（如集結點）建立，可考慮恢復原值。
 
 ### 3.5 移動、派駐、路徑、行軍碰撞
 
@@ -102,8 +103,11 @@
 - **主城派遣下限**：
   - **玩家手動派遣**：主城作為來源時，無論滑桿選何比例，**至少留下 1 兵**。例如主城 count = 10 且選 100%，派遣 9、留 1。若 count = 1 則無法派遣。
   - **AI rule #2 派遣**：依 §4.1 分階累積保護，主城派出後至少保留該階 tier 閾值兵力（Knight: 5 / Queen: 15 / King: 30 後無下限保護）。
-  - **AI rule #3 派遣**：100% 進攻不受 tier 保護限制（castle 兵全押進攻），但 §3.5.1 玩家手動的 1 兵下限仍適用；本規則延伸到**所有 source**（含非主城），即 AI rule #3 派遣後 source 至少保留 1 兵，避免抽空前線格留下真空帶。
-  - 設計意圖：玩家對「全押進攻」有充分操作權，AI 在擴張階段保守、進攻階段果斷但不無腦撤退留守。
+  - **AI rule #3 派遣**：派遣量 = `source.count - reserve`：
+    - 非主城 source：reserve = 1（避免抽空前線格留下真空帶）
+    - 主城 source：reserve = 5（保留 Knight tier 防禦力，避免互攻同歸於盡）
+    - 若派遣量 ≤ 0，rule #3 不 fire
+  - 設計意圖：玩家對「全押進攻」有充分操作權，AI 在擴張階段保守、進攻階段果斷但留下防守底氣。
 
 #### 3.5.2 路徑規則
 
@@ -198,7 +202,7 @@ new_count = max(0, count - loss)
 
 設計意圖不變：同 tier 對戰也可造成顯著消耗、跨閾值即時降級。
 
-**設計意圖**：高 tier 不只抗打更是輸出乘法 —— King 戰力倍率 30，可在小數量下單方面屠殺低 tier 大軍。閾值 5 / 15 / 30 拉開後，玩家需累積較久才能享受質變，但一旦升級威力顯著。
+**設計意圖**：高 tier 不只抗打更是輸出乘法 —— King 戰力倍率 30，可在小數量下單方面屠殺低 tier 大軍。閾值 5 / 12 / 25 拉開後，玩家需累積較久才能享受質變，但一旦升級威力顯著。
 
 ### 3.6.1 相鄰勢力空格佔領（adjacent claim）
 
@@ -321,19 +325,27 @@ function updateStalemates(
      - 條件：`count ≥ EXPAND_MIN_STACK` (= 5)
      - 派出比例：50%
 
-   - **主城格**（`isCastle = true`）— 分階累積保護：
+   - **主城格**（`isCastle = true`）— 分階累積保護（v0.9 對齊 §3.4 新閾值 5/12/25）：
      - `count < KNIGHT_RESERVE` (= 5, Soldier 階)：**禁止派兵**（讓主城先長到 Knight）
-     - `KNIGHT_RESERVE ≤ count < QUEEN_RESERVE` (= 5–14, Knight 階)：派出 25%，但派出後 source 至少保留 5 兵
-     - `QUEEN_RESERVE ≤ count < KING_THRESHOLD` (= 15–29, Queen 階)：派出 33%，但派出後 source 至少保留 15 兵
-     - `count ≥ KING_THRESHOLD` (= 30, King 階)：派出 50%（無 tier 保護，正常擴張）
+     - `KNIGHT_RESERVE ≤ count < QUEEN_RESERVE` (= 5–11, Knight 階)：派出 25%，但派出後 source 至少保留 5 兵
+     - `QUEEN_RESERVE ≤ count < KING_THRESHOLD` (= 12–24, Queen 階)：派出 33%，但派出後 source 至少保留 12 兵
+     - `count ≥ KING_THRESHOLD` (= 25, King 階)：派出 50%（無 tier 保護，正常擴張）
 
    設計意圖：避免主城被 rule #2 永久鎖在 Knight 入口閾值。分階保護讓主城邊升級邊溢出，而非整段累積期完全靜默。King tier (≥ 30) 後完全解除限制，模擬「兵力溢滿」的戰略中樞。
 
-3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（己方 power ≥ 敵方主城 power × 1.5），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護，source 至少保留 1 兵）。
+3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（己方 power ≥ 敵方主城 power × `ATTACK_POWER_RATIO`），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護）。派遣量 = `source.count - reserve`，其中 reserve：
 
-   常數：`ATTACK_RANGE_HOPS = 8`（原 4，於 v0.8 放寬）。
+   - 非主城 source：reserve = 1
+   - 主城 source：reserve = 5（Knight tier 保護）
 
-   設計意圖：原值 4 在 11x11 default scenario 上不可能 fire（對角距離 20，前線推到中段時離敵方主城仍 14–15 格）。放寬到 8 讓前線推進到地圖中段時即可觸發進攻評估，給遊戲明確的收斂機制。
+   若派遣量 ≤ 0，rule #3 不 fire。
+
+   常數：`ATTACK_RANGE_HOPS = 8`（v0.8 放寬，v0.9 不變）；`ATTACK_POWER_RATIO = 1.0`（v0.8 為 1.5，v0.9 放寬）。
+
+   設計意圖：
+   - `ATTACK_RANGE_HOPS = 8`：原值 4 在 11x11 default scenario 上不可能 fire（對角距離 20，前線推到中段時離敵方主城仍 14–15 格）。放寬到 8 讓前線推進到地圖中段時即可觸發進攻評估。
+   - `ATTACK_POWER_RATIO = 1.0`（v0.9）：v0.8 觀察 attacker source 戰力天花板（受戰場無累積機制限制）無法達到 1.5× 條件。放寬到 1.0× 允許「均勢進攻」，讓 castle 升 Queen 後能對等戰力進攻敵 castle，給遊戲明確的收斂機制。
+   - Castle reserve 5：避免兩 castle 同時 rule #3 互攻時雙方主城留 1 兵被瞬間 drain，保留 5 兵讓主城在進攻派出後仍有 Knight tier 防禦力（power 20）抵擋反擊。
 
 4. **囤兵**：以上皆不滿足時不動，等下次評估。
 
@@ -419,8 +431,8 @@ function updateStalemates(
 | AC-01 | 啟動後可見 **11x11** 棋盤、4 主城在四角、玩家為 Tokugawa                                                                        | 開啟瀏覽器肉眼確認                                                                                                |
 | AC-02 | Tick 計數每 2 秒 +1，HUD 顯示                                                                                                   | 觀察 10 秒應為 5 ticks                                                                                            |
 | AC-03 | 主城所在格每 4 秒 count +1                                                                                                      | 暫停所有派遣，觀察 20 秒應 +5                                                                                     |
-| AC-04 | 當格 count 達 5 → sprite 變為 Knight；達 15 → Queen；達 30 → King                                                               | Headless 測試：強制 setCount，斷言 deriveTier 回傳正確 tier                                                       |
-| AC-05 | count 從 15 掉到 14 → sprite 退回 Knight；從 5 掉到 4 → 退回 Soldier                                                            | Headless 測試：模擬戰鬥減 count，斷言 tier 更新                                                                   |
+| AC-04 | 當格 count 達 5 → sprite 變為 Knight；達 12 → Queen；達 25 → King (v0.9 閾值)                                                  | Headless 測試：強制 setCount，斷言 deriveTier 回傳正確 tier                                                       |
+| AC-05 | count 從 12 掉到 11 → sprite 退回 Knight；從 5 掉到 4 → 退回 Soldier (v0.9 閾值)                                                | Headless 測試：模擬戰鬥減 count，斷言 tier 更新                                                                   |
 | AC-06 | 從己方格 hold-drag 到 5 格外目標 → 顯示 BFS 路徑高亮，**目標格為敵方時仍可派遣**                                                | 操作確認；嘗試 drag 到敵方相鄰格與 5 格外敵方格                                                                   |
 | AC-07 | 派遣後來源 count 減少對應數，目標格在抵達 tick 後 count 增加（或進入戰鬥）                                                      | 觀察兩格 count 變化吻合；測試比例 50% / 100%                                                                      |
 | AC-08 | 6 Knight vs 5 Knight 相鄰 1 tick 後：6-stack count=3 tier=Soldier，5-stack count=1 tier=Soldier                                  | Headless 測試：setUp 後 advance(1)，斷言 count 與 tier 完全符合                                                   |
@@ -446,6 +458,8 @@ function updateStalemates(
 | AC-28 | Castle 分階累積保護（Soldier 階禁止派兵）：TOKUGAWA 主城 count=4 (Soldier) 相鄰空格、無其他合格 source、無敵方威脅、無進攻目標 → rule #2 不對主城 fire；fallthrough 走規則 #4（不動） | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 | AC-29 | Rule #3 距離放寬：TOKUGAWA 非主城格 (3,0) count=10 (Knight, power=40)、TAKEDA 主城 (10,0) count=3 (Soldier, power=3)、distance=7 (≤ 8) → rule #3 fire，派 `count-1 = 9` 兵；source.count → 1 | Headless：stepAi 後斷言 marching stack count=9、source count=1、path 終點 = TAKEDA 主城                          |
 | AC-30 | Rule #3 距離仍受限：source 到敵方主城最短路徑 = 9 hops (> 8) → rule #3 不 fire                                                  | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
+| AC-31 | Rule #3 castle source 保留 5 兵：TOKUGAWA 主城 (0,0) count=14 (Queen, power 168)、TAKEDA 主城 (10,0) count=12 (Queen, power 144)、路徑 ≤ 8 hops、power ratio 1.0 滿足 → 派遣量 = 14 − 5 = 9，TOKUGAWA castle 保留 5（Knight） | Headless：stepAi 後斷言 marching stack count=9、source count=5、path 終點 = TAKEDA 主城                          |
+| AC-32 | Rule #3 派遣量 ≤ 0 時不 fire：TOKUGAWA 主城 count=5 (Knight, power 20)、TAKEDA 主城 count=5 (Knight, power 20)、ratio 1.0、hops 滿足 → 派遣量 = 5 − 5 = 0，跳過，rule #3 不 fire | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 
 ## 8. 範圍外（Future Scope）
 
