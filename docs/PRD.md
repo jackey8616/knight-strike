@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.5
+**Version**: v0.6
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -8,6 +8,7 @@
 - v0.3 — 行軍碰撞細則補完（同勢力合併規則、敵方碰撞三子場景）、stalemate counter 實作規格、marching stack 移除 tier 欄位、AI 短路 + RNG shuffle、主城起始 count = 3
 - v0.4 — 修正 scenario 範例主城 count 為 3；AC-19 時序對齊 §3.7；補同勢力跳過戰鬥、敗北勢力 stack 行為、Tick 編號約定
 - v0.5 — 修正 §3.6 範例與 AC-08：原「10 Soldier」與 §3.4 閾值矛盾（count 10 應為 Knight），改用 6 Knight vs 5 Knight 場景
+- v0.6 — 新增 §3.6.1 相鄰勢力空格佔領規則；明確 §3.2 步驟 3 的兩階段 claim；補 AC-23/24/25。修復 M1.11 smoke 100% 卡 500 tick stalemate 的問題
 
 ## 1. 願景與背景
 
@@ -58,11 +59,16 @@
 - 暫停 / 繼續 / 變速 (1x / 2x) 支援；變速影響 tick 實際間隔。
 - 每個 tick 結算順序固定：
   1. 移動推進（每 tick 沿路徑前進 1 格，包含 marching stack 入格與 stack-collision 判定）
-  2. 戰鬥傷害結算（同步，含駐紮 vs 駐紮、駐紮 vs 行軍、行軍 vs 行軍）
-  3. 佔領判定（空格被相鄰己方單位佔據時轉所有權；遭佔領主城觸發勢力敗北）
+  2. 戰鬥傷害結算（同步，含駐紮 vs 駐紮、駐紮 vs 行軍、行軍 vs 行軍）+ §3.7 stalemate / drain 結算
+  3. 佔領判定（claim phase）：
+     - **3a. 行軍 stack 抵達 claim**：行軍 stack 抵達空格 / NEUTRAL 空格 → 該格 owner = 行軍方、count = stack count（已由 §3.5.4 規則處理，列在這裡只是為了和 3b 同步顯示順序）
+     - **3b. 駐紮空格 claim**：對每個 count = 0 的非己方格（含敵方 count = 0、NEUTRAL 空格、defeated faction 殘留空格），依 §3.6.1 規則由相鄰勢力 claim 所有權
+     - **3c. 主城被佔判定**：遭佔領主城觸發該勢力敗北（§6.3）
   4. 產兵（主城）
   5. 升級判定（count 跨過閾值即時推導 tier）
   6. 勝負判定
+
+> 完整 step order：`movement → combat → drain (§3.7) → claim (3a 行軍抵達 + 3b §3.6.1) → defeats → produce → upgrade → victory`。claim phase 在 drain 之後：drain 剛清空的格在同 tick 內就能被相鄰勢力 claim，避免下一 tick 才反應的延遲感。
 
 ### 3.3 城堡與產兵
 
@@ -187,6 +193,43 @@ new_count = max(0, count - loss)
 設計意圖不變：同 tier 對戰也可造成顯著消耗、跨閾值即時降級。
 
 **設計意圖**：高 tier 不只抗打更是輸出乘法 —— King 戰力倍率 30，可在小數量下單方面屠殺低 tier 大軍。閾值 5 / 15 / 30 拉開後，玩家需累積較久才能享受質變，但一旦升級威力顯著。
+
+### 3.6.1 相鄰勢力空格佔領（adjacent claim）
+
+每 tick 戰鬥（含 §3.7 drain）結算完之後，對每個 `count = 0` 的格 `T`（不論 `T.owner` 為敵方 / NEUTRAL / defeated faction 殘留），執行下列判定：
+
+```
+adjClaimants = { n.owner | n ∈ T.neighbours,
+                 n.count > 0,
+                 n.owner ∉ { NEUTRAL, defeated_factions },
+                 n.owner != T.owner }
+
+if |adjClaimants| == 0:
+    no change
+
+elif |adjClaimants| == 1:
+    T.owner = 該勢力
+    T.count 保持 0
+
+else:  # 多勢力同時臨接 — 戰力決勝
+    powerByFaction[f] = sum(
+        n.count * tierMultiplier(deriveTier(n.count))
+        for n in T.neighbours
+        if n.owner == f and n.count > 0
+    )
+    winner = argmax(powerByFaction)
+    # tiebreak: 用 §4.2 同套 RNG（seed + tick + T.id 派生）shuffle 後取第一個
+    T.owner = winner
+    T.count 保持 0
+```
+
+#### 設計意圖
+
+- **Claim 只變更 owner、不變更 count**：claim 過來的格仍是空格（count = 0），需另派兵駐軍才能繼續推進或防守。
+- **只在「無行軍 stack 抵達」場景觸發**：行軍 stack 抵達已由 §3.5.4 規則處理（3a），優先於 §3.6.1（3b）。同 tick 抵達 + 駐紮 claim 不會雙重結算 — 抵達後該格 count > 0，§3.6.1 跳過。
+- **保留「打贏不自動雪球」的戰術深度**：戰勝相鄰敵格不會讓駐紮兵自動推進到對面，玩家仍需主動派遣鞏固佔領。
+- **三角戰場以戰力總和決勝**：多勢力同時臨接同一空格時，避免規則矛盾或卡死；tiebreak 走 §4.2 RNG 保確定性。
+- **NEUTRAL 與 defeated faction 不參與 claim**：NEUTRAL 沒有意圖，defeated 勢力的殘留 stack 已視同野怪不再行動（§6.3）。
 
 ### 3.7 弱勢平衡（stalemate 防護）
 
@@ -352,6 +395,9 @@ function updateStalemates(
 | AC-20 | 同勢力雙 marching stack 同 tick 入同格 → 合併、path 取剩餘步數最少者，tiebreak 取早派遣者                                       | Headless：派遣 stack A（剩 3 步）與 stack B（剩 1 步）同時抵達；斷言合併後 count 加總且 path 用 B 的剩餘 path     |
 | AC-21 | 敵方 marching stack 頭對頭（雙方非終點）→ 倖存方繼續原路徑、不入駐碰撞格                                                       | Headless：擺好兩條路徑交叉的 stack，斷言碰撞 tick 後倖存方 idx 仍前進、碰撞格無新主                               |
 | AC-22 | AI 評估順序 RNG shuffle：同 seed 重跑 100 場結果完全相同；不同 seed 結果分佈不同                                                | Headless：`pnpm playtest scenario.json --runs 100 --seed 42` 兩次跑結果 hash 一致；換 seed → hash 不同            |
+| AC-23 | 單一相鄰勢力佔領空敵格：A(TOKUGAWA, count=3) 與 B(TAKEDA, count=0) 相鄰，B 其餘鄰格皆無 claimant → 1 tick 後 B.owner = TOKUGAWA, B.count = 0 | Headless：advance(1) 後斷言 B 所有權翻轉、count 不變                                                              |
+| AC-24 | 多勢力爭奪空格戰力決勝：X(NEUTRAL, count=0) 四鄰 N(TOKUGAWA count=5, Knight, power=20) / E(TAKEDA count=3, Soldier, power=3) / S / W 空地 → X.owner = TOKUGAWA | Headless：advance(1) 後斷言 X.owner = TOKUGAWA（高 power 勝）                                                     |
+| AC-25 | Claim 不變更 count：A(TOKUGAWA count=5) 與 B(TAKEDA count=0) 相鄰 → advance(1) 後 B.owner = TOKUGAWA、B.count = 0、A.count = 5         | Headless：advance(1) 後斷言三個欄位精確                                                                          |
 
 ## 8. 範圍外（Future Scope）
 
