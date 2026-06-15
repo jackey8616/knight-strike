@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.6
+**Version**: v0.7
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -9,6 +9,7 @@
 - v0.4 — 修正 scenario 範例主城 count 為 3；AC-19 時序對齊 §3.7；補同勢力跳過戰鬥、敗北勢力 stack 行為、Tick 編號約定
 - v0.5 — 修正 §3.6 範例與 AC-08：原「10 Soldier」與 §3.4 閾值矛盾（count 10 應為 Knight），改用 6 Knight vs 5 Knight 場景
 - v0.6 — 新增 §3.6.1 相鄰勢力空格佔領規則；明確 §3.2 步驟 3 的兩階段 claim；補 AC-23/24/25。修復 M1.11 smoke 100% 卡 500 tick stalemate 的問題
+- v0.7 — §3.6.1 補 hysteresis 規則（claim 後 3 ticks 保護期）；Province 新增 lastClaimedAtTick 欄位；新增 AC-26
 
 ## 1. 願景與背景
 
@@ -231,6 +232,25 @@ else:  # 多勢力同時臨接 — 戰力決勝
 - **三角戰場以戰力總和決勝**：多勢力同時臨接同一空格時，避免規則矛盾或卡死；tiebreak 走 §4.2 RNG 保確定性。
 - **NEUTRAL 與 defeated faction 不參與 claim**：NEUTRAL 沒有意圖，defeated 勢力的殘留 stack 已視同野怪不再行動（§6.3）。
 
+#### Hysteresis（防震盪）
+
+§3.6.1 v0.6 觀察到 late-game 邊界格在相鄰雙方戰力此消彼長時反覆翻轉 owner（claim → 反 claim → claim），形成肉眼閃爍。改為記錄 claim 時間戳防止反覆翻轉：
+
+- 每個格 `T` 維護 `T.lastClaimedAtTick: number | null`，預設 `null`。
+- 當 §3.6.1 觸發 owner 變更時，set `T.lastClaimedAtTick = currentTick`。
+- 判定 claim 是否觸發前，先檢查保護期：
+
+  ```
+  if T.lastClaimedAtTick != null
+     and currentTick - T.lastClaimedAtTick < 3:
+      跳過本次 claim（保留現 owner、count 仍 0）
+  ```
+
+- 保護期內，§3.6.1 不對 T 重新計算 claimants — `T.owner` 凍結直到保護期解除。`T.count` 由其他規則（戰鬥、抵達）正常變動，不受 hysteresis 限制。
+- 保護期解除時機：`currentTick - lastClaimedAtTick >= 3`。即 claim 發生於 tick K，tick K, K+1, K+2 受保護；tick K+3 起可再次被 claim。
+
+設計意圖：3 ticks = 6 秒，跟 §3.7 stalemate counter 的 5 ticks 同數量級。玩家肉眼能感受到「邊界穩定」而非「閃爍」；公式 + AI 規則的微小擾動不會把 owner 翻來翻去。
+
 ### 3.7 弱勢平衡（stalemate 防護）
 
 公式中 `loss` 可為 0 → 兩個對峙小 stack 可能永久互相打不死。引入 **per-adjacency-pair stalemate counter** 強制消耗。
@@ -398,6 +418,7 @@ function updateStalemates(
 | AC-23 | 單一相鄰勢力佔領空敵格：A(TOKUGAWA, count=3) 與 B(TAKEDA, count=0) 相鄰，B 其餘鄰格皆無 claimant → 1 tick 後 B.owner = TOKUGAWA, B.count = 0 | Headless：advance(1) 後斷言 B 所有權翻轉、count 不變                                                              |
 | AC-24 | 多勢力爭奪空格戰力決勝：X(NEUTRAL, count=0) 四鄰 N(TOKUGAWA count=5, Knight, power=20) / E(TAKEDA count=3, Soldier, power=3) / S / W 空地 → X.owner = TOKUGAWA | Headless：advance(1) 後斷言 X.owner = TOKUGAWA（高 power 勝）                                                     |
 | AC-25 | Claim 不變更 count：A(TOKUGAWA count=5) 與 B(TAKEDA count=0) 相鄰 → advance(1) 後 B.owner = TOKUGAWA、B.count = 0、A.count = 5         | Headless：advance(1) 後斷言三個欄位精確                                                                          |
+| AC-26 | Claim hysteresis：T(owner=TOKUGAWA, count=0, lastClaimedAtTick=null) 與相鄰 TAKEDA 戰力 > TOKUGAWA → tick 1 claim 給 TAKEDA、lastClaimedAtTick=1；tick 2/3 即使 TOKUGAWA 戰力反超 T 不變；tick 4 (`4-1=3`，不 `<3`) 保護期解除可再 claim | Headless：multi-step advance，斷言 tick 1→3 owner 凍結為 TAKEDA、tick 4 可再翻回 TOKUGAWA                          |
 
 ## 8. 範圍外（Future Scope）
 
