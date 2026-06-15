@@ -1,12 +1,13 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.4
+**Version**: v0.5
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
 - v0.2 — 棋盤改 11x11、技術棧改 Pixi.js、操作方案重設、戰鬥公式重做、新增 §10 Headless Playtest
 - v0.3 — 行軍碰撞細則補完（同勢力合併規則、敵方碰撞三子場景）、stalemate counter 實作規格、marching stack 移除 tier 欄位、AI 短路 + RNG shuffle、主城起始 count = 3
 - v0.4 — 修正 scenario 範例主城 count 為 3；AC-19 時序對齊 §3.7；補同勢力跳過戰鬥、敗北勢力 stack 行為、Tick 編號約定
+- v0.5 — 修正 §3.6 範例與 AC-08：原「10 Soldier」與 §3.4 閾值矛盾（count 10 應為 Knight），改用 6 Knight vs 5 Knight 場景
 
 ## 1. 願景與背景
 
@@ -179,9 +180,11 @@ new_count = max(0, count - loss)
 
 **範例計算（用於 AC-08）**：
 
-- 場景：10 Soldier (power = 10 × 1 = 10) vs 5 Knight (count = 5 達 Knight 閾值，power = 5 × 4 = 20)
-- Soldier 受到 loss = max(0, floor((20 − 10/4) / 4)) = max(0, floor((20 − 2.5) / 4)) = max(0, floor(4.375)) = **4**。Soldier count 10 → 6。
-- Knight 受到 loss = max(0, floor((10 − 20/4) / 4)) = max(0, floor((10 − 5) / 4)) = max(0, floor(1.25)) = **1**。Knight count 5 → 4，count < 5 → **tier 自動降回 Soldier**。
+- 場景：6 Knight (count 6, tier 由 count 推導 = Knight, power = 6 × 4 = 24) vs 5 Knight (count 5, tier = Knight, power = 5 × 4 = 20)
+- 6-stack 受到 loss = max(0, floor((20 − 24/4) / 4)) = max(0, floor((20 − 6) / 4)) = max(0, floor(3.5)) = **3**。count 6 → 3，tier 由 Knight 降為 Soldier (3 < 5)。
+- 5-stack 受到 loss = max(0, floor((24 − 20/4) / 4)) = max(0, floor((24 − 5) / 4)) = max(0, floor(4.75)) = **4**。count 5 → 1，tier 由 Knight 降為 Soldier (1 < 5)。
+
+設計意圖不變：同 tier 對戰也可造成顯著消耗、跨閾值即時降級。
 
 **設計意圖**：高 tier 不只抗打更是輸出乘法 —— King 戰力倍率 30，可在小數量下單方面屠殺低 tier 大軍。閾值 5 / 15 / 30 拉開後，玩家需累積較久才能享受質變，但一旦升級威力顯著。
 
@@ -334,7 +337,7 @@ function updateStalemates(
 | AC-05 | count 從 15 掉到 14 → sprite 退回 Knight；從 5 掉到 4 → 退回 Soldier                                                            | Headless 測試：模擬戰鬥減 count，斷言 tier 更新                                                                   |
 | AC-06 | 從己方格 hold-drag 到 5 格外目標 → 顯示 BFS 路徑高亮，**目標格為敵方時仍可派遣**                                                | 操作確認；嘗試 drag 到敵方相鄰格與 5 格外敵方格                                                                   |
 | AC-07 | 派遣後來源 count 減少對應數，目標格在抵達 tick 後 count 增加（或進入戰鬥）                                                      | 觀察兩格 count 變化吻合；測試比例 50% / 100%                                                                      |
-| AC-08 | 10 Soldier vs 5 Knight 相鄰 1 tick 後：Soldier 損 **4**（10→6），Knight 損 **1**（5→4，tier 降回 Soldier）                       | Headless 測試：setUp 後 advance(1)，斷言 count 與 tier 完全符合                                                   |
+| AC-08 | 6 Knight vs 5 Knight 相鄰 1 tick 後：6-stack count=3 tier=Soldier，5-stack count=1 tier=Soldier                                  | Headless 測試：setUp 後 advance(1)，斷言 count 與 tier 完全符合                                                   |
 | AC-09 | 空格被相鄰己方派遣/推進佔領，所有權變更，HUD 計數更新                                                                           | 操作確認                                                                                                          |
 | AC-10 | 佔領敵方主城 → 該 AI 勢力 `defeated`，其餘領地變 Neutral                                                                        | 操作確認 + 控制台檢查；或 Headless 跑「玩家秒殺」場景                                                             |
 | AC-11 | 玩家主城被佔領 → 顯示「敗北」畫面 + 重新開始按鈕                                                                                | 操作確認；重新開始可回初始狀態                                                                                    |
