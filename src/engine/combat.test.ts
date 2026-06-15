@@ -65,18 +65,18 @@ describe("tilePower", () => {
     expect(tilePower(4)).toBe(4);
   });
 
-  it("Knight tier (5..14): power = count × 4", () => {
+  it("Knight tier (5..11): power = count × 4", () => {
     expect(tilePower(5)).toBe(20);
-    expect(tilePower(14)).toBe(56);
+    expect(tilePower(11)).toBe(44);
   });
 
-  it("Queen tier (15..29): power = count × 12", () => {
-    expect(tilePower(15)).toBe(180);
-    expect(tilePower(29)).toBe(348);
+  it("Queen tier (12..24): power = count × 12", () => {
+    expect(tilePower(12)).toBe(144);
+    expect(tilePower(24)).toBe(288);
   });
 
-  it("King tier (≥30): power = count × 30", () => {
-    expect(tilePower(30)).toBe(900);
+  it("King tier (≥25): power = count × 30", () => {
+    expect(tilePower(25)).toBe(750);
     expect(tilePower(50)).toBe(1500);
   });
 

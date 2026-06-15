@@ -333,7 +333,7 @@ function updateStalemates(
 
    設計意圖：避免主城被 rule #2 永久鎖在 Knight 入口閾值。分階保護讓主城邊升級邊溢出，而非整段累積期完全靜默。King tier (≥ 30) 後完全解除限制，模擬「兵力溢滿」的戰略中樞。
 
-3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（己方 power ≥ 敵方主城 power × `ATTACK_POWER_RATIO`），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護）。派遣量 = `source.count - reserve`，其中 reserve：
+3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（**己方 power**（即 `tilePower(source.count)`，使用 source 全 count 計算）` ≥ 敵方主城 power × `ATTACK_POWER_RATIO`），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護）。派遣量 = `source.count - reserve`，其中 reserve：
 
    - 非主城 source：reserve = 1
    - 主城 source：reserve = 5（Knight tier 保護）

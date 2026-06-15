@@ -160,11 +160,17 @@ function tryDefense(
 
 const EXPAND_MIN_STACK = 5;
 
-// PRD §3.4 tier thresholds — re-exported as named reserve constants so the
-// castle-tier branching reads "reserve ≥ Knight floor" rather than magic 5.
+// PRD §3.4 tier thresholds — reserve constants are kept in lockstep with the
+// tier floors in upgrade.ts so the castle-tier branching reads "reserve ≥
+// Knight floor" rather than magic numbers. v0.9 values are 5 / 12 / 25.
 export const KNIGHT_RESERVE = 5;
-export const QUEEN_RESERVE = 15;
-export const KING_THRESHOLD = 30;
+export const QUEEN_RESERVE = 12;
+export const KING_THRESHOLD = 25;
+// PRD §4.1 v0.9 rule #3 castle source keep-reserve: keeps Knight-tier garrison
+// (power 20) after dispatch so mutual rule #3 attacks don't drain both castles
+// to 1 troop in the same tick.
+const RULE3_CASTLE_RESERVE = 5;
+const RULE3_NON_CASTLE_RESERVE = 1;
 
 // Returns the count to dispatch from `source` under PRD §4.1 rule #2, or null
 // when the source is ineligible (tier-protection or insufficient surplus).
@@ -243,9 +249,11 @@ function tryExpand(
 }
 
 // PRD v0.8 §4.1 rule #3: hops 4 → 8 so 11x11 mid-board frontier can reach
-// enemy castle range. Power ratio threshold (1.5×) unchanged.
+// enemy castle range. Power ratio 1.5 → 1.0 in v0.9 (M1 convergence patch:
+// field tiles never reach the 1.5× threshold; 1.0× lets equal-power Queen
+// castles attack each other once both sides have climbed tiers).
 export const ATTACK_RANGE_HOPS = 8;
-const ATTACK_POWER_RATIO = 1.5;
+const ATTACK_POWER_RATIO = 1.0;
 
 function tryAttack(
   state: GameState,
@@ -255,21 +263,30 @@ function tryAttack(
   const targets = liveEnemyCastles(state, faction);
   if (targets.length === 0) return null;
 
-  type Pair = { readonly source: Province; readonly target: Province };
+  type Pair = {
+    readonly source: Province;
+    readonly target: Province;
+    readonly sendCount: number;
+  };
   const pairs: Pair[] = [];
   for (const own of findOwnTiles(state, faction)) {
-    if (own.count <= 1) continue;
-    // PRD §3.5.1 (v0.8): rule #3 keeps 1 troop on source even for non-castle
-    // tiles — power check has to mirror what will actually march out.
-    const effectiveCount = own.count - 1;
-    if (effectiveCount <= 0) continue;
-    const ownPower = tilePower(effectiveCount);
+    // PRD v0.9 §3.5.1 reserve: castle → 5, non-castle → 1. sendCount must be
+    // ≥ 1 for the dispatch to fire.
+    const reserve = own.isCastle
+      ? RULE3_CASTLE_RESERVE
+      : RULE3_NON_CASTLE_RESERVE;
+    const sendCount = own.count - reserve;
+    if (sendCount <= 0) continue;
+    // PRD v0.9 §4.1 rule #3 power check uses the source tile's full power
+    // ("己方 power"), not the sent power — the AI evaluates the tile's
+    // overall strength, then dispatches `sendCount` with reserve left behind.
+    const ownPower = tilePower(own.count);
     for (const target of targets) {
       if (ownPower < tilePower(target.count) * ATTACK_POWER_RATIO) continue;
       const path = findPath(state, own.id, target.id, faction);
       if (path === null) continue;
       if (path.length - 1 > ATTACK_RANGE_HOPS) continue;
-      pairs.push({ source: own, target });
+      pairs.push({ source: own, target, sendCount });
     }
   }
   if (pairs.length === 0) return null;
@@ -279,7 +296,7 @@ function tryAttack(
       from: pair.source.id,
       to: pair.target.id,
       ratio: 1.0 as DispatchRatio,
-      forceCount: pair.source.count - 1,
+      forceCount: pair.sendCount,
     });
     if (res.ok) return res.state;
   }
