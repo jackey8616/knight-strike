@@ -21,7 +21,7 @@ import { createMarchingRenderer } from "@/render/marching";
 import { createPathRenderer } from "@/render/paths";
 import { createTierTextures } from "@/render/sprites";
 import { createUnitsRenderer } from "@/render/units";
-import { idleTargetScenario } from "@/scenarios/idle-target";
+import { playNormalScenario } from "@/scenarios/play-normal";
 import { evaluateOutcome } from "@/engine/victory";
 import { createFactionPanel } from "@/ui/faction-panel";
 import { createHud } from "@/ui/hud";
@@ -42,7 +42,7 @@ async function bootstrap(): Promise<void> {
 
   const render = await createRenderApp(container);
   const tierTextures = createTierTextures(render.app);
-  const initialState = buildInitialState(idleTargetScenario);
+  const initialState = buildInitialState(playNormalScenario);
   let state: GameState = initialState;
   let ended = false;
 
