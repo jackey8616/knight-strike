@@ -5,7 +5,7 @@ import {
   Polygon,
 } from "pixi.js";
 
-import { tileId } from "@/engine/state";
+import { derivedOwner, tileId } from "@/engine/state";
 import type { FactionId, GameState, TileId } from "@/engine/types";
 
 export const TILE_WIDTH = 64;
@@ -198,11 +198,19 @@ export function createBoardRenderer(
     for (const province of state.provinces.values()) {
       const t = tiles.get(province.id);
       if (t === undefined) continue;
-      const isEmptyNeutral =
-        province.owner === "NEUTRAL" && province.count === 0;
-      const fill = isEmptyNeutral
-        ? EMPTY_TILE_COLOR
-        : FACTION_COLORS[province.owner];
+      // PRD §3.4 v1.2 multi-occupant: derived owner = single-occupant faction
+      // or null. Empty tiles get the neutral colour. Contested (multi-faction)
+      // tiles fall back to the castle's original owner colour if it's a castle,
+      // else the neutral tile colour so the player has *some* coherent cue.
+      const owner = derivedOwner(province);
+      let fill: number;
+      if (owner !== null) {
+        fill = FACTION_COLORS[owner];
+      } else if (province.isCastle && province.castleOwner !== null) {
+        fill = FACTION_COLORS[province.castleOwner];
+      } else {
+        fill = EMPTY_TILE_COLOR;
+      }
       drawTileBase(t.base, fill);
       if (province.isCastle) {
         drawCastleMarker(t.base);

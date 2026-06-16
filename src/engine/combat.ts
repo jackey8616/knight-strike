@@ -1,89 +1,169 @@
-import { pairKey, tileId } from "./state";
-import type { GameState, PairKey, Province, TileId } from "./types";
+import { isContested } from "./state";
+import type {
+  FactionId,
+  GameState,
+  Occupant,
+  Province,
+  TileId,
+} from "./types";
+import { createRng } from "./util/rng";
 
-// PRD §3.6 (v1.1): per-pair ramp damage, count-only. damage at `engagementTicks
-// = 0` is 0 (the visual "encounter" tick); subsequent ticks deal 2^(n-1) each.
-export function pairDamage(engagementTicks: number): number {
-  if (engagementTicks <= 0) return 0;
-  return 2 ** (engagementTicks - 1);
+// PRD §3.6 (v1.2): step-function ramp. damage(t) = 2^floor(log2(max(t, 1))).
+// t=0..1 → 1; t=2..3 → 2; t=4..7 → 4; t=8..15 → 8; ...
+export function stageDamage(t: number): number {
+  const clamped = Math.max(t, 1);
+  return 2 ** Math.floor(Math.log2(clamped));
 }
 
-export type CombatPair = {
-  readonly a: TileId;
-  readonly b: TileId;
+export type Attack = {
+  readonly attacker: FactionId;
+  readonly defender: FactionId;
   readonly damage: number;
-  readonly engagementTicks: number;
+};
+
+export type CombatEvent = {
+  readonly tile: TileId;
+  readonly combatTick: number;
+  readonly baseDamage: number;
+  readonly attacks: readonly Attack[];
 };
 
 export type CombatResult = {
   readonly state: GameState;
-  readonly pairs: readonly CombatPair[];
+  readonly events: readonly CombatEvent[];
 };
 
-// 4-conn iteration uses only the (+x, +y) cardinals so each unordered pair is
-// visited exactly once.
-const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
-  [1, 0],
-  [0, 1],
-];
+function hashTileId(id: TileId): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
 
-export function resolveAdjacentCombat(state: GameState): CombatResult {
-  const pairs: CombatPair[] = [];
-  const lossPerTile = new Map<TileId, number>();
+// Among occupants with the smallest arrivalTick, pick one — single tile that
+// has only one earliest is unique; multi-faction tie uses a deterministic
+// RNG keyed on (rngSeed, tile, currentTick). Sorted by faction id first so
+// the shuffle input order is itself deterministic regardless of occupants[]
+// insertion order.
+function pickDefenderFaction(
+  state: GameState,
+  tile: TileId,
+  ties: readonly FactionId[],
+): FactionId {
+  if (ties.length === 1) return ties[0] as FactionId;
+  const sorted = [...ties].sort();
+  const rng = createRng((state.rngSeed ^ hashTileId(tile) ^ state.tick) >>> 0);
+  // Fisher–Yates; first element is the chosen defender.
+  for (let i = sorted.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = sorted[i] as FactionId;
+    sorted[i] = sorted[j] as FactionId;
+    sorted[j] = tmp;
+  }
+  return sorted[0] as FactionId;
+}
+
+// PRD §3.6: at combat start (tile transitions to contested), recompute who is
+// the defender. Smallest arrivalTick wins; ties broken by deterministic RNG.
+function assignDefender(state: GameState, p: Province): readonly Occupant[] {
+  if (p.occupants.length === 0) return p.occupants;
+  let minArrival = Infinity;
+  for (const o of p.occupants) {
+    if (o.arrivalTick < minArrival) minArrival = o.arrivalTick;
+  }
+  const tieFactions: FactionId[] = [];
+  for (const o of p.occupants) {
+    if (o.arrivalTick === minArrival) tieFactions.push(o.faction);
+  }
+  const defenderFaction = pickDefenderFaction(state, p.id, tieFactions);
+  return p.occupants.map((o) => ({
+    ...o,
+    isDefender: o.faction === defenderFaction && o.arrivalTick === minArrival,
+  }));
+}
+
+// PRD §3.6 v1.2: every tile with 2+ distinct-faction occupants resolves one
+// round of damage. Within a tile, all incoming damages are computed against
+// the post-merge (start-of-tick-combat) amounts so adding a hit and taking a
+// hit are independent. NEUTRAL occupants (defeated factions, per §6.3) are
+// punching bags — they take damage but never deal it.
+export function resolveSameTileCombat(state: GameState): CombatResult {
+  let provincesNext: Map<TileId, Province> | null = null;
+  const events: CombatEvent[] = [];
 
   for (const [id, p] of state.provinces) {
-    if (p.count <= 0) continue;
-    for (const [dx, dy] of NEIGHBOR_OFFSETS) {
-      const nid = tileId(p.x + dx, p.y + dy);
-      const np = state.provinces.get(nid);
-      if (np === undefined) continue;
-      if (np.owner === p.owner) continue;
-      if (np.count <= 0) continue;
-      const [a, b] = id < nid ? [id, nid] : [nid, id];
-      const key = pairKey(a, b);
-      const prev = state.engagements.get(key) ?? 0;
-      const damage = pairDamage(prev);
-      pairs.push({ a, b, damage, engagementTicks: prev });
-      if (damage > 0) {
-        lossPerTile.set(id, (lossPerTile.get(id) ?? 0) + damage);
-        lossPerTile.set(nid, (lossPerTile.get(nid) ?? 0) + damage);
+    const contested = isContested(p);
+
+    if (!contested) {
+      // Tile not in combat — make sure stale combatStartTick is cleared.
+      if (p.combatStartTick !== null) {
+        if (provincesNext === null) provincesNext = new Map(state.provinces);
+        provincesNext.set(id, { ...p, combatStartTick: null });
+      }
+      continue;
+    }
+
+    let occupants = p.occupants;
+    let combatStartTick = p.combatStartTick;
+    if (combatStartTick === null) {
+      combatStartTick = state.tick;
+      occupants = assignDefender({ ...state, tick: state.tick }, { ...p, occupants });
+    }
+
+    const t = state.tick - combatStartTick;
+    const base = stageDamage(t);
+    const incoming = new Array<number>(occupants.length).fill(0);
+    const attacks: Attack[] = [];
+
+    for (let i = 0; i < occupants.length; i++) {
+      const attacker = occupants[i] as Occupant;
+      // §6.3 NEUTRAL never attacks (defeated-faction passive remnant).
+      if (attacker.faction === "NEUTRAL") continue;
+      // §3.6 tick-0 駐紮優勢: only the defender attacks at t=0.
+      if (t === 0 && !attacker.isDefender) continue;
+      if (attacker.amount <= 0) continue;
+
+      for (let j = 0; j < occupants.length; j++) {
+        if (i === j) continue;
+        const defender = occupants[j] as Occupant;
+        if (defender.faction === attacker.faction) continue;
+
+        const actual = Math.min(base, attacker.amount);
+        if (actual <= 0) continue;
+        incoming[j] = (incoming[j] as number) + actual;
+        attacks.push({
+          attacker: attacker.faction,
+          defender: defender.faction,
+          damage: actual,
+        });
       }
     }
-  }
 
-  if (pairs.length === 0) {
-    if (state.engagements.size === 0) return { state, pairs: [] };
-    // All previously-engaged pairs dissolved this tick — drop counter map.
-    return { state: { ...state, engagements: new Map() }, pairs: [] };
-  }
-
-  // Apply damage first so we know which tiles still have count > 0 to keep
-  // their counters alive.
-  let nextProvinces: ReadonlyMap<TileId, Province> = state.provinces;
-  if (lossPerTile.size > 0) {
-    const map = new Map<TileId, Province>(state.provinces);
-    for (const [id, loss] of lossPerTile) {
-      const p = map.get(id);
-      if (p === undefined) continue;
-      map.set(id, { ...p, count: Math.max(0, p.count - loss) });
+    const newOccupants: Occupant[] = [];
+    for (let i = 0; i < occupants.length; i++) {
+      const o = occupants[i] as Occupant;
+      const survivors = Math.max(0, o.amount - (incoming[i] as number));
+      if (survivors > 0) newOccupants.push({ ...o, amount: survivors });
     }
-    nextProvinces = map;
+
+    // Combat ends (combatStartTick → null) when the post-tick tile has ≤ 1
+    // distinct active faction. NEUTRAL counts as a faction for this check
+    // (a NEUTRAL survivor sharing a tile with one live attacker is still
+    // a 2-faction tile and combat keeps going), matching §6.3's punching-bag
+    // semantics — the bandit doesn't end the fight until it's killed.
+    const factions = new Set<FactionId>();
+    for (const o of newOccupants) factions.add(o.faction);
+    const stillContested = factions.size >= 2;
+
+    if (provincesNext === null) provincesNext = new Map(state.provinces);
+    provincesNext.set(id, {
+      ...p,
+      occupants: newOccupants,
+      combatStartTick: stillContested ? combatStartTick : null,
+    });
+
+    events.push({ tile: id, combatTick: t, baseDamage: base, attacks });
   }
 
-  // Advance counters for pairs whose both tiles survive; pairs that just had
-  // a side reduced to 0 dissolve (key omitted, counter discarded — matches
-  // PRD §3.6 dissolution rule and v1.0 §3.7.1 semantics).
-  const nextEngagements = new Map<PairKey, number>();
-  for (const pair of pairs) {
-    const ap = nextProvinces.get(pair.a);
-    const bp = nextProvinces.get(pair.b);
-    if (ap === undefined || bp === undefined) continue;
-    if (ap.count <= 0 || bp.count <= 0) continue;
-    nextEngagements.set(pairKey(pair.a, pair.b), pair.engagementTicks + 1);
-  }
-
-  return {
-    state: { ...state, provinces: nextProvinces, engagements: nextEngagements },
-    pairs,
-  };
+  if (provincesNext === null) return { state, events };
+  return { state: { ...state, provinces: provincesNext }, events };
 }

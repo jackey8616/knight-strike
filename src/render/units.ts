@@ -160,7 +160,20 @@ export function createUnitsRenderer(
     }
 
     for (const province of state.provinces.values()) {
-      const tier = deriveTier(province.count);
+      // PRD §3.4 v1.2: pick the dominant occupant for rendering. Contested
+      // tiles will visually appear as the largest faction (with the actual
+      // multi-occupant breakdown surfaced via tile-info hover instead).
+      let display: { faction: FactionId; amount: number } | null = null;
+      let totalAmount = 0;
+      for (const o of province.occupants) {
+        totalAmount += o.amount;
+        if (display === null || o.amount > display.amount) {
+          display = { faction: o.faction, amount: o.amount };
+        }
+      }
+      const renderFaction = display?.faction ?? province.castleOwner ?? "NEUTRAL";
+      const renderAmount = display?.amount ?? 0;
+      const tier = deriveTier(renderAmount);
       let gfx = units.get(province.id);
       const isNew = gfx === undefined;
       if (gfx === undefined) {
@@ -168,8 +181,8 @@ export function createUnitsRenderer(
           province.id,
           province.x,
           province.y,
-          province.owner,
-          province.count,
+          renderFaction,
+          renderAmount,
           textures,
         );
         container.addChild(gfx.node);
@@ -181,30 +194,30 @@ export function createUnitsRenderer(
         gfx.sprite.texture = tierTexture;
       }
       const targetScale = tierScale(tier, tierTexture);
-      gfx.sprite.tint = FACTION_COLORS[province.owner];
+      gfx.sprite.tint = FACTION_COLORS[renderFaction];
       gfx.sprite.scale.set(targetScale);
-      gfx.count.text = province.count > 0 ? String(province.count) : "";
-      gfx.node.visible = province.count > 0;
+      gfx.count.text = totalAmount > 0 ? String(totalAmount) : "";
+      gfx.node.visible = totalAmount > 0;
 
       if (!isNew) {
         if (TIER_RANK[tier] > TIER_RANK[gfx.prevTier]) {
           playUpgradeFx(gfx.sprite, targetScale);
         }
-        const drop = gfx.prevCount - province.count;
+        const drop = gfx.prevCount - totalAmount;
         const dispatched = dispatchOut.get(province.id) ?? 0;
         const combatLoss = drop - dispatched;
         const overtaken =
-          province.owner !== gfx.prevOwner &&
+          renderFaction !== gfx.prevOwner &&
           gfx.prevOwner !== "NEUTRAL" &&
-          province.owner !== "NEUTRAL";
+          renderFaction !== "NEUTRAL";
         if (combatLoss > 0 || overtaken) {
           playCombatBump(gfx.node, gfx.sprite);
         }
       }
 
       gfx.prevTier = tier;
-      gfx.prevCount = province.count;
-      gfx.prevOwner = province.owner;
+      gfx.prevCount = totalAmount;
+      gfx.prevOwner = renderFaction;
     }
   }
 

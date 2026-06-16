@@ -1,358 +1,348 @@
 import { describe, expect, it } from "vitest";
-import { pairDamage, resolveAdjacentCombat } from "./combat";
-import { pairKey, tileId } from "./state";
-import { deriveTier } from "./upgrade";
-import { AI_IDLE } from "./types";
-import type {
-  AiMode,
-  EngagementMap,
-  FactionId,
-  GameState,
-  Province,
-  TileId,
+import {
+  resolveSameTileCombat,
+  stageDamage,
+} from "./combat";
+import { tileId } from "./state";
+import {
+  AI_IDLE,
+  type FactionId,
+  type GameState,
+  type Occupant,
+  type Province,
 } from "./types";
 
-const idleAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: AI_IDLE,
-  TAKEDA: AI_IDLE,
-  ODA: AI_IDLE,
-  UESUGI: AI_IDLE,
-  NEUTRAL: AI_IDLE,
-};
-
-function makeProvince(
-  x: number,
-  y: number,
-  owner: FactionId,
-  count: number,
-  isCastle = false,
-): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle };
-}
-
-function buildState(
-  provinces: readonly Province[],
-  engagements: EngagementMap = new Map(),
+function makeState(
+  provinces: ReadonlyMap<string, Province>,
+  tick = 0,
+  rngSeed = 42,
 ): GameState {
-  const map = new Map<TileId, Province>();
-  for (const p of provinces) map.set(p.id, p);
   return {
-    boardSize: 11,
-    tick: 1,
-    provinces: map,
+    boardSize: 3,
+    tick,
+    provinces,
     marchingStacks: [],
-    engagements,
-    aiConfig: idleAi,
+    aiConfig: {
+      TOKUGAWA: AI_IDLE,
+      TAKEDA: AI_IDLE,
+      ODA: AI_IDLE,
+      UESUGI: AI_IDLE,
+      NEUTRAL: AI_IDLE,
+    },
     defeated: new Set<FactionId>(),
-    rngSeed: 1,
+    rngSeed,
     nextMarchingId: 1,
   };
 }
 
-describe("pairDamage", () => {
-  it("engagementTicks = 0 → 0 damage (the encounter tick is no-dmg)", () => {
-    expect(pairDamage(0)).toBe(0);
-  });
+function occ(
+  faction: FactionId,
+  amount: number,
+  arrivalTick = 0,
+  isDefender = false,
+): Occupant {
+  return { faction, amount, arrivalTick, isDefender };
+}
 
-  it("ramp matches 2^(n-1) for n ≥ 1", () => {
-    expect(pairDamage(1)).toBe(1);
-    expect(pairDamage(2)).toBe(2);
-    expect(pairDamage(3)).toBe(4);
-    expect(pairDamage(4)).toBe(8);
-    expect(pairDamage(5)).toBe(16);
-  });
+function makeTile(
+  id: string,
+  occupants: readonly Occupant[],
+  combatStartTick: number | null = null,
+  isCastle = false,
+  castleOwner: FactionId | null = null,
+): Province {
+  return {
+    id,
+    x: 0,
+    y: 0,
+    isCastle,
+    castleOwner,
+    occupants,
+    combatStartTick,
+  };
+}
 
-  it("negative input clamps to 0 (defensive)", () => {
-    expect(pairDamage(-1)).toBe(0);
+describe("stageDamage", () => {
+  it("matches PRD §3.6 step function", () => {
+    expect(stageDamage(0)).toBe(1);
+    expect(stageDamage(1)).toBe(1);
+    expect(stageDamage(2)).toBe(2);
+    expect(stageDamage(3)).toBe(2);
+    expect(stageDamage(4)).toBe(4);
+    expect(stageDamage(7)).toBe(4);
+    expect(stageDamage(8)).toBe(8);
+    expect(stageDamage(15)).toBe(8);
+    expect(stageDamage(16)).toBe(16);
   });
 });
 
-describe("resolveAdjacentCombat", () => {
-  it("first encounter (engagementTicks = 0): both sides take 0 damage, counter advances to 1", () => {
-    const before = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 6),
-      makeProvince(1, 0, "TAKEDA", 5),
+describe("resolveSameTileCombat", () => {
+  it("no-op when tile is empty or single-faction", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map<string, Province>([
+      [id, makeTile(id, [occ("TOKUGAWA", 5, 0, true)])],
     ]);
-    const { state: after, pairs } = resolveAdjacentCombat(before);
-    expect(after.provinces.get(tileId(0, 0))?.count).toBe(6);
-    expect(after.provinces.get(tileId(1, 0))?.count).toBe(5);
-    expect(pairs).toHaveLength(1);
-    expect(pairs[0]?.damage).toBe(0);
-    expect(pairs[0]?.engagementTicks).toBe(0);
-    const key = pairKey(tileId(0, 0), tileId(1, 0));
-    expect(after.engagements.get(key)).toBe(1);
+    const state = makeState(provinces);
+    const result = resolveSameTileCombat(state);
+    expect(result.state).toBe(state);
+    expect(result.events).toEqual([]);
   });
 
-  it("[AC-08] 6 Knight vs 5 Knight ramp: (6,5)→(6,5)→(5,4)→(3,2)→(0,0)", () => {
-    let state = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 6),
-      makeProvince(1, 0, "TAKEDA", 5),
-    ]);
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-
-    function advance(): void {
-      state = resolveAdjacentCombat(state).state;
-    }
-
-    advance(); // engagementTicks 0→1, dmg 0
-    expect(state.provinces.get(a)?.count).toBe(6);
-    expect(state.provinces.get(b)?.count).toBe(5);
-    expect(state.engagements.get(pairKey(a, b))).toBe(1);
-
-    advance(); // engagementTicks 1→2, dmg 1
-    expect(state.provinces.get(a)?.count).toBe(5);
-    expect(state.provinces.get(b)?.count).toBe(4);
-    expect(state.engagements.get(pairKey(a, b))).toBe(2);
-
-    advance(); // engagementTicks 2→3, dmg 2
-    expect(state.provinces.get(a)?.count).toBe(3);
-    expect(state.provinces.get(b)?.count).toBe(2);
-    expect(deriveTier(state.provinces.get(a)?.count ?? -1)).toBe("SOLDIER");
-    expect(deriveTier(state.provinces.get(b)?.count ?? -1)).toBe("SOLDIER");
-    expect(state.engagements.get(pairKey(a, b))).toBe(3);
-
-    advance(); // engagementTicks 3→dissolved, dmg 4 (clamped to 0 on both)
-    expect(state.provinces.get(a)?.count).toBe(0);
-    expect(state.provinces.get(b)?.count).toBe(0);
-    // Both sides at 0 → pair dissolves; key not written.
-    expect(state.engagements.has(pairKey(a, b))).toBe(false);
-  });
-
-  it("[AC-19] 3v3 Soldier ramp: (3,3)→(3,3)→(2,2)→(0,0); pair dissolves after both clear", () => {
-    let state = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 3),
-      makeProvince(1, 0, "TAKEDA", 3),
-    ]);
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const key = pairKey(a, b);
-
-    function advance(): void {
-      state = resolveAdjacentCombat(state).state;
-    }
-
-    advance(); // dmg 0 → (3, 3); counter = 1
-    expect(state.provinces.get(a)?.count).toBe(3);
-    expect(state.provinces.get(b)?.count).toBe(3);
-    expect(state.engagements.get(key)).toBe(1);
-
-    advance(); // dmg 1 → (2, 2); counter = 2
-    expect(state.provinces.get(a)?.count).toBe(2);
-    expect(state.provinces.get(b)?.count).toBe(2);
-    expect(state.engagements.get(key)).toBe(2);
-
-    advance(); // dmg 2 → (0, 0); pair dissolves (both at 0)
-    expect(state.provinces.get(a)?.count).toBe(0);
-    expect(state.provinces.get(b)?.count).toBe(0);
-    expect(state.engagements.has(key)).toBe(false);
-
-    advance(); // pair no longer combatPair → engagements stays empty
-    expect(state.engagements.has(key)).toBe(false);
-  });
-
-  it("pair dissolution drops counter when one side clears mid-ramp", () => {
-    // 1 vs 4 at engagementTicks = 1 (carried over) → dmg 1 → (0, 3). pair gone.
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const key = pairKey(a, b);
-    const before = buildState(
-      [makeProvince(0, 0, "TOKUGAWA", 1), makeProvince(1, 0, "TAKEDA", 4)],
-      new Map([[key, 1]]),
-    );
-    const { state: after } = resolveAdjacentCombat(before);
-    expect(after.provinces.get(a)?.count).toBe(0);
-    expect(after.provinces.get(b)?.count).toBe(3);
-    expect(after.engagements.has(key)).toBe(false);
-  });
-
-  it("re-engagement after dissolution restarts at engagementTicks = 0", () => {
-    // Counter dropped, both sides newly garrisoned → next tick is a fresh
-    // encounter with damage 0.
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const before = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 5),
-      makeProvince(1, 0, "TAKEDA", 5),
-    ]);
-    const { state: after, pairs } = resolveAdjacentCombat(before);
-    expect(pairs[0]?.damage).toBe(0);
-    expect(after.provinces.get(a)?.count).toBe(5);
-    expect(after.provinces.get(b)?.count).toBe(5);
-    expect(after.engagements.get(pairKey(a, b))).toBe(1);
-  });
-
-  it("4-adjacent only: diagonal tiles do not fight", () => {
-    const before = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 10),
-      makeProvince(1, 1, "TAKEDA", 10),
-    ]);
-    const { state: after, pairs } = resolveAdjacentCombat(before);
-    expect(pairs).toHaveLength(0);
-    expect(after).toBe(before);
-  });
-
-  it("[AC-36] 4-conn adjacency: combat pairs include cardinals, exclude diagonals", () => {
-    const provinces = [
-      makeProvince(5, 5, "TOKUGAWA", 10),
-      makeProvince(6, 5, "TAKEDA", 10),
-      makeProvince(4, 5, "TAKEDA", 10),
-      makeProvince(5, 6, "TAKEDA", 10),
-      makeProvince(5, 4, "TAKEDA", 10),
-      makeProvince(6, 6, "TAKEDA", 10),
-      makeProvince(4, 4, "TAKEDA", 10),
-      makeProvince(6, 4, "TAKEDA", 10),
-      makeProvince(4, 6, "TAKEDA", 10),
+  it("[AC-V2-08] case 1: defender 50 vs invader 36 ramp sequence", () => {
+    const expected: ReadonlyArray<readonly [number, number]> = [
+      [50, 35], // tick 0: t=0 defender only → -1 to B
+      [49, 34], // tick 1: t=1 damage=1
+      [47, 32], // tick 2: t=2 damage=2
+      [45, 30],
+      [41, 26], // tick 4: t=4 damage=4
+      [37, 22],
+      [33, 18],
+      [29, 14],
+      [21, 6], // tick 8: t=8 damage=8
+      [15, 0], // tick 9: B capped at 6
     ];
-    const { pairs } = resolveAdjacentCombat(buildState(provinces));
-    const center = tileId(5, 5);
-    const partnersOfCenter = new Set<TileId>();
-    for (const p of pairs) {
-      if (p.a === center) partnersOfCenter.add(p.b);
-      else if (p.b === center) partnersOfCenter.add(p.a);
+
+    const id = tileId(1, 1);
+    // combatStartTick is pre-set so assignDefender doesn't re-pick the
+    // defender via the arrivalTick-tie RNG — TOKUGAWA stays the defender
+    // for the whole sequence.
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 50, 0, true), occ("TAKEDA", 36, 0, false)],
+          0,
+        ),
+      ],
+    ]);
+    let state = makeState(provinces, 0);
+
+    for (let i = 0; i < expected.length; i++) {
+      const tickPair = expected[i] as readonly [number, number];
+      const result = resolveSameTileCombat(state);
+      const tile = result.state.provinces.get(id) as Province;
+      const a = tile.occupants.find((o) => o.faction === "TOKUGAWA");
+      const b = tile.occupants.find((o) => o.faction === "TAKEDA");
+      expect([a?.amount ?? 0, b?.amount ?? 0]).toEqual([
+        tickPair[0],
+        tickPair[1],
+      ]);
+      state = { ...result.state, tick: state.tick + 1 };
     }
-    expect(partnersOfCenter.size).toBe(4);
-    expect(partnersOfCenter.has(tileId(6, 5))).toBe(true);
-    expect(partnersOfCenter.has(tileId(4, 5))).toBe(true);
-    expect(partnersOfCenter.has(tileId(5, 6))).toBe(true);
-    expect(partnersOfCenter.has(tileId(5, 4))).toBe(true);
-    expect(partnersOfCenter.has(tileId(6, 6))).toBe(false);
-    expect(partnersOfCenter.has(tileId(4, 4))).toBe(false);
-    expect(partnersOfCenter.has(tileId(6, 4))).toBe(false);
-    expect(partnersOfCenter.has(tileId(4, 6))).toBe(false);
+
+    const finalTile = state.provinces.get(id) as Province;
+    expect(finalTile.occupants).toHaveLength(1);
+    expect(finalTile.occupants[0]?.faction).toBe("TOKUGAWA");
+    expect(finalTile.combatStartTick).toBeNull();
   });
 
-  it("same-faction adjacent: no combat, engagements unchanged", () => {
-    const before = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 10),
-      makeProvince(1, 0, "TOKUGAWA", 10),
+  it("[AC-V2-17] case 2: reinforcement at tick 9 keeps B alive one more tick", () => {
+    const id = tileId(1, 1);
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 21, 0, true), occ("TAKEDA", 16, 0, false)],
+          0,
+        ),
+      ],
     ]);
-    const { state: after, pairs } = resolveAdjacentCombat(before);
-    expect(pairs).toHaveLength(0);
-    expect(after).toBe(before);
+    const state = makeState(provinces, 9);
+    const result = resolveSameTileCombat(state);
+    const tile = result.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(13);
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(8);
+    expect(tile.combatStartTick).toBe(0);
   });
 
-  it("NEUTRAL vs NEUTRAL adjacent: no combat", () => {
-    const before = buildState([
-      makeProvince(0, 0, "NEUTRAL", 3),
-      makeProvince(1, 0, "NEUTRAL", 3),
+  it("[AC-V2-28] 3 vs 3 step ramp through tick 2", () => {
+    const id = tileId(0, 0);
+    // Pre-set combatStartTick=0 so TOKUGAWA stays the defender (skip the
+    // RNG tiebreak path in assignDefender).
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 3, 0, true), occ("TAKEDA", 3, 0, false)],
+          0,
+        ),
+      ],
     ]);
-    const { pairs } = resolveAdjacentCombat(before);
-    expect(pairs).toHaveLength(0);
+    let state = makeState(provinces, 0);
+
+    // tick 0: t=0, damage=1, only defender (TOK) attacks → A=3, B=2
+    let r = resolveSameTileCombat(state);
+    let tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(3);
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(2);
+    state = { ...r.state, tick: 1 };
+
+    // tick 1: t=1, damage=1, both attack → A=2, B=1
+    r = resolveSameTileCombat(state);
+    tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(2);
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(1);
+    state = { ...r.state, tick: 2 };
+
+    // tick 2: damage=2. A→B = min(2, 2) = 2 → B = 0 (eliminated).
+    // B→A = min(2, 1) = 1 (capped at B's own amount) → A = 1.
+    r = resolveSameTileCombat(state);
+    tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants).toHaveLength(1);
+    expect(tile.occupants[0]?.faction).toBe("TOKUGAWA");
+    expect(tile.occupants[0]?.amount).toBe(1);
+    expect(tile.combatStartTick).toBeNull();
   });
 
-  it("NEUTRAL vs player: NEUTRAL participates (engages, ramps normally)", () => {
-    // Encounter tick: dmg 0; next tick (counter 1): dmg 1.
-    let state = buildState([
-      makeProvince(0, 0, "NEUTRAL", 3),
-      makeProvince(1, 0, "TOKUGAWA", 5),
+  it("[AC-V2-24] mutual annihilation clears combatStartTick and tile occupants", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 1, 0, true), occ("TAKEDA", 1, 0, false)],
+          0,
+        ),
+      ],
     ]);
-    state = resolveAdjacentCombat(state).state;
-    expect(state.provinces.get(tileId(0, 0))?.count).toBe(3);
-    expect(state.provinces.get(tileId(1, 0))?.count).toBe(5);
-    state = resolveAdjacentCombat(state).state;
-    expect(state.provinces.get(tileId(0, 0))?.count).toBe(2);
-    expect(state.provinces.get(tileId(1, 0))?.count).toBe(4);
+    const state = makeState(provinces, 1);
+    const r = resolveSameTileCombat(state);
+    const tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants).toHaveLength(0);
+    expect(tile.combatStartTick).toBeNull();
   });
 
-  it("count = 0 on either side: skip combat, drop counter if it was stored", () => {
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const key = pairKey(a, b);
-    const before = buildState(
-      [makeProvince(0, 0, "TOKUGAWA", 0), makeProvince(1, 0, "TAKEDA", 10)],
-      new Map([[key, 3]]),
-    );
-    const { state: after, pairs } = resolveAdjacentCombat(before);
-    expect(pairs).toHaveLength(0);
-    expect(after.engagements.has(key)).toBe(false);
-  });
-
-  it("multiple enemy attackers: per-pair counters independent, damage stacks", () => {
-    // Defender at (1,0) flanked by two attackers. All three first-encounter
-    // → counter 0 → dmg 0 across the board.
-    let state = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 5),
-      makeProvince(1, 0, "TAKEDA", 6),
-      makeProvince(2, 0, "TOKUGAWA", 5),
+  it("[AC-V2-10] multi-party: 3 hostile factions, independent attacks", () => {
+    const id = tileId(0, 0);
+    // combatStartTick=0 so assignDefender keeps TOK as defender (avoids
+    // RNG tiebreak across the 3-way arrivalTick=0 set).
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [
+            occ("TOKUGAWA", 50, 0, true),
+            occ("TAKEDA", 30, 0, false),
+            occ("ODA", 20, 0, false),
+          ],
+          0,
+        ),
+      ],
     ]);
-    state = resolveAdjacentCombat(state).state;
-    expect(state.provinces.get(tileId(1, 0))?.count).toBe(6);
+    let state = makeState(provinces, 0);
 
-    // Tick 2: counter 1 on both pairs → defender absorbs 1+1=2; attackers 1 each.
-    state = resolveAdjacentCombat(state).state;
-    expect(state.provinces.get(tileId(0, 0))?.count).toBe(4);
-    expect(state.provinces.get(tileId(1, 0))?.count).toBe(4);
-    expect(state.provinces.get(tileId(2, 0))?.count).toBe(4);
+    // tick 0: t=0 only defender (TOK) attacks. TOK hits both TAK and ODA for 1.
+    let r = resolveSameTileCombat(state);
+    let tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(50);
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(29);
+    expect(tile.occupants.find((o) => o.faction === "ODA")?.amount).toBe(19);
+    state = { ...r.state, tick: 1 };
 
-    // Tick 3: counter 2 → defender absorbs 2+2=4; attackers 2 each.
-    state = resolveAdjacentCombat(state).state;
-    expect(state.provinces.get(tileId(0, 0))?.count).toBe(2);
-    expect(state.provinces.get(tileId(1, 0))?.count).toBe(0);
-    expect(state.provinces.get(tileId(2, 0))?.count).toBe(2);
+    // tick 1: t=1 damage=1; everyone attacks every hostile.
+    // TOK takes 1+1 = 2 → 48
+    // TAK takes 1+1 = 2 → 27
+    // ODA takes 1+1 = 2 → 17
+    r = resolveSameTileCombat(state);
+    tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(48);
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(27);
+    expect(tile.occupants.find((o) => o.faction === "ODA")?.amount).toBe(17);
   });
 
-  it("pair output ordering: a < b lexicographically for stable keying", () => {
-    const before = buildState([
-      makeProvince(5, 5, "TOKUGAWA", 10),
-      makeProvince(5, 6, "TAKEDA", 10),
+  it("[AC-V2-11] defender RNG pick deterministic for the same seed", () => {
+    const id = tileId(0, 0);
+    const tile = makeTile(
+      id,
+      [occ("TOKUGAWA", 10, 0, false), occ("TAKEDA", 10, 0, false)],
+      null,
+    );
+    const stateA = makeState(new Map([[id, tile]]), 0, 12345);
+    const stateB = makeState(new Map([[id, tile]]), 0, 12345);
+    const rA = resolveSameTileCombat(stateA);
+    const rB = resolveSameTileCombat(stateB);
+    const defA = (rA.state.provinces.get(id) as Province).occupants.find(
+      (o) => o.isDefender,
+    )?.faction;
+    const defB = (rB.state.provinces.get(id) as Province).occupants.find(
+      (o) => o.isDefender,
+    )?.faction;
+    expect(defA).toBe(defB);
+    expect(["TOKUGAWA", "TAKEDA"]).toContain(defA);
+  });
+
+  it("[AC-V2-11] different seeds yield different defender picks (at least 2 distinct)", () => {
+    const id = tileId(0, 0);
+    const tile = makeTile(
+      id,
+      [occ("TOKUGAWA", 10, 0, false), occ("TAKEDA", 10, 0, false)],
+      null,
+    );
+    const results = new Set<string>();
+    for (const seed of [1, 7, 19, 23, 42, 99, 100, 200, 500, 1000]) {
+      const state = makeState(new Map([[id, tile]]), 0, seed);
+      const r = resolveSameTileCombat(state);
+      const def = (r.state.provinces.get(id) as Province).occupants.find(
+        (o) => o.isDefender,
+      )?.faction;
+      if (def !== undefined) results.add(def);
+    }
+    expect(results.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("defender = smallest arrivalTick when not a tie", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 10, 0, false), occ("TAKEDA", 10, 5, false)],
+          null,
+        ),
+      ],
     ]);
-    const { pairs } = resolveAdjacentCombat(before);
-    expect(pairs).toHaveLength(1);
-    const pair = pairs[0];
-    if (!pair) return;
-    expect(pair.a < pair.b).toBe(true);
+    const state = makeState(provinces, 5);
+    const r = resolveSameTileCombat(state);
+    const tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.isDefender)?.faction).toBe("TOKUGAWA");
+    expect(tile.occupants.find((o) => o.faction === "TAKEDA")?.amount).toBe(9);
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(10);
+    expect(tile.combatStartTick).toBe(5);
   });
 
-  it("returns new state when damage is applied, does not mutate input", () => {
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const before = buildState(
-      [makeProvince(0, 0, "TOKUGAWA", 10), makeProvince(1, 0, "TAKEDA", 5)],
-      new Map([[pairKey(a, b), 2]]),
-    );
-    const beforeCounts = Array.from(before.provinces.values()).map(
-      (p) => p.count,
-    );
-    const { state: after } = resolveAdjacentCombat(before);
-    expect(after).not.toBe(before);
-    expect(after.provinces).not.toBe(before.provinces);
-    const beforeCountsAfter = Array.from(before.provinces.values()).map(
-      (p) => p.count,
-    );
-    expect(beforeCountsAfter).toEqual(beforeCounts);
-  });
-
-  it("returns same state reference when no engagement pairs exist", () => {
-    const before = buildState([
-      makeProvince(0, 0, "TOKUGAWA", 10),
-      makeProvince(5, 5, "TAKEDA", 10),
+  it("NEUTRAL is a punching bag (takes damage, never attacks)", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map<string, Province>([
+      [
+        id,
+        makeTile(
+          id,
+          [occ("TOKUGAWA", 5, 0, true), occ("NEUTRAL", 3, 0, false)],
+          0,
+        ),
+      ],
     ]);
-    expect(resolveAdjacentCombat(before).state).toBe(before);
+    const state = makeState(provinces, 1);
+    const r = resolveSameTileCombat(state);
+    const tile = r.state.provinces.get(id) as Province;
+    expect(tile.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(5);
+    expect(tile.occupants.find((o) => o.faction === "NEUTRAL")?.amount).toBe(2);
   });
 
-  it("simultaneous (dry-run) symmetry: both sides take same damage in a single tick", () => {
-    // Pre-set counter so we actually deal damage this tick.
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const before = buildState(
-      [makeProvince(0, 0, "TOKUGAWA", 5), makeProvince(1, 0, "TAKEDA", 5)],
-      new Map([[pairKey(a, b), 1]]),
-    );
-    const { state: after } = resolveAdjacentCombat(before);
-    expect(after.provinces.get(a)?.count).toBe(4);
-    expect(after.provinces.get(b)?.count).toBe(4);
-  });
-
-  it("damage clamps count at 0 (cannot go negative)", () => {
-    const a = tileId(0, 0);
-    const b = tileId(1, 0);
-    const before = buildState(
-      [makeProvince(0, 0, "TOKUGAWA", 1), makeProvince(1, 0, "TAKEDA", 30)],
-      new Map([[pairKey(a, b), 5]]), // dmg 16
-    );
-    const { state: after } = resolveAdjacentCombat(before);
-    expect(after.provinces.get(a)?.count).toBe(0);
-    expect(after.provinces.get(b)?.count).toBe(14);
+  it("clears stale combatStartTick on non-contested tile", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map<string, Province>([
+      [id, makeTile(id, [occ("TOKUGAWA", 5, 0, true)], 3)],
+    ]);
+    const state = makeState(provinces, 5);
+    const r = resolveSameTileCombat(state);
+    const tile = r.state.provinces.get(id) as Province;
+    expect(tile.combatStartTick).toBeNull();
   });
 });

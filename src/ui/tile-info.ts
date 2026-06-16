@@ -56,16 +56,35 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
       renderEmpty();
       return;
     }
-    const tier = deriveTier(p.count);
-    const ownerLabel = FACTION_LABEL[p.owner] ?? p.owner;
     const lines: string[] = [];
-    lines.push(`<div style='font-weight:700'>(${p.x}, ${p.y})${p.isCastle ? " ★ Castle" : ""}</div>`);
-    lines.push(`<div>Owner: ${ownerLabel}</div>`);
-    if (p.count > 0) {
-      lines.push(`<div>Tier: ${TIER_LABEL[tier]}</div>`);
-      lines.push(`<div>Count: ${p.count}</div>`);
-    } else {
+    lines.push(
+      `<div style='font-weight:700'>(${p.x}, ${p.y})${p.isCastle ? " ★ Castle" : ""}</div>`,
+    );
+    if (p.isCastle && p.castleOwner !== null) {
+      lines.push(`<div>Castle of: ${FACTION_LABEL[p.castleOwner] ?? p.castleOwner}</div>`);
+    }
+    if (p.occupants.length === 0) {
       lines.push(`<div style='opacity:0.6'>Empty</div>`);
+    } else if (p.occupants.length === 1) {
+      const o = p.occupants[0];
+      if (o !== undefined) {
+        const tier = deriveTier(o.amount);
+        lines.push(`<div>Owner: ${FACTION_LABEL[o.faction] ?? o.faction}</div>`);
+        lines.push(`<div>Tier: ${TIER_LABEL[tier]}</div>`);
+        lines.push(`<div>Count: ${o.amount}</div>`);
+      }
+    } else {
+      lines.push(`<div style='color:#ff8'>⚔ Contested</div>`);
+      for (const o of p.occupants) {
+        const tier = deriveTier(o.amount);
+        const tag = o.isDefender ? " (def)" : "";
+        lines.push(
+          `<div>${FACTION_LABEL[o.faction] ?? o.faction}${tag}: ${o.amount} (${TIER_LABEL[tier]})</div>`,
+        );
+      }
+      if (p.combatStartTick !== null) {
+        lines.push(`<div style='opacity:0.7'>Combat tick: ${p.combatStartTick}</div>`);
+      }
     }
     root.innerHTML = lines.join("");
   }

@@ -1,3 +1,4 @@
+import { derivedOwner } from "@/engine/state";
 import type { FactionId, GameState } from "@/engine/types";
 
 const FACTIONS: readonly Exclude<FactionId, "NEUTRAL">[] = [
@@ -76,12 +77,29 @@ function computeStats(
     out.set(f, { tiles: 0, total: 0, hasCastle: false });
   }
   for (const p of state.provinces.values()) {
-    if (p.owner === "NEUTRAL") continue;
-    const s = out.get(p.owner);
-    if (s === undefined) continue;
-    s.tiles += 1;
-    s.total += p.count;
-    if (p.isCastle) s.hasCastle = true;
+    // §3.4 v1.2: tile "owned" by a faction = exactly one occupant of that
+    // faction. Counts (panel "total" column) are per-faction occupant sum
+    // even on contested tiles. Castle ownership tracks the castleOwner only
+    // when they have an occupant there.
+    const owner = derivedOwner(p);
+    if (owner !== null && owner !== "NEUTRAL") {
+      const s = out.get(owner as Exclude<FactionId, "NEUTRAL">);
+      if (s !== undefined) s.tiles += 1;
+    }
+    for (const o of p.occupants) {
+      if (o.faction === "NEUTRAL") continue;
+      const s = out.get(o.faction as Exclude<FactionId, "NEUTRAL">);
+      if (s !== undefined) s.total += o.amount;
+    }
+    if (p.isCastle && p.castleOwner !== null && p.castleOwner !== "NEUTRAL") {
+      for (const o of p.occupants) {
+        if (o.faction === p.castleOwner) {
+          const s = out.get(p.castleOwner as Exclude<FactionId, "NEUTRAL">);
+          if (s !== undefined) s.hasCastle = true;
+          break;
+        }
+      }
+    }
   }
   for (const m of state.marchingStacks) {
     if (m.faction === "NEUTRAL") continue;

@@ -1,303 +1,202 @@
 import { describe, expect, it } from "vitest";
 import { tileId } from "./state";
-import { AI_IDLE } from "./types";
-import type {
-  AiMode,
-  FactionId,
-  GameState,
-  MarchingStack,
-  Province,
-  TileId,
+import {
+  AI_IDLE,
+  type FactionId,
+  type GameState,
+  type MarchingStack,
+  type Occupant,
+  type Province,
 } from "./types";
 import { applyDefeats, evaluateOutcome } from "./victory";
 
-const idleAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: AI_IDLE,
-  TAKEDA: AI_IDLE,
-  ODA: AI_IDLE,
-  UESUGI: AI_IDLE,
-  NEUTRAL: AI_IDLE,
-};
-
-function makeProvince(
-  x: number,
-  y: number,
-  owner: FactionId,
-  count: number,
-  isCastle = false,
-): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle };
-}
-
-function makeStack(
-  id: string,
-  faction: FactionId,
-  count: number,
-  path: readonly TileId[],
-  idx = 0,
-  dispatchedAtTick = 1,
-): MarchingStack {
-  return { id, faction, count, path, idx, dispatchedAtTick };
-}
-
-function buildState(
-  provinces: readonly Province[],
-  options: {
-    readonly defeated?: ReadonlySet<FactionId>;
-    readonly marchingStacks?: readonly MarchingStack[];
-  } = {},
+function makeState(
+  provinces: ReadonlyMap<string, Province>,
+  marchingStacks: readonly MarchingStack[] = [],
+  defeated: ReadonlySet<FactionId> = new Set(),
 ): GameState {
-  const map = new Map<TileId, Province>();
-  for (const p of provinces) map.set(p.id, p);
   return {
     boardSize: 11,
     tick: 1,
-    provinces: map,
-    marchingStacks: options.marchingStacks ?? [],
-    engagements: new Map(),
-    aiConfig: idleAi,
-    defeated: options.defeated ?? new Set<FactionId>(),
-    rngSeed: 1,
+    provinces,
+    marchingStacks,
+    aiConfig: {
+      TOKUGAWA: AI_IDLE,
+      TAKEDA: AI_IDLE,
+      ODA: AI_IDLE,
+      UESUGI: AI_IDLE,
+      NEUTRAL: AI_IDLE,
+    },
+    defeated,
+    rngSeed: 42,
     nextMarchingId: 1,
   };
 }
 
-const fourCastles: readonly Province[] = [
-  makeProvince(0, 0, "TOKUGAWA", 3, true),
-  makeProvince(10, 0, "TAKEDA", 3, true),
-  makeProvince(0, 10, "ODA", 3, true),
-  makeProvince(10, 10, "UESUGI", 3, true),
-];
+function tile(
+  id: string,
+  occupants: readonly Occupant[],
+  opts: { isCastle?: boolean; castleOwner?: FactionId | null } = {},
+): Province {
+  return {
+    id,
+    x: 0,
+    y: 0,
+    isCastle: opts.isCastle ?? false,
+    castleOwner: opts.castleOwner ?? null,
+    occupants,
+    combatStartTick: null,
+  };
+}
 
 describe("applyDefeats", () => {
-  it("marks a faction defeated when its castle is captured", () => {
-    const provinces: readonly Province[] = [
-      // Takeda's corner castle now flies the Tokugawa flag — Takeda is out.
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const before = buildState(provinces);
-    const after = applyDefeats(before);
-    expect(after.defeated.has("TAKEDA")).toBe(true);
-    expect(after.defeated.has("TOKUGAWA")).toBe(false);
-    expect(after.defeated.has("ODA")).toBe(false);
-    expect(after.defeated.has("UESUGI")).toBe(false);
-  });
-
-  it("[AC-10] converts the defeated faction's non-castle tiles to NEUTRAL", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      // Takeda's outer holdings keep their counts but flip to NEUTRAL bandits.
-      makeProvince(9, 0, "TAKEDA", 7, false),
-      makeProvince(10, 1, "TAKEDA", 2, false),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const before = buildState(provinces);
-    const after = applyDefeats(before);
-    const t1 = after.provinces.get(tileId(9, 0));
-    const t2 = after.provinces.get(tileId(10, 1));
-    expect(t1?.owner).toBe("NEUTRAL");
-    expect(t1?.count).toBe(7);
-    expect(t2?.owner).toBe("NEUTRAL");
-    expect(t2?.count).toBe(2);
-  });
-
-  it("[AC-10] preserves the captured castle's new owner", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      // Captured castle stays with the conqueror, not flipped to NEUTRAL.
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const after = applyDefeats(buildState(provinces));
-    const castle = after.provinces.get(tileId(10, 0));
-    expect(castle?.owner).toBe("TOKUGAWA");
-    expect(castle?.count).toBe(4);
-    expect(castle?.isCastle).toBe(true);
-  });
-
-  it("[§6.3] re-flags defeated faction's marching stacks as NEUTRAL", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-      makeProvince(5, 0, "NEUTRAL", 0, false),
-      makeProvince(6, 0, "NEUTRAL", 0, false),
-    ];
-    const stack = makeStack(
-      "mstack:7",
-      "TAKEDA",
-      5,
-      [tileId(5, 0), tileId(6, 0)],
-      0,
-      3,
-    );
-    const before = buildState(provinces, { marchingStacks: [stack] });
-    const after = applyDefeats(before);
-    expect(after.marchingStacks).toHaveLength(1);
-    const survivor = after.marchingStacks[0] as MarchingStack;
-    expect(survivor.faction).toBe("NEUTRAL");
-    expect(survivor.count).toBe(5);
-    expect(survivor.path).toBe(stack.path);
-    expect(survivor.idx).toBe(0);
-    expect(survivor.dispatchedAtTick).toBe(3);
-    expect(survivor.id).toBe("mstack:7");
-  });
-
-  it("leaves living factions' marching stacks untouched", () => {
-    const stack = makeStack("mstack:1", "TOKUGAWA", 2, [
-      tileId(1, 0),
-      tileId(2, 0),
+  it("no-op when every faction still holds its castle", () => {
+    const provinces = new Map<string, Province>([
+      [
+        tileId(0, 0),
+        tile(
+          tileId(0, 0),
+          [{ faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TOKUGAWA" },
+        ),
+      ],
+      [
+        tileId(10, 0),
+        tile(
+          tileId(10, 0),
+          [{ faction: "TAKEDA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TAKEDA" },
+        ),
+      ],
+      [
+        tileId(0, 10),
+        tile(
+          tileId(0, 10),
+          [{ faction: "ODA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "ODA" },
+        ),
+      ],
+      [
+        tileId(10, 10),
+        tile(
+          tileId(10, 10),
+          [{ faction: "UESUGI", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "UESUGI" },
+        ),
+      ],
     ]);
-    const before = buildState(fourCastles, { marchingStacks: [stack] });
-    const after = applyDefeats(before);
-    expect(after.marchingStacks[0]).toBe(stack);
+    const state = makeState(provinces);
+    const out = applyDefeats(state);
+    expect(out).toBe(state);
   });
 
-  it("handles multiple newly defeated factions in a single call", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      // Tokugawa just rolled up two castles in the same tick.
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(0, 10, "TOKUGAWA", 2, true),
-      makeProvince(9, 0, "TAKEDA", 3, false),
-      makeProvince(1, 10, "ODA", 6, false),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const after = applyDefeats(buildState(provinces));
-    expect(after.defeated.has("TAKEDA")).toBe(true);
-    expect(after.defeated.has("ODA")).toBe(true);
-    expect(after.defeated.has("UESUGI")).toBe(false);
-    expect(after.provinces.get(tileId(9, 0))?.owner).toBe("NEUTRAL");
-    expect(after.provinces.get(tileId(1, 10))?.owner).toBe("NEUTRAL");
-  });
-
-  it("keeps already-defeated factions in the set without re-processing", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TAKEDA", 3, true),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const before = buildState(provinces, {
-      defeated: new Set<FactionId>(["ODA"]),
-    });
-    const after = applyDefeats(before);
-    expect(after).toBe(before);
-    expect(after.defeated.has("ODA")).toBe(true);
-  });
-
-  it("returns the same state reference when no faction is newly defeated", () => {
-    const before = buildState(fourCastles);
-    expect(applyDefeats(before)).toBe(before);
-  });
-
-  it("does not mutate the input state", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(9, 0, "TAKEDA", 7, false),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const stack = makeStack("mstack:1", "TAKEDA", 4, [
-      tileId(8, 0),
-      tileId(9, 0),
+  it("[AC-V2-25] castle empty of owner → faction defeated, remnants → NEUTRAL", () => {
+    const provinces = new Map<string, Province>([
+      [
+        tileId(0, 0),
+        tile(
+          tileId(0, 0),
+          [{ faction: "TAKEDA", amount: 5, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TOKUGAWA" }, // TOK's castle held by TAK
+        ),
+      ],
+      [
+        tileId(1, 1),
+        tile(tileId(1, 1), [
+          { faction: "TOKUGAWA", amount: 4, arrivalTick: 0, isDefender: true },
+        ]),
+      ],
+      [
+        tileId(10, 0),
+        tile(
+          tileId(10, 0),
+          [{ faction: "TAKEDA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TAKEDA" },
+        ),
+      ],
+      [
+        tileId(0, 10),
+        tile(
+          tileId(0, 10),
+          [{ faction: "ODA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "ODA" },
+        ),
+      ],
+      [
+        tileId(10, 10),
+        tile(
+          tileId(10, 10),
+          [{ faction: "UESUGI", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "UESUGI" },
+        ),
+      ],
     ]);
-    const before = buildState(provinces, { marchingStacks: [stack] });
-    const beforeDefeated = new Set(before.defeated);
-    const beforeTakedaTile = before.provinces.get(tileId(9, 0));
-    const beforeStackFaction = (
-      before.marchingStacks[0] as MarchingStack
-    ).faction;
-
-    const after = applyDefeats(before);
-
-    expect(after).not.toBe(before);
-    expect(after.provinces).not.toBe(before.provinces);
-    expect(after.defeated).not.toBe(before.defeated);
-    expect(Array.from(before.defeated)).toEqual(Array.from(beforeDefeated));
-    expect(beforeTakedaTile?.owner).toBe("TAKEDA");
-    expect(beforeStackFaction).toBe("TAKEDA");
+    const marchingStacks: MarchingStack[] = [
+      {
+        id: "tok-march",
+        faction: "TOKUGAWA",
+        count: 2,
+        path: [tileId(1, 1), tileId(2, 1)],
+        idx: 0,
+        dispatchedAtTick: 0,
+      },
+    ];
+    const state = makeState(provinces, marchingStacks);
+    const out = applyDefeats(state);
+    expect(out.defeated.has("TOKUGAWA")).toBe(true);
+    // The non-castle TOK occupant flips to NEUTRAL
+    const remnant = out.provinces.get(tileId(1, 1));
+    expect(remnant?.occupants[0]?.faction).toBe("NEUTRAL");
+    // TOK marching stack dropped
+    expect(out.marchingStacks).toHaveLength(0);
   });
 });
 
 describe("evaluateOutcome", () => {
-  it("returns ongoing when 2+ non-NEUTRAL factions remain", () => {
-    const state = buildState(fourCastles);
-    expect(evaluateOutcome(state)).toEqual({ status: "ongoing" });
-  });
-
-  it("[AC-12 engine] returns ended with the lone survivor as winner", () => {
-    const state = buildState(fourCastles, {
-      defeated: new Set<FactionId>(["TAKEDA", "ODA", "UESUGI"]),
-    });
-    expect(evaluateOutcome(state)).toEqual({
-      status: "ended",
-      winner: "TOKUGAWA",
-    });
-  });
-
-  it("[AC-11 engine] returns ended with another faction as winner when player is defeated and one rival remains", () => {
-    const state = buildState(fourCastles, {
-      defeated: new Set<FactionId>(["TOKUGAWA", "ODA", "UESUGI"]),
-    });
-    expect(evaluateOutcome(state)).toEqual({
-      status: "ended",
-      winner: "TAKEDA",
-    });
-  });
-
-  it("returns ended with winner=null when zero factions remain", () => {
-    const state = buildState(fourCastles, {
-      defeated: new Set<FactionId>(["TOKUGAWA", "TAKEDA", "ODA", "UESUGI"]),
-    });
-    expect(evaluateOutcome(state)).toEqual({ status: "ended", winner: null });
-  });
-
-  it("still ongoing when player is defeated but two rivals remain", () => {
-    const state = buildState(fourCastles, {
-      defeated: new Set<FactionId>(["TOKUGAWA", "ODA"]),
-    });
-    expect(evaluateOutcome(state)).toEqual({ status: "ongoing" });
-  });
-});
-
-describe("applyDefeats + evaluateOutcome", () => {
-  it("[AC-12 engine] player captures last enemy castle → ended, winner=TOKUGAWA", () => {
-    const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(10, 0, "TOKUGAWA", 4, true),
-      makeProvince(0, 10, "TOKUGAWA", 2, true),
-      makeProvince(10, 10, "TOKUGAWA", 2, true),
+  function castleState(holders: readonly FactionId[]): GameState {
+    const provinces = new Map<string, Province>();
+    const corners: [FactionId, [number, number]][] = [
+      ["TOKUGAWA", [0, 0]],
+      ["TAKEDA", [10, 0]],
+      ["ODA", [0, 10]],
+      ["UESUGI", [10, 10]],
     ];
-    const before = buildState(provinces);
-    const after = applyDefeats(before);
-    expect(after.defeated.has("TAKEDA")).toBe(true);
-    expect(after.defeated.has("ODA")).toBe(true);
-    expect(after.defeated.has("UESUGI")).toBe(true);
-    expect(evaluateOutcome(after)).toEqual({
-      status: "ended",
-      winner: "TOKUGAWA",
-    });
+    for (const [castleOwner, [x, y]] of corners) {
+      const id = tileId(x, y);
+      const occupants: Occupant[] = holders.includes(castleOwner)
+        ? [
+            {
+              faction: castleOwner,
+              amount: 3,
+              arrivalTick: 0,
+              isDefender: true,
+            },
+          ]
+        : [];
+      provinces.set(id, tile(id, occupants, { isCastle: true, castleOwner }));
+    }
+    let state = makeState(provinces);
+    // Run applyDefeats so the defeated set is populated.
+    state = applyDefeats(state);
+    return state;
+  }
+
+  it("ongoing when 2+ factions alive", () => {
+    const s = castleState(["TOKUGAWA", "TAKEDA"]);
+    expect(evaluateOutcome(s).status).toBe("ongoing");
   });
 
-  it("[AC-11 engine] player's castle is taken → player defeated; if rivals remain it stays ongoing", () => {
-    const provinces: readonly Province[] = [
-      // Takeda has overrun Tokugawa's home corner.
-      makeProvince(0, 0, "TAKEDA", 5, true),
-      makeProvince(10, 0, "TAKEDA", 3, true),
-      makeProvince(0, 10, "ODA", 3, true),
-      makeProvince(10, 10, "UESUGI", 3, true),
-    ];
-    const after = applyDefeats(buildState(provinces));
-    expect(after.defeated.has("TOKUGAWA")).toBe(true);
-    expect(evaluateOutcome(after)).toEqual({ status: "ongoing" });
+  it("ended with winner when exactly one faction alive", () => {
+    const s = castleState(["TOKUGAWA"]);
+    const out = evaluateOutcome(s);
+    expect(out.status).toBe("ended");
+    if (out.status === "ended") expect(out.winner).toBe("TOKUGAWA");
+  });
+
+  it("ended with null winner when all factions defeated", () => {
+    const s = castleState([]);
+    const out = evaluateOutcome(s);
+    expect(out.status).toBe("ended");
+    if (out.status === "ended") expect(out.winner).toBeNull();
   });
 });

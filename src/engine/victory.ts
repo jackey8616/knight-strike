@@ -1,7 +1,9 @@
+import { findOccupant } from "./state";
 import type {
   FactionId,
   GameState,
   MarchingStack,
+  Occupant,
   Province,
   TileId,
 } from "./types";
@@ -17,9 +19,14 @@ export type GameOutcome =
   | { readonly status: "ongoing" }
   | { readonly status: "ended"; readonly winner: FactionId | null };
 
-function ownsAnyCastle(state: GameState, faction: FactionId): boolean {
+// PRD §6.1 v1.2: castle "held" by its castleOwner means the owner faction has
+// an occupant on that castle tile. Empty castle or castle with only enemy
+// occupants → owner has fallen.
+function holdsCastle(state: GameState, faction: FactionId): boolean {
   for (const p of state.provinces.values()) {
-    if (p.isCastle && p.owner === faction) return true;
+    if (!p.isCastle) continue;
+    if (p.castleOwner !== faction) continue;
+    if (findOccupant(p, faction) !== undefined) return true;
   }
   return false;
 }
@@ -28,7 +35,7 @@ export function applyDefeats(state: GameState): GameState {
   const newlyDefeated: FactionId[] = [];
   for (const faction of NON_NEUTRAL_FACTIONS) {
     if (state.defeated.has(faction)) continue;
-    if (ownsAnyCastle(state, faction)) continue;
+    if (holdsCastle(state, faction)) continue;
     newlyDefeated.push(faction);
   }
 
@@ -38,31 +45,59 @@ export function applyDefeats(state: GameState): GameState {
   const newDefeated = new Set<FactionId>(state.defeated);
   for (const faction of newlyDefeated) newDefeated.add(faction);
 
-  // PRD §6.3: defeated faction's non-castle tiles immediately become NEUTRAL.
-  // The captured castle keeps its new owner (already set by upstream resolvers),
-  // so leave isCastle tiles untouched here.
+  // PRD §6.3 v1.2: defeated faction's remaining occupants become NEUTRAL
+  // (passive punching bags). Walk every tile and rewrite any occupant of the
+  // newly-defeated factions. Same-tile NEUTRAL collision (defeated A turned
+  // NEUTRAL on a tile that already had NEUTRAL) merges into one NEUTRAL entry.
   let provincesChanged = false;
   const newProvinces = new Map<TileId, Province>(state.provinces);
   for (const [id, province] of state.provinces) {
-    if (province.isCastle) continue;
-    if (!newlySet.has(province.owner)) continue;
-    newProvinces.set(id, { ...province, owner: "NEUTRAL" });
+    let touched = false;
+    let remappedOccupants: Occupant[] = [];
+    for (const o of province.occupants) {
+      if (newlySet.has(o.faction)) {
+        remappedOccupants.push({ ...o, faction: "NEUTRAL", isDefender: false });
+        touched = true;
+      } else {
+        remappedOccupants.push(o);
+      }
+    }
+    if (!touched) continue;
+    // Coalesce duplicate NEUTRAL entries that arose from the rewrite.
+    const neutrals = remappedOccupants.filter((o) => o.faction === "NEUTRAL");
+    if (neutrals.length > 1) {
+      const totalAmount = neutrals.reduce((sum, o) => sum + o.amount, 0);
+      const minArrival = neutrals.reduce(
+        (min, o) => Math.min(min, o.arrivalTick),
+        Number.POSITIVE_INFINITY,
+      );
+      const others = remappedOccupants.filter((o) => o.faction !== "NEUTRAL");
+      remappedOccupants = [
+        ...others,
+        {
+          faction: "NEUTRAL",
+          amount: totalAmount,
+          arrivalTick: minArrival === Number.POSITIVE_INFINITY ? 0 : minArrival,
+          isDefender: false,
+        },
+      ];
+    }
+    newProvinces.set(id, { ...province, occupants: remappedOccupants });
     provincesChanged = true;
   }
 
-  // PRD §6.3: remaining marching stacks of a defeated faction stay on the board
-  // as "野怪" — they still fight under §3.6 but never act on their own. Flipping
-  // their faction to NEUTRAL is the simplest way to make every downstream
-  // resolver treat them like bandits without a special-case branch.
+  // PRD §6.3 v1.2 (rewrite): defeated faction's marching stacks are dropped
+  // immediately rather than re-mapped to NEUTRAL — keeping them around would
+  // let dead factions still create occupants on arrival, which the v1.2
+  // multi-occupant model can't sanely route.
   let stacksChanged = false;
   const newStacks: MarchingStack[] = [];
   for (const stack of state.marchingStacks) {
     if (newlySet.has(stack.faction)) {
-      newStacks.push({ ...stack, faction: "NEUTRAL" });
       stacksChanged = true;
-    } else {
-      newStacks.push(stack);
+      continue;
     }
+    newStacks.push(stack);
   }
 
   return {

@@ -4,15 +4,21 @@ export type Tier = "SOLDIER" | "KNIGHT" | "QUEEN" | "KING";
 
 export type TileId = string;
 
-export type PairKey = string;
+export type Occupant = {
+  readonly faction: FactionId;
+  readonly amount: number;
+  readonly arrivalTick: number;
+  readonly isDefender: boolean;
+};
 
 export type Province = {
   readonly id: TileId;
   readonly x: number;
   readonly y: number;
-  readonly owner: FactionId;
-  readonly count: number;
   readonly isCastle: boolean;
+  readonly castleOwner: FactionId | null;
+  readonly occupants: readonly Occupant[];
+  readonly combatStartTick: number | null;
 };
 
 export type MarchingStack = {
@@ -24,23 +30,13 @@ export type MarchingStack = {
   readonly dispatchedAtTick: number;
 };
 
-export type EngagementMap = ReadonlyMap<PairKey, number>;
-
 export type RuleTier = "easy" | "normal" | "hard";
 
-// PRD §4 (v1.1): discriminated union so the future LLM tier slots in as a
-// `{kind: "llm", …}` variant without breaking type assignability across the
-// dozens of `aiConfig[faction]` switches. Shorthand strings in scenario JSON
-// (`"easy"`, `"normal"`, `"hard"`, `"idle"`, `"scripted"`) get normalized to
-// this shape by `parseScenario`.
 export type AiMode =
   | { readonly kind: "rule"; readonly tier: RuleTier }
   | { readonly kind: "scripted" }
   | { readonly kind: "idle" };
 
-// Canonical `AiMode` constants for fixture / scenario authoring. Re-exposing
-// the literals as named values keeps tests and engine call-sites from spelling
-// the discriminator key out 5×4 times in every aiConfig record.
 export const AI_IDLE: AiMode = { kind: "idle" };
 export const AI_SCRIPTED: AiMode = { kind: "scripted" };
 export const AI_EASY: AiMode = { kind: "rule", tier: "easy" };
@@ -52,7 +48,6 @@ export type GameState = {
   readonly tick: number;
   readonly provinces: ReadonlyMap<TileId, Province>;
   readonly marchingStacks: readonly MarchingStack[];
-  readonly engagements: EngagementMap;
   readonly aiConfig: Readonly<Record<FactionId, AiMode>>;
   readonly defeated: ReadonlySet<FactionId>;
   readonly rngSeed: number;

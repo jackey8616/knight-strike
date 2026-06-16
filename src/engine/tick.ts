@@ -1,31 +1,29 @@
 import { stepAi } from "./ai";
-import { resolveAdjacentCombat } from "./combat";
+import { resolveSameTileCombat } from "./combat";
 import { advanceMarching } from "./movement";
-import { applyCastleOverflow } from "./overflow";
 import { produce } from "./production";
 import type { GameState } from "./types";
 import { applyDefeats } from "./victory";
 
+// PRD §3.2 v1.2 step order:
+//   1. movement + arrival addition (advanceMarching: marching stacks step
+//      forward; arrivals merge into same-faction occupant or land as new)
+//   2. production (castle owner's occupant gains +1; behaves as an extra
+//      reinforcement on contested castle tiles since combat damage runs after)
+//   3. combat (resolveSameTileCombat: per-contested-tile step-function ramp
+//      with defender tick-0 advantage and multi-party independent attacks)
+//   4. defeats (faction without castleOwner occupant on its own castle →
+//      defeated; remnants → NEUTRAL, marching stacks dropped)
+//   5. victory check is caller-side (evaluateOutcome reads state)
+//
+// stepAi() stays at the top for the same reason as v1.1 — when AI logic is
+// restored its dispatches must hit marchingStacks before advanceMarching.
+// Today it is a no-op (PRD §9.1 v1.2 stub).
 export function step(state: GameState): GameState {
-  // PRD §3.2 v1.1 settlement order. AI evaluation sits at the top of the tick
-  // because its dispatches must be in marchingStacks before advanceMarching
-  // runs (newly dispatched stacks advance idx 0 → 1 in the same tick, per
-  // §3.5.3). §3.6.1 adjacent-claim phase was removed in v0.12; §3.7 drain
-  // phase was removed in v1.1 — engagement counter advance is now folded into
-  // resolveAdjacentCombat.
   let s = stepAi(state);
   s = advanceMarching(s);
-  s = resolveAdjacentCombat(s).state;
-  // §3.2 step 3: castle captured this tick triggers faction defeat. Runs
-  // before produce so a dying faction can't push out an extra count.
-  s = applyDefeats(s);
   s = produce(s);
-  // §3.2 v0.11: castle overflow runs after produce so any freshly produced
-  // unit that pushes the castle above CASTLE_OVERFLOW_THRESHOLD can ship out
-  // the same tick. Stays before upgrade because tier is derived on read —
-  // deriveTier on next access reflects the post-overflow count.
-  s = applyCastleOverflow(s);
-  // §3.2 step 5 (tier upgrade) is implicit — deriveTier is recomputed on read.
-  // §3.2 step 6 (victory) is caller-side: evaluateOutcome reads state.
+  s = resolveSameTileCombat(s).state;
+  s = applyDefeats(s);
   return { ...s, tick: s.tick + 1 };
 }

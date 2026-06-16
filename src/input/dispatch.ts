@@ -5,6 +5,7 @@ import {
   type DispatchRatio,
   type DispatchResult,
 } from "@/engine/movement";
+import { derivedOwner } from "@/engine/state";
 import type { FactionId, GameState, TileId } from "@/engine/types";
 
 import type { PointerButton } from "./pointer";
@@ -50,11 +51,13 @@ export function createDispatchController(
     if (button !== "left") return;
     const state = deps.getState();
     const src = state.provinces.get(id);
-    // PRD §3.5.1: dispatch must originate from a player-owned tile with count > 0.
-    // UI layer is responsible for rejecting non-player origins (engine still
-    // double-checks in dispatch()).
-    if (src === undefined || src.owner !== deps.playerFaction) return;
-    if (src.count <= 0) return;
+    // PRD §3.5.1 v1.2: dispatch must originate from a tile uniquely owned by
+    // the player (single own-faction occupant). UI rejects non-player /
+    // contested origins early; engine `dispatch()` double-checks.
+    if (src === undefined) return;
+    if (derivedOwner(src) !== deps.playerFaction) return;
+    const ownerOccupant = src.occupants[0];
+    if (ownerOccupant === undefined || ownerOccupant.amount <= 0) return;
     activeFrom = id;
   }
 

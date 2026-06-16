@@ -2,7 +2,7 @@ import {
   cancelMarchingStack,
   dispatch as engineDispatch,
 } from "@/engine/movement";
-import { tileId as makeTileId } from "@/engine/state";
+import { derivedOwner, tileId as makeTileId } from "@/engine/state";
 import { step } from "@/engine/tick";
 import type {
   DispatchRatio,
@@ -207,7 +207,7 @@ async function bootstrap(): Promise<void> {
       stopTicker();
       let playerTiles = 0;
       for (const p of state.provinces.values()) {
-        if (p.owner === PLAYER_FACTION) playerTiles += 1;
+        if (derivedOwner(p) === PLAYER_FACTION) playerTiles += 1;
       }
       const playerWon = outcome.winner === PLAYER_FACTION;
       endScreen.show({

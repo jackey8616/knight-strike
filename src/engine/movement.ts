@@ -1,11 +1,19 @@
-import { parseTileId, tileId } from "./state";
+import {
+  derivedOwner,
+  findOccupant,
+  isContested,
+  parseTileId,
+  tileId,
+} from "./state";
 import type {
   FactionId,
   GameState,
   MarchingStack,
+  Occupant,
   Province,
   TileId,
 } from "./types";
+import { createRng } from "./util/rng";
 
 const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
   [1, 0],
@@ -14,17 +22,21 @@ const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
   [0, -1],
 ];
 
+// PRD §3.5.2 (v1.2): intermediate tiles in a BFS path must be either empty
+// (no occupants) or single-faction self-owned. Any hostile occupant — even
+// alongside friendly ones — blocks transit, since arriving at a contested
+// tile triggers force-join (§3.5.4 #2(e)) and the stack can't reach further
+// down the original path.
 function isPassableIntermediate(
   province: Province | undefined,
   faction: FactionId,
 ): boolean {
   if (province === undefined) return false;
-  if (province.owner === faction) return true;
-  // PRD §3.5.2 (v1.1 amendment): any empty tile is passable regardless of
-  // owner. Combined with the walk-through claim in §3.5.4 this lets stacks
-  // cut across abandoned enemy frontier and pick up the territory in transit.
-  // Enemy-garrisoned tiles (count > 0) remain walls.
-  return province.count === 0;
+  if (province.occupants.length === 0) return true;
+  for (const o of province.occupants) {
+    if (o.faction !== faction) return false;
+  }
+  return true;
 }
 
 export function findPath(
@@ -37,7 +49,9 @@ export function findPath(
   const source = state.provinces.get(from);
   const target = state.provinces.get(to);
   if (source === undefined || target === undefined) return null;
-  if (source.owner !== faction) return null;
+  // PRD §3.5.1: dispatch must originate from a fully-owned source tile
+  // (single own-faction occupant). Contested or empty source = no dispatch.
+  if (derivedOwner(source) !== faction) return null;
 
   const parent = new Map<TileId, TileId>();
   const visited = new Set<TileId>([from]);
@@ -56,7 +70,6 @@ export function findPath(
       visited.add(nid);
       parent.set(nid, current);
       if (nid === to) {
-        // PRD §3.5.2: target tile is exempt from passable; reached → reconstruct.
         const path: TileId[] = [to];
         let cur: TileId = to;
         while (cur !== from) {
@@ -68,12 +81,9 @@ export function findPath(
         path.reverse();
         return path;
       }
-      if (isPassableIntermediate(np, faction)) {
-        queue.push(nid);
-      }
+      if (isPassableIntermediate(np, faction)) queue.push(nid);
     }
   }
-
   return null;
 }
 
@@ -83,11 +93,6 @@ export type DispatchCommand = {
   readonly from: TileId;
   readonly to: TileId;
   readonly ratio: DispatchRatio;
-  // AI-internal escape hatch: when set, the exact count to dispatch overrides
-  // the ratio-derived value. Used by §4.1 rule #2 castle-tier branching and
-  // rule #3 "all but 1" attack. Player-facing dispatches never set this and
-  // keep the ratio-only semantic (so AC-16's 100% behaviour is unchanged).
-  // Castle-min-1 still applies on top.
   readonly forceCount?: number;
 };
 
@@ -110,20 +115,43 @@ export type DispatchResult =
       readonly reason: DispatchFailureReason;
     };
 
+// Update a province by replacing the occupant of `faction` with a new
+// amount; drop the occupant entirely if amount reaches 0. Returns the new
+// province (immutable copy).
+function withOccupantAmount(
+  province: Province,
+  faction: FactionId,
+  newAmount: number,
+): Province {
+  const next: Occupant[] = [];
+  for (const o of province.occupants) {
+    if (o.faction !== faction) {
+      next.push(o);
+      continue;
+    }
+    if (newAmount > 0) next.push({ ...o, amount: newAmount });
+    // amount <= 0 → drop occupant
+  }
+  return { ...province, occupants: next };
+}
+
 export function dispatch(state: GameState, cmd: DispatchCommand): DispatchResult {
   const source = state.provinces.get(cmd.from);
   if (source === undefined) return { ok: false, state, reason: "no-source" };
-  if (source.owner === "NEUTRAL") {
+
+  const ownerFaction = derivedOwner(source);
+  if (ownerFaction === null || ownerFaction === "NEUTRAL") {
     return { ok: false, state, reason: "wrong-owner" };
   }
-  if (source.count <= 0) return { ok: false, state, reason: "no-count" };
-  // PRD §3.5.1 castle reserve: a castle source must always leave ≥ 1 behind.
-  // When count == 1 the dispatch is impossible — fail early to keep AC-16 honest.
-  if (source.isCastle && source.count <= 1) {
+  const occupant = findOccupant(source, ownerFaction);
+  if (occupant === undefined || occupant.amount <= 0) {
+    return { ok: false, state, reason: "no-count" };
+  }
+  if (source.isCastle && occupant.amount <= 1) {
     return { ok: false, state, reason: "castle-min-1" };
   }
 
-  const faction = source.owner;
+  const faction = ownerFaction;
   const path = findPath(state, cmd.from, cmd.to, faction);
   if (path === null || path.length < 2) {
     return { ok: false, state, reason: "no-path" };
@@ -131,14 +159,15 @@ export function dispatch(state: GameState, cmd: DispatchCommand): DispatchResult
 
   let toSend: number;
   if (cmd.forceCount !== undefined) {
-    toSend = Math.max(1, Math.min(cmd.forceCount, source.count));
+    toSend = Math.max(1, Math.min(cmd.forceCount, occupant.amount));
   } else {
-    toSend = Math.max(1, Math.floor(source.count * cmd.ratio));
-    toSend = Math.min(toSend, source.count);
+    toSend = Math.max(1, Math.floor(occupant.amount * cmd.ratio));
+    toSend = Math.min(toSend, occupant.amount);
   }
   if (source.isCastle) {
-    toSend = Math.min(toSend, source.count - 1);
+    toSend = Math.min(toSend, occupant.amount - 1);
   }
+  if (toSend <= 0) return { ok: false, state, reason: "no-count" };
 
   const stack: MarchingStack = {
     id: `mstack:${state.nextMarchingId}`,
@@ -149,30 +178,28 @@ export function dispatch(state: GameState, cmd: DispatchCommand): DispatchResult
     dispatchedAtTick: state.tick,
   };
 
-  const newSource: Province = { ...source, count: source.count - toSend };
+  const newSource = withOccupantAmount(source, faction, occupant.amount - toSend);
   const newProvinces = new Map<TileId, Province>(state.provinces);
   newProvinces.set(cmd.from, newSource);
 
-  const newState: GameState = {
-    ...state,
-    provinces: newProvinces,
-    marchingStacks: [...state.marchingStacks, stack],
-    nextMarchingId: state.nextMarchingId + 1,
+  return {
+    ok: true,
+    state: {
+      ...state,
+      provinces: newProvinces,
+      marchingStacks: [...state.marchingStacks, stack],
+      nextMarchingId: state.nextMarchingId + 1,
+    },
+    stack,
   };
-
-  return { ok: true, state: newState, stack };
 }
 
 export type CancelResult =
   | { readonly ok: true; readonly state: GameState }
   | { readonly ok: false; readonly state: GameState; readonly reason: "not-found" };
 
-// PRD §3.5.4 (v1.1 amendment): player-initiated cancel. The stack lands at its
-// current tile (path[idx]). If the tile is owned by the stack's faction the
-// count is merged into the garrison; if it's empty (NEUTRAL or enemy with
-// count = 0) the owner flips and the count is dropped. Garrisoned enemy is
-// impossible at path[idx] (BFS never traverses one as an intermediate) so we
-// just refuse defensively to keep the function total.
+// Player cancel — drop the stack back onto its current tile as if it had
+// just arrived (force-join semantics if the current tile is contested).
 export function cancelMarchingStack(
   state: GameState,
   stackId: string,
@@ -185,22 +212,7 @@ export function cancelMarchingStack(
   if (province === undefined) return { ok: false, state, reason: "not-found" };
 
   const newProvinces = new Map(state.provinces);
-  if (province.owner === stack.faction) {
-    newProvinces.set(tileAt, {
-      ...province,
-      count: province.count + stack.count,
-    });
-  } else if (province.count === 0) {
-    newProvinces.set(tileAt, {
-      ...province,
-      owner: stack.faction,
-      count: stack.count,
-    });
-  } else {
-    // Garrisoned non-self tile — shouldn't be reachable mid-march, but refuse
-    // rather than corrupt the province with a co-occupier.
-    return { ok: false, state, reason: "not-found" };
-  }
+  newProvinces.set(tileAt, mergeArrivalIntoTile(province, stack.faction, stack.count, state.tick));
 
   const newStacks = state.marchingStacks.filter((s) => s.id !== stackId);
   return {
@@ -209,88 +221,78 @@ export function cancelMarchingStack(
   };
 }
 
+// PRD §3.5.4 (v1.2): landing one faction's merged arrival onto a tile.
+// Same-faction occupant present → merge amount. Otherwise add new occupant
+// at currentTick with isDefender=false (combat.ts re-assigns defender on
+// combat start). isDefender=true is only granted in the special path:
+// empty tile + single arriving faction this tick, set by callers via
+// `mergeArrivalIntoTileEmptyFirstArrival`.
+function mergeArrivalIntoTile(
+  province: Province,
+  faction: FactionId,
+  amount: number,
+  currentTick: number,
+): Province {
+  const existing = findOccupant(province, faction);
+  if (existing !== undefined) {
+    const updated = province.occupants.map((o) =>
+      o.faction === faction ? { ...o, amount: o.amount + amount } : o,
+    );
+    return { ...province, occupants: updated };
+  }
+  const newOccupant: Occupant = {
+    faction,
+    amount,
+    arrivalTick: currentTick,
+    isDefender: false,
+  };
+  return { ...province, occupants: [...province.occupants, newOccupant] };
+}
+
+function mergeArrivalIntoTileAsDefender(
+  province: Province,
+  faction: FactionId,
+  amount: number,
+  currentTick: number,
+): Province {
+  const existing = findOccupant(province, faction);
+  if (existing !== undefined) {
+    const updated = province.occupants.map((o) =>
+      o.faction === faction ? { ...o, amount: o.amount + amount } : o,
+    );
+    return { ...province, occupants: updated };
+  }
+  const newOccupant: Occupant = {
+    faction,
+    amount,
+    arrivalTick: currentTick,
+    isDefender: true,
+  };
+  return { ...province, occupants: [...province.occupants, newOccupant] };
+}
+
 type AdvanceIntent = {
   readonly stack: MarchingStack;
-  readonly newIdx: number;
-  readonly newTile: TileId;
-  readonly stalled: boolean;
+  readonly nextIdx: number;
+  readonly nextTile: TileId;
+  readonly isTerminus: boolean;
 };
 
 type FactionArrival = {
   readonly faction: FactionId;
   readonly count: number;
+  readonly anyTerminus: boolean;
   readonly chosenPath: readonly TileId[];
   readonly chosenIdx: number;
   readonly chosenDispatchedAtTick: number;
   readonly chosenId: string;
-  readonly atTerminus: boolean;
 };
 
-export function advanceMarching(state: GameState): GameState {
-  if (state.marchingStacks.length === 0) return state;
-
-  const intents: AdvanceIntent[] = [];
-  for (const stack of state.marchingStacks) {
-    const nextIdx = stack.idx + 1;
-    if (nextIdx >= stack.path.length) {
-      // Defensive: a well-formed pipeline resolves stacks on arrival, so this
-      // branch only fires if state was constructed by hand with an out-of-range
-      // idx. Drop the stack rather than throw to keep step() total.
-      continue;
-    }
-    const nextTile = stack.path[nextIdx] as TileId;
-    const isTerminus = nextIdx === stack.path.length - 1;
-    if (isTerminus) {
-      intents.push({ stack, newIdx: nextIdx, newTile: nextTile, stalled: false });
-      continue;
-    }
-    const np = state.provinces.get(nextTile);
-    if (isPassableIntermediate(np, stack.faction)) {
-      intents.push({ stack, newIdx: nextIdx, newTile: nextTile, stalled: false });
-    } else {
-      // PRD §3.5.4 #6 path cut: hold position, idx unchanged.
-      intents.push({
-        stack,
-        newIdx: stack.idx,
-        newTile: stack.path[stack.idx] as TileId,
-        stalled: true,
-      });
-    }
-  }
-
-  const newProvinces = new Map<TileId, Province>(state.provinces);
-  const newStacks: MarchingStack[] = [];
-
-  for (const intent of intents) {
-    if (intent.stalled) newStacks.push(intent.stack);
-  }
-
-  const groups = new Map<TileId, AdvanceIntent[]>();
-  for (const intent of intents) {
-    if (intent.stalled) continue;
-    const list = groups.get(intent.newTile);
-    if (list === undefined) groups.set(intent.newTile, [intent]);
-    else list.push(intent);
-  }
-
-  for (const [tile, group] of groups) {
-    resolveArrival(tile, group, newProvinces, newStacks);
-  }
-
-  return {
-    ...state,
-    provinces: newProvinces,
-    marchingStacks: newStacks,
-  };
-}
-
-function mergeFactionArrival(
+function mergeFactionArrivals(
   faction: FactionId,
   intents: readonly AdvanceIntent[],
 ): FactionArrival {
-  const anyTerminus = intents.some(
-    (i) => i.newIdx === i.stack.path.length - 1,
-  );
+  const anyTerminus = intents.some((i) => i.isTerminus);
 
   let totalCount = 0;
   let earliestDispatched = (intents[0] as AdvanceIntent).stack.dispatchedAtTick;
@@ -303,15 +305,13 @@ function mergeFactionArrival(
 
   let chosen: AdvanceIntent;
   if (anyTerminus) {
-    chosen = intents.find(
-      (i) => i.newIdx === i.stack.path.length - 1,
-    ) as AdvanceIntent;
+    chosen = intents.find((i) => i.isTerminus) as AdvanceIntent;
   } else {
-    // PRD §3.5.4 #2 path selection: fewest remaining steps wins;
-    // tiebreak on earlier dispatchedAtTick; final tiebreak on id (lex).
+    // PRD §3.5.4 #1 path pick: fewest remaining steps; tiebreak on earliest
+    // dispatched; final tiebreak on id (lex).
     const ranked = intents.slice().sort((a, b) => {
-      const remA = a.stack.path.length - 1 - a.newIdx;
-      const remB = b.stack.path.length - 1 - b.newIdx;
+      const remA = a.stack.path.length - 1 - a.nextIdx;
+      const remB = b.stack.path.length - 1 - b.nextIdx;
       if (remA !== remB) return remA - remB;
       if (a.stack.dispatchedAtTick !== b.stack.dispatchedAtTick) {
         return a.stack.dispatchedAtTick - b.stack.dispatchedAtTick;
@@ -324,193 +324,173 @@ function mergeFactionArrival(
   return {
     faction,
     count: totalCount,
+    anyTerminus,
     chosenPath: chosen.stack.path,
-    chosenIdx: chosen.newIdx,
+    chosenIdx: chosen.nextIdx,
     chosenDispatchedAtTick: earliestDispatched,
     chosenId: chosen.stack.id,
-    atTerminus: anyTerminus,
   };
 }
 
-function resolveArrival(
+// Deterministic shuffle of a small list (used when 2+ factions co-arrive on
+// an empty tile and the defender slot must be assigned by RNG).
+function hashTileId(id: TileId): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+
+function pickInitialDefenderFromTies(
+  state: GameState,
   tile: TileId,
-  group: readonly AdvanceIntent[],
-  newProvinces: Map<TileId, Province>,
-  newStacks: MarchingStack[],
-): void {
-  const byFaction = new Map<FactionId, AdvanceIntent[]>();
-  for (const intent of group) {
-    const f = intent.stack.faction;
-    const list = byFaction.get(f);
-    if (list === undefined) byFaction.set(f, [intent]);
+  factions: readonly FactionId[],
+): FactionId {
+  if (factions.length === 1) return factions[0] as FactionId;
+  const sorted = [...factions].sort();
+  const rng = createRng((state.rngSeed ^ hashTileId(tile) ^ state.tick) >>> 0);
+  for (let i = sorted.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = sorted[i] as FactionId;
+    sorted[i] = sorted[j] as FactionId;
+    sorted[j] = tmp;
+  }
+  return sorted[0] as FactionId;
+}
+
+export function advanceMarching(state: GameState): GameState {
+  if (state.marchingStacks.length === 0) return state;
+
+  const intents: AdvanceIntent[] = [];
+  for (const stack of state.marchingStacks) {
+    const nextIdx = stack.idx + 1;
+    if (nextIdx >= stack.path.length) continue;
+    const nextTile = stack.path[nextIdx] as TileId;
+    const isTerminus = nextIdx === stack.path.length - 1;
+    intents.push({ stack, nextIdx, nextTile, isTerminus });
+  }
+
+  if (intents.length === 0) {
+    // All marching stacks have invalid idx — drop them defensively.
+    return { ...state, marchingStacks: [] };
+  }
+
+  // Group intents by tile
+  const byTile = new Map<TileId, AdvanceIntent[]>();
+  for (const intent of intents) {
+    const list = byTile.get(intent.nextTile);
+    if (list === undefined) byTile.set(intent.nextTile, [intent]);
     else list.push(intent);
   }
 
-  const arrivals: FactionArrival[] = [];
-  for (const [faction, intents] of byFaction) {
-    arrivals.push(mergeFactionArrival(faction, intents));
-  }
+  const newProvinces = new Map<TileId, Province>(state.provinces);
+  const continuingStacks: MarchingStack[] = [];
 
-  if (arrivals.length === 1) {
-    resolveSingleFactionArrival(
-      arrivals[0] as FactionArrival,
-      tile,
-      newProvinces,
-      newStacks,
+  for (const [tile, group] of byTile) {
+    const province = newProvinces.get(tile);
+    if (province === undefined) continue;
+
+    // Merge same-faction intents on this tile (§3.5.4 #1)
+    const byFaction = new Map<FactionId, AdvanceIntent[]>();
+    for (const intent of group) {
+      const list = byFaction.get(intent.stack.faction);
+      if (list === undefined) byFaction.set(intent.stack.faction, [intent]);
+      else list.push(intent);
+    }
+    const arrivals: FactionArrival[] = [];
+    for (const [faction, intents] of byFaction) {
+      arrivals.push(mergeFactionArrivals(faction, intents));
+    }
+
+    // Determine final faction set on the tile after this tick's arrivals.
+    // forceJoin = the resulting tile would be contested (2+ distinct factions).
+    const existingFactions = new Set<FactionId>(
+      province.occupants.map((o) => o.faction),
     );
-  } else {
-    resolveHeadOnCollision(arrivals, tile, newProvinces, newStacks);
-  }
-}
+    const arrivingFactions = new Set<FactionId>(arrivals.map((a) => a.faction));
+    const allFactions = new Set<FactionId>();
+    for (const f of existingFactions) allFactions.add(f);
+    for (const f of arrivingFactions) allFactions.add(f);
+    const forceJoin = allFactions.size >= 2;
 
-function continueAsMarching(
-  arrival: FactionArrival,
-  surviving: number,
-  newStacks: MarchingStack[],
-): void {
-  if (surviving <= 0) return;
-  newStacks.push({
-    id: arrival.chosenId,
-    faction: arrival.faction,
-    count: surviving,
-    path: arrival.chosenPath,
-    idx: arrival.chosenIdx,
-    dispatchedAtTick: arrival.chosenDispatchedAtTick,
-  });
-}
+    let workingProvince: Province = province;
 
-function resolveSingleFactionArrival(
-  arrival: FactionArrival,
-  tile: TileId,
-  newProvinces: Map<TileId, Province>,
-  newStacks: MarchingStack[],
-): void {
-  const province = newProvinces.get(tile);
-  if (province === undefined) return;
-
-  if (province.owner === arrival.faction) {
-    if (arrival.atTerminus) {
-      // PRD §3.5.4 #1 terminus branch: marching count joins garrison.
-      newProvinces.set(tile, {
-        ...province,
-        count: province.count + arrival.count,
-      });
-    } else {
-      // Non-terminus through own tile: pass through without disturbing garrison.
-      continueAsMarching(arrival, arrival.count, newStacks);
-    }
-    return;
-  }
-
-  if (province.count === 0) {
-    // PRD §3.5.4 (v1.1 amendment): walk-through claim. Empty intermediate
-    // tiles (neutral-empty or enemy-empty) flip owner to the marching faction
-    // and the stack continues forward; count on the tile stays 0 because the
-    // troops are still in transit. At terminus we additionally drop the count
-    // and stop, matching the pre-v1.1 behaviour.
-    if (arrival.atTerminus) {
-      newProvinces.set(tile, {
-        ...province,
-        owner: arrival.faction,
-        count: arrival.count,
-      });
-    } else {
-      if (province.owner !== arrival.faction) {
-        newProvinces.set(tile, { ...province, owner: arrival.faction });
+    for (const arrival of arrivals) {
+      const landing = forceJoin || arrival.anyTerminus;
+      if (landing) {
+        // Decide whether this arrival becomes the initial defender of a
+        // brand-new empty tile (single arriving faction, no existing
+        // occupants). Otherwise isDefender=false; combat.ts may re-assign on
+        // combat start.
+        const tileWasEmpty = existingFactions.size === 0;
+        const onlyOneArrivingFaction = arrivals.length === 1;
+        const becomesDefender =
+          tileWasEmpty && onlyOneArrivingFaction && !forceJoin;
+        if (becomesDefender) {
+          workingProvince = mergeArrivalIntoTileAsDefender(
+            workingProvince,
+            arrival.faction,
+            arrival.count,
+            state.tick,
+          );
+        } else {
+          workingProvince = mergeArrivalIntoTile(
+            workingProvince,
+            arrival.faction,
+            arrival.count,
+            state.tick,
+          );
+        }
+      } else {
+        // Pass through — single-faction, no terminus, no force-join.
+        continuingStacks.push({
+          id: arrival.chosenId,
+          faction: arrival.faction,
+          count: arrival.count,
+          path: arrival.chosenPath,
+          idx: arrival.chosenIdx,
+          dispatchedAtTick: arrival.chosenDispatchedAtTick,
+        });
       }
-      continueAsMarching(arrival, arrival.count, newStacks);
     }
-    return;
-  }
 
-  if (!arrival.atTerminus) {
-    // Garrisoned enemy on the path mid-flight — BFS should never produce this,
-    // so just drop the stack defensively.
-    return;
-  }
-
-  // PRD §3.5.4 #5 (v1.1) marching vs garrison: garrison plays terminus side;
-  // one-shot engagementTicks = 1 → both sides lose 1. No persistent pair is
-  // recorded since this is a transient arrival event.
-  const survOwn = Math.max(0, arrival.count - 1);
-  const survOpp = Math.max(0, province.count - 1);
-
-  if (survOwn === 0 && survOpp === 0) {
-    newProvinces.set(tile, { ...province, count: 0 });
-  } else if (survOwn > 0 && survOpp === 0) {
-    newProvinces.set(tile, {
-      ...province,
-      owner: arrival.faction,
-      count: survOwn,
-    });
-  } else if (survOwn === 0 && survOpp > 0) {
-    newProvinces.set(tile, { ...province, count: survOpp });
-  } else {
-    // Both alive: defender keeps the tile (terminus-side wins ties); attacker
-    // survivors are destroyed since they can't co-occupy.
-    newProvinces.set(tile, { ...province, count: survOpp });
-  }
-}
-
-function resolveHeadOnCollision(
-  arrivals: readonly FactionArrival[],
-  tile: TileId,
-  newProvinces: Map<TileId, Province>,
-  newStacks: MarchingStack[],
-): void {
-  const province = newProvinces.get(tile);
-  if (province === undefined) return;
-
-  // PRD §3.5.4 #4 (v1.1) head-on: one-shot engagementTicks = 1 vs every other
-  // faction at the tile. Each arrival loses 1 per opposing arrival; multi-way
-  // (3+) collisions stack linearly. No persistent pair is recorded.
-  const losses = arrivals.map(() => arrivals.length - 1);
-  const survivors = arrivals.map((a, i) =>
-    Math.max(0, a.count - (losses[i] as number)),
-  );
-
-  // Non-terminus survivors keep marching (sub-scenario b). Terminus survivors
-  // compete for the tile.
-  const aliveAtTerminus: { arrival: FactionArrival; surviving: number }[] = [];
-  for (let i = 0; i < arrivals.length; i++) {
-    const a = arrivals[i] as FactionArrival;
-    const surv = survivors[i] as number;
-    if (surv <= 0) continue;
-    if (a.atTerminus) {
-      aliveAtTerminus.push({ arrival: a, surviving: surv });
-    } else {
-      continueAsMarching(a, surv, newStacks);
-    }
-  }
-
-  if (aliveAtTerminus.length === 0) return;
-
-  if (aliveAtTerminus.length === 1) {
-    const winner = aliveAtTerminus[0] as { arrival: FactionArrival; surviving: number };
-    newProvinces.set(tile, {
-      ...province,
-      owner: winner.arrival.faction,
-      count: winner.surviving,
-    });
-    return;
-  }
-
-  // Multiple terminus winners (rare 3+-way arrival): higher surviving count
-  // wins; deterministic tiebreak by faction id lex.
-  let best = aliveAtTerminus[0] as { arrival: FactionArrival; surviving: number };
-  for (let i = 1; i < aliveAtTerminus.length; i++) {
-    const cand = aliveAtTerminus[i] as { arrival: FactionArrival; surviving: number };
+    // §3.5.4 #3: when 2+ factions co-arrived on a previously-empty tile this
+    // tick, assign one as initial defender via RNG. This pre-stages the
+    // defender flag so combat.ts assignDefender can re-derive the same pick
+    // (smallest arrivalTick + RNG tiebreak with the same seed → same result).
     if (
-      cand.surviving > best.surviving ||
-      (cand.surviving === best.surviving &&
-        cand.arrival.faction < best.arrival.faction)
+      forceJoin &&
+      existingFactions.size === 0 &&
+      arrivingFactions.size >= 2
     ) {
-      best = cand;
+      const chosenDefender = pickInitialDefenderFromTies(
+        state,
+        tile,
+        [...arrivingFactions],
+      );
+      const adjusted = workingProvince.occupants.map((o) =>
+        o.arrivalTick === state.tick && arrivingFactions.has(o.faction)
+          ? { ...o, isDefender: o.faction === chosenDefender }
+          : o,
+      );
+      workingProvince = { ...workingProvince, occupants: adjusted };
     }
+
+    // When force-join into an already-occupied tile, ensure the newly added
+    // occupants are isDefender=false (mergeArrivalIntoTile already does this,
+    // so nothing extra here).
+
+    // If the tile transitions into contested this tick, combat.ts will fill in
+    // combatStartTick at the next combat step. No-op here.
+    newProvinces.set(tile, workingProvince);
   }
-  newProvinces.set(tile, {
-    ...province,
-    owner: best.arrival.faction,
-    count: best.surviving,
-  });
+
+  return {
+    ...state,
+    provinces: newProvinces,
+    marchingStacks: continuingStacks,
+  };
 }
+
+// Convenience re-export so callers reading derived ownership can do so
+// alongside dispatch / findPath without a second import.
+export { derivedOwner, isContested };
