@@ -1,7 +1,9 @@
 import {
   Container,
+  Rectangle,
   Sprite,
   Text,
+  type FederatedPointerEvent,
   type TextStyleOptions,
   type Texture,
 } from "pixi.js";
@@ -33,11 +35,21 @@ type MarchGfx = {
   prevTile: TileId;
 };
 
+export type MarchingRendererEvents = {
+  readonly onCancel?: (stackId: string) => void;
+};
+
 export type MarchingRenderer = {
   readonly container: Container;
   update(state: GameState, tickIntervalMs: number): void;
   destroy(): void;
 };
+
+// Hit-test box around the sprite. Generous enough that the player doesn't need
+// pixel-perfect aim on a moving target, snug enough that adjacent stacks don't
+// overlap. Drawn in node-local coords centred on (0,0).
+const HIT_HALF_W = 18;
+const HIT_HALF_H = 22;
 
 function tileCenter(id: TileId): { x: number; y: number } {
   const { x, y } = parseTileId(id);
@@ -50,6 +62,7 @@ function spriteScale(texture: Texture): number {
 
 export function createMarchingRenderer(
   textures: TierTextures,
+  events: MarchingRendererEvents = {},
 ): MarchingRenderer {
   const container = new Container();
   container.sortableChildren = true;
@@ -79,6 +92,26 @@ export function createMarchingRenderer(
     text.anchor.set(0.5, 1);
     text.position.set(0, TILE_HEIGHT / 2);
     node.addChild(text);
+
+    // Right-click cancel hit area. Pixi v8 emits `rightdown` for the secondary
+    // pointer button; the controller catches the event before our window-level
+    // pointer listener so the press doesn't auto-pause via the canvas DOM
+    // pointerdown either.
+    if (events.onCancel !== undefined) {
+      const stackId = stack.id;
+      node.eventMode = "static";
+      node.cursor = "pointer";
+      node.hitArea = new Rectangle(
+        -HIT_HALF_W,
+        -HIT_HALF_H,
+        HIT_HALF_W * 2,
+        HIT_HALF_H * 2,
+      );
+      node.on("rightdown", (e: FederatedPointerEvent) => {
+        e.stopPropagation();
+        events.onCancel?.(stackId);
+      });
+    }
 
     return { node, sprite, count: text, prevTile: start };
   }

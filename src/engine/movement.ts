@@ -21,9 +21,11 @@ function isPassableIntermediate(
 ): boolean {
   if (province === undefined) return false;
   if (province.owner === faction) return true;
-  // PRD §3.5.2 passable rule: own faction tiles OR empty neutral. Anything else
-  // (enemy with garrison, enemy empty, neutral with bandits) is wall to BFS.
-  return province.owner === "NEUTRAL" && province.count === 0;
+  // PRD §3.5.2 (v1.1 amendment): any empty tile is passable regardless of
+  // owner. Combined with the walk-through claim in §3.5.4 this lets stacks
+  // cut across abandoned enemy frontier and pick up the territory in transit.
+  // Enemy-garrisoned tiles (count > 0) remain walls.
+  return province.count === 0;
 }
 
 export function findPath(
@@ -160,6 +162,52 @@ export function dispatch(state: GameState, cmd: DispatchCommand): DispatchResult
   };
 
   return { ok: true, state: newState, stack };
+}
+
+export type CancelResult =
+  | { readonly ok: true; readonly state: GameState }
+  | { readonly ok: false; readonly state: GameState; readonly reason: "not-found" };
+
+// PRD §3.5.4 (v1.1 amendment): player-initiated cancel. The stack lands at its
+// current tile (path[idx]). If the tile is owned by the stack's faction the
+// count is merged into the garrison; if it's empty (NEUTRAL or enemy with
+// count = 0) the owner flips and the count is dropped. Garrisoned enemy is
+// impossible at path[idx] (BFS never traverses one as an intermediate) so we
+// just refuse defensively to keep the function total.
+export function cancelMarchingStack(
+  state: GameState,
+  stackId: string,
+): CancelResult {
+  const idx = state.marchingStacks.findIndex((s) => s.id === stackId);
+  if (idx < 0) return { ok: false, state, reason: "not-found" };
+  const stack = state.marchingStacks[idx] as MarchingStack;
+  const tileAt = stack.path[stack.idx] as TileId;
+  const province = state.provinces.get(tileAt);
+  if (province === undefined) return { ok: false, state, reason: "not-found" };
+
+  const newProvinces = new Map(state.provinces);
+  if (province.owner === stack.faction) {
+    newProvinces.set(tileAt, {
+      ...province,
+      count: province.count + stack.count,
+    });
+  } else if (province.count === 0) {
+    newProvinces.set(tileAt, {
+      ...province,
+      owner: stack.faction,
+      count: stack.count,
+    });
+  } else {
+    // Garrisoned non-self tile — shouldn't be reachable mid-march, but refuse
+    // rather than corrupt the province with a co-occupier.
+    return { ok: false, state, reason: "not-found" };
+  }
+
+  const newStacks = state.marchingStacks.filter((s) => s.id !== stackId);
+  return {
+    ok: true,
+    state: { ...state, provinces: newProvinces, marchingStacks: newStacks },
+  };
 }
 
 type AdvanceIntent = {
@@ -356,8 +404,11 @@ function resolveSingleFactionArrival(
   }
 
   if (province.count === 0) {
-    // Empty tile (neutral-empty or enemy-empty). At terminus we claim it;
-    // otherwise we treat it as a passable intermediate and continue.
+    // PRD §3.5.4 (v1.1 amendment): walk-through claim. Empty intermediate
+    // tiles (neutral-empty or enemy-empty) flip owner to the marching faction
+    // and the stack continues forward; count on the tile stays 0 because the
+    // troops are still in transit. At terminus we additionally drop the count
+    // and stop, matching the pre-v1.1 behaviour.
     if (arrival.atTerminus) {
       newProvinces.set(tile, {
         ...province,
@@ -365,6 +416,9 @@ function resolveSingleFactionArrival(
         count: arrival.count,
       });
     } else {
+      if (province.owner !== arrival.faction) {
+        newProvinces.set(tile, { ...province, owner: arrival.faction });
+      }
       continueAsMarching(arrival, arrival.count, newStacks);
     }
     return;

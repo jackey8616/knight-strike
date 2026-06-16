@@ -11,6 +11,11 @@ export type PointerHandlers = {
   onDragMove?(currentId: TileId | null, button: PointerButton): void;
   onDragEnd?(currentId: TileId | null, button: PointerButton): void;
   onDragCancel?(button: PointerButton): void;
+  // Fires the moment a press begins (before drag-threshold is decided) and
+  // when it resolves (click, drag-end, or cancel). Lets the main loop
+  // auto-pause game time during any pointer interaction.
+  onPressStart?(button: PointerButton): void;
+  onPressEnd?(button: PointerButton): void;
 };
 
 export type PointerController = {
@@ -55,6 +60,7 @@ export function createPointerController(
     } else if (commit === "click") {
       handlers.onTileClick?.(sourceId, button);
     }
+    handlers.onPressEnd?.(button);
   }
 
   function onPointerDown(e: PointerEvent): void {
@@ -69,6 +75,7 @@ export function createPointerController(
       sourceId: hoverId,
       dragging: false,
     };
+    handlers.onPressStart?.(button);
   }
 
   function onPointerMove(e: PointerEvent): void {

@@ -1,4 +1,7 @@
-import { dispatch as engineDispatch } from "@/engine/movement";
+import {
+  cancelMarchingStack,
+  dispatch as engineDispatch,
+} from "@/engine/movement";
 import { tileId as makeTileId } from "@/engine/state";
 import { step } from "@/engine/tick";
 import type {
@@ -45,6 +48,11 @@ async function bootstrap(): Promise<void> {
 
   let paused = false;
   let speed: Speed = 1;
+  // True when the current pause was driven by an in-flight pointer interaction
+  // (auto-pause-on-press, PRD §5.3 v1.1 amendment). Cleared whenever the user
+  // manually toggles pause via Space / HUD / keyboard so a deliberate pause
+  // isn't unpaused on pointer-up.
+  let autoPausedByPress = false;
 
   function intervalForSpeed(s: Speed): number {
     return TICK_INTERVAL_MS / s;
@@ -63,7 +71,19 @@ async function bootstrap(): Promise<void> {
   const units = createUnitsRenderer(state, tierTextures);
   board.container.addChild(units.container);
 
-  const marching = createMarchingRenderer(tierTextures);
+  const marching = createMarchingRenderer(tierTextures, {
+    onCancel: (stackId) => {
+      // Only the player faction can cancel its own marching stacks; AI / NEUTRAL
+      // stacks are ignored at the engine layer too, but keep the UI honest.
+      const target = state.marchingStacks.find((s) => s.id === stackId);
+      if (target === undefined || target.faction !== PLAYER_FACTION) return;
+      const result = cancelMarchingStack(state, stackId);
+      if (result.ok) {
+        state = result.state;
+        renderAll();
+      }
+    },
+  });
   board.container.addChild(marching.container);
 
   const paths = createPathRenderer();
@@ -120,6 +140,22 @@ async function bootstrap(): Promise<void> {
     onDragMove: (id, button) => dispatchCtrl.handleDragMove(id, button),
     onDragEnd: (id, button) => dispatchCtrl.handleDragEnd(id, button),
     onDragCancel: (button) => dispatchCtrl.handleDragCancel(button),
+    onPressStart: () => {
+      // PRD §5.3 v1.1 amendment: pause while the player is interacting. Skip
+      // if the game has already ended (end screen up) or is paused manually.
+      if (ended || paused) return;
+      autoPausedByPress = true;
+      paused = true;
+      stopTicker();
+      pushHudStatus();
+    },
+    onPressEnd: () => {
+      if (!autoPausedByPress) return;
+      autoPausedByPress = false;
+      paused = false;
+      startTicker();
+      pushHudStatus();
+    },
   });
 
   const ratioPanel = createRatioPanel(
@@ -183,6 +219,10 @@ async function bootstrap(): Promise<void> {
   }
 
   function setPaused(v: boolean): void {
+    // Manual toggle wins over the auto-pause latch: if the player explicitly
+    // pauses or resumes mid-press, the auto-pause-on-release shouldn't
+    // second-guess the next pointer-up.
+    autoPausedByPress = false;
     if (v === paused) return;
     paused = v;
     if (paused) stopTicker();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveAdjacentCombat } from "./combat";
 import {
   advanceMarching,
+  cancelMarchingStack,
   dispatch,
   findPath,
 } from "./movement";
@@ -926,5 +927,191 @@ describe("advanceMarching: purity", () => {
       provinces: [makeProvince(0, 0, "TOKUGAWA", 3)],
     });
     expect(advanceMarching(before)).toBe(before);
+  });
+});
+
+describe("walk-through claim (PRD §3.5.4 v1.1 amendment)", () => {
+  it("intermediate NEUTRAL empty flips owner mid-march, count stays 0", () => {
+    // Path (0,0) own → (1,0) NEUTRAL 0 → (2,0) NEUTRAL 0 (terminus).
+    // After advance: stack at idx 1 on (1,0), (1,0) flipped to TOKUGAWA count 0.
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 3,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 0,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "NEUTRAL", 0),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+
+    const after = advanceMarching(before);
+    const intermediate = after.provinces.get(tileId(1, 0));
+    expect(intermediate?.owner).toBe("TOKUGAWA");
+    expect(intermediate?.count).toBe(0);
+    // Stack still in flight at idx 1, count unchanged.
+    expect(after.marchingStacks).toHaveLength(1);
+    expect(after.marchingStacks[0]?.idx).toBe(1);
+    expect(after.marchingStacks[0]?.count).toBe(3);
+  });
+
+  it("intermediate enemy-empty tile also flips and is passable", () => {
+    // Path through (1,0) which is enemy with count=0. Pre-v1.1 BFS would have
+    // refused to plan this path; post-amendment it's passable + claimed.
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 3,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 0,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "TAKEDA", 0),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+
+    const after = advanceMarching(before);
+    const intermediate = after.provinces.get(tileId(1, 0));
+    expect(intermediate?.owner).toBe("TOKUGAWA");
+    expect(intermediate?.count).toBe(0);
+    expect(after.marchingStacks[0]?.idx).toBe(1);
+  });
+
+  it("findPath routes through enemy-empty per v1.1 §3.5.2 amendment", () => {
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "TAKEDA", 0),
+        makeProvince(2, 0, "NEUTRAL", 0),
+        makeProvince(3, 0, "TAKEDA", 3),
+      ],
+    });
+    const path = findPath(state, tileId(0, 0), tileId(3, 0), "TOKUGAWA");
+    expect(path).toEqual([
+      tileId(0, 0),
+      tileId(1, 0),
+      tileId(2, 0),
+      tileId(3, 0),
+    ]);
+  });
+
+  it("intermediate own tile still passes through without changes", () => {
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 3,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 0,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "TOKUGAWA", 2),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+    const after = advanceMarching(before);
+    // Garrison untouched by pass-through.
+    expect(after.provinces.get(tileId(1, 0))?.owner).toBe("TOKUGAWA");
+    expect(after.provinces.get(tileId(1, 0))?.count).toBe(2);
+  });
+});
+
+describe("cancelMarchingStack (PRD §3.5.4 v1.1 amendment)", () => {
+  it("drops onto own tile → count joins the garrison", () => {
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 1,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "TOKUGAWA", 2),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+    const out = cancelMarchingStack(before, "mstack:1");
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.state.marchingStacks).toHaveLength(0);
+    expect(out.state.provinces.get(tileId(1, 0))?.count).toBe(6);
+    expect(out.state.provinces.get(tileId(1, 0))?.owner).toBe("TOKUGAWA");
+  });
+
+  it("drops onto empty NEUTRAL tile → flips owner + sets count", () => {
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 1,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "NEUTRAL", 0),
+        makeProvince(2, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+    const out = cancelMarchingStack(before, "mstack:1");
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.state.marchingStacks).toHaveLength(0);
+    expect(out.state.provinces.get(tileId(1, 0))?.owner).toBe("TOKUGAWA");
+    expect(out.state.provinces.get(tileId(1, 0))?.count).toBe(4);
+  });
+
+  it("unknown stack id → not-found, state untouched", () => {
+    const before = buildState({
+      provinces: [makeProvince(0, 0, "TOKUGAWA", 3)],
+    });
+    const out = cancelMarchingStack(before, "mstack:does-not-exist");
+    expect(out.ok).toBe(false);
+    expect(out.state).toBe(before);
+  });
+
+  it("purity: returns a new state, leaves input untouched", () => {
+    const stack: MarchingStack = {
+      id: "mstack:1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0)],
+      idx: 0,
+      dispatchedAtTick: 1,
+    };
+    const before = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 3),
+        makeProvince(1, 0, "NEUTRAL", 0),
+      ],
+      marchingStacks: [stack],
+    });
+    const beforeCount = before.marchingStacks.length;
+    const out = cancelMarchingStack(before, "mstack:1");
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.state).not.toBe(before);
+    expect(before.marchingStacks.length).toBe(beforeCount);
+    expect(before.provinces.get(tileId(0, 0))?.count).toBe(3);
   });
 });
