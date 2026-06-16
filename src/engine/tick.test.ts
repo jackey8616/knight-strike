@@ -122,18 +122,32 @@ describe("step is pure (does not mutate input)", () => {
   });
 });
 
-describe("production fires on PRD §3.2 cadence", () => {
-  it("tick 1 → 2: no production (1 is odd)", () => {
+describe("production fires on PRD §3.3 v1.1 cadence (every tick)", () => {
+  it("tick 0 → 1: castle untouched (castles don't produce)", () => {
     const state = buildState({
       provinces: [makeProvince(0, 0, "TOKUGAWA", 3, true)],
+      tick: 0,
+    });
+    const out = step(state);
+    expect(out.tick).toBe(1);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+  });
+
+  it("tick 1 → 2: field garrison +1 (every tick produces under v1.1)", () => {
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 1, true),
+        makeProvince(1, 0, "TOKUGAWA", 4, false),
+      ],
       tick: 1,
     });
     const out = step(state);
     expect(out.tick).toBe(2);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(1);
+    expect((out.provinces.get(tileId(1, 0)) as Province).count).toBe(5);
   });
 
-  it("tick 2 → 3: castle stays static (PRD §3.3 v1.1: castles don't produce)", () => {
+  it("tick 2 → 3: castle stays static even on even tick", () => {
     const state = buildState({
       provinces: [makeProvince(0, 0, "TOKUGAWA", 3, true)],
       tick: 2,
@@ -143,7 +157,7 @@ describe("production fires on PRD §3.2 cadence", () => {
     expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
   });
 
-  it("tick 2 → 3: field garrison +1 (PRD §3.3 v1.1 amendment)", () => {
+  it("tick 2 → 3: field garrison +1 again (consecutive ticks both fire)", () => {
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
@@ -153,18 +167,7 @@ describe("production fires on PRD §3.2 cadence", () => {
     });
     const out = step(state);
     expect(out.tick).toBe(3);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(1);
     expect((out.provinces.get(tileId(1, 0)) as Province).count).toBe(5);
-  });
-
-  it("tick 0 → 1: no production (tick 0 is the initial-state guard)", () => {
-    const state = buildState({
-      provinces: [makeProvince(0, 0, "TOKUGAWA", 3, true)],
-      tick: 0,
-    });
-    const out = step(state);
-    expect(out.tick).toBe(1);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
   });
 });
 
@@ -216,7 +219,9 @@ describe("step composes movement before combat (PRD §3.2 step order)", () => {
     expect(out.marchingStacks.length).toBe(0);
     const claimed = out.provinces.get(tileId(1, 0)) as Province;
     expect(claimed.owner).toBe("TOKUGAWA");
-    expect(claimed.count).toBe(3);
+    // arrival.count (3) is dropped by the §3.5.4 terminus arm, then the §3.3
+    // v1.1 production pass adds +1 because the field tile is now garrisoned.
+    expect(claimed.count).toBe(4);
   });
 });
 

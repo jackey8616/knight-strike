@@ -30,7 +30,7 @@ So the new rule is *not* "castle + universal" — it's "no castle, only field ga
 
 **Was**: every main castle owned by a non-NEUTRAL, undefeated faction produces +1 every 2 ticks.
 
-**Now**: every **non-castle, non-NEUTRAL, garrisoned** tile owned by an undefeated faction produces +1 every 2 ticks. Castles never produce.
+**Now**: every **non-castle, non-NEUTRAL, garrisoned** tile owned by an undefeated faction produces +1 **every tick** (no 2-tick skip). Castles never produce. Tiles cap out at `PRODUCTION_CAP = 100` to keep field garrisons from running into 4-digit territory over a long game.
 
 Exact eligibility per tile per production tick:
 
@@ -39,10 +39,13 @@ Exact eligibility per tile per production tick:
 | `isCastle === true` | **No** (regardless of owner / count) |
 | `owner === "NEUTRAL"` | No |
 | `count <= 0` | No (no seed from an empty tile) |
+| `count >= PRODUCTION_CAP` | No (already capped) |
 | `state.defeated.has(owner)` | No |
-| All four above false | **+1** |
+| All five above false | **+1** (clamped to `PRODUCTION_CAP`) |
 
-Cadence unchanged: emission ticks are every 2 ticks (`tick % 2 === 0 && tick > 0`). The PRD §3.2 step order is unchanged — production still runs after `defeats`, before `castle overflow` (orphan, §3.5.5) and `upgrade`.
+Cadence: **every tick where `tick > 0`**. PRD §3.2 step order is unchanged — production runs after `defeats`, before `castle overflow` (orphan §3.5.5) and `upgrade`.
+
+The cap applies only to production-induced growth. A tile pushed above 100 by a dispatch arrival or combat survivor stays above 100; subsequent production simply won't add more until the count drops below the cap (via combat or dispatch). This avoids the engine retroactively clipping legitimate troop reserves.
 
 ### #2 — castle's role (rewritten)
 
