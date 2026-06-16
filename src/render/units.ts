@@ -27,10 +27,10 @@ const TIER_RANK: Readonly<Record<Tier, number>> = {
 // crown extended high enough to overlap the row above, making the board
 // feel crowded once production filled it with garrisons.
 const TIER_TILE_FRACTION: Readonly<Record<Tier, number>> = {
-  SOLDIER: 0.4,
-  KNIGHT: 0.5,
-  QUEEN: 0.6,
-  KING: 0.7,
+  SOLDIER: 0.2,
+  KNIGHT: 0.25,
+  QUEEN: 0.3,
+  KING: 0.35,
 };
 
 const UPGRADE_FLASH_COLOR = 0xffe480;

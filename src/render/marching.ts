@@ -18,7 +18,7 @@ import type { TierTextures } from "./sprites";
 
 // PRD §5.1: marching sprite is the regular tile sprite shrunk to 0.7× so it
 // reads as in-transit vs. garrisoned.
-const MARCHING_TILE_FRACTION = 0.45;
+const MARCHING_TILE_FRACTION = 0.225;
 const COUNT_TEXT_STYLE: TextStyleOptions = {
   fontFamily: "monospace",
   fontSize: 11,
