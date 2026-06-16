@@ -1,7 +1,7 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v1.1
-**Status**: Pruned baseline — AI work deferred; UI + 基礎機制 next round
+**Version**: v1.2
+**Status**: Same-tile combat model — adjacency 戰鬥整套移除,Tile 改 multi-occupant
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
 - v0.2 — 棋盤改 11x11、技術棧改 Pixi.js、操作方案重設、戰鬥公式重做、新增 §10 Headless Playtest
@@ -16,6 +16,7 @@
 - v0.11 — §3.5.5 新增 Castle 自動溢出規則（`CASTLE_OVERFLOW_THRESHOLD = 30`）；§3.5.6 新增 Castle vs castle BFS hops 例外；§4.1 新增 Rule #2.5 集結（順序：威脅 → 擴張 → 集結 → 進攻 → 囤兵）；§3.2 step order 加 `castle overflow` phase（produce 之後、upgrade 之前）；新增 AC-33/34/35；§11.1 補 v0.11 解法；§11.2 把「平均場長 100–400 ticks + 結束率 ≥ 50% + 任一勢力勝率 ≤ 50%」重啟為 M2 退出條件。M2 P0 收斂導向（[`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0、[`docs/MILESTONES.md`](./MILESTONES.md) M2.2.6–M2.2.8）
 - v0.12 — 移除 §3.6.1 相鄰勢力空格佔領（含 hysteresis）。理由：v0.6 引入的「相鄰自動翻 owner」與玩家對「走過 / 打贏的格才屬於我」的直覺相違，視覺上像是領土莫名其妙就染色到鄰格、且削弱主動派遣的戰略意義。撤掉後駐紮空格 owner 翻轉**只剩** §3.5.4 的行軍 stack 抵達 claim；§3.2 step order 移除 3b claim phase；AC-23/24/25/26 刪除。`Province.lastClaimedAtTick` 欄位於 PRD 失去語意，engine schema 可同步清掉（細節不在本文件範圍）。**收斂風險**：§3.6.1 v0.6/v0.7 的補強作用消失，M2.2.8 acceptance 若失守需回頭調 v0.11 P0 機制（§3.5.5 / §4.1 rule #2.5 / §3.5.6 參數）而非復活 §3.6.1。
 - v1.0 — **重大 scope 重設**：把 AI 設計（PRD §4 規則、§3.5.5 castle overflow、§3.5.6 castle vs castle 例外、§10 playtest balance 重心、§11 收斂限制）整段移出本 PRD，等 UI + 基礎機制建好後再回頭重寫。本次也順手砍 AI 相關 AC：AC-15（AI 30-tick 擴張）、AC-22（AI RNG 確定性）、AC-27..AC-35（rule #2 castle 分階保護 / rule #3 距離+reserve+派遣量 / castle 溢出 / rule #2.5 集結 / castle vs castle BFS 例外）。**Engine 程式碼層 `src/engine/ai.ts` / `ai.test.ts` / `overflow.ts` / `overflow.test.ts` / `src/playtest/runner.ts` 的 AI 分類邏輯與 spectator-4ai scenario 保留在 repo 內**，但屬「規格 orphan」狀態：對應的 PRD 章節已不存在、不在 v1 acceptance 內、未來 AI 重啟時必跟新規格對齊（程式碼不保證直接可用）。pre-prune 完整 v0.12 快照見 git tag `archive/prd-v0.12` (commit `5714dc5`)。本 v1.0 是「UI + 基礎機制」次輪設計的起點 baseline，**不是**最終 v1.0 release。
+- v1.2 — **戰鬥模型再次重做：鄰邊戰鬥整段移除，改為同 tile multi-occupant 戰鬥**。`Province.owner` 欄位徹底刪除（由 `occupants` derive 出 ownership 語意）；Tile 改持有 `occupants: { faction, amount, arrivalTick, isDefender }[]`。**觸發條件**：tile 上出現 2+ 不同 faction 的 occupant 即進入戰鬥，單方佔據不觸發。**駐紮方**：tile 上「最先抵達」的 faction；若同 tick 多方抵達空 tile，用 `state.rng` 隨機抽選 defender（維持 deterministic）。**傷害公式改為 step function**：`damage(t) = 2^floor(log2(max(t, 1)))`，即 t=0–1 → 1、t=2–3 → 2、t=4–7 → 4...（舊 v1.1 的 `2^(n-1)` 線性遞增改為以 2^k tick 為界的階梯）。**駐紮方 tick-0 優勢**：combat 首 tick 只有 defender 攻擊，所有入侵者不還手。**多方混戰**：每個 occupant 對「每一個」敵對 occupant 獨立發動一次攻擊，各自套用 `min(理論傷害, 自身 amount)` 上限。**增援機制**：同陣營單位從相鄰 tile 抵達同格 = 併入既有 occupant amount，**同 tick 內加法（增援）先於減法（攻擊）結算**，可救回理論該歿之單位。**行軍經過戰鬥 tile**：無論友軍敵軍，marching stack 抵達 contested tile 強制變 occupant 加入戰鬥（同陣營當增援、不同陣營當新入侵者），path 丟棄。**鄰邊戰鬥模型整套廢除**：§3.6 v1.1 的 `engagementMap` / `pairKey` / `resolveAdjacentCombat` 全部移除；§3.5.4 一次性碰撞解析（#4、#5、#6）同樣廢除。**§3.7** 維持已刪除狀態（v1.1 即刪）。**§3.2 step order 改為**：`movement (含 §3.5.4 同 tile 加法併入) → production → combat (§3.6 same-tile damage 減法) → defeats → victory`（production 改到 combat 前，讓 castle 產的兵可在當 tick 立即參與戰鬥的「加法階段」）。**AC 大規模重編**：舊 AC-08 / 17 / 18 / 19 / 20 / 21 / 36 與鄰邊 / 一次性碰撞相關場景全 strikethrough；新規從 `AC-V2-01` 起，覆蓋兩個範例案例（駐紮 50 vs 入侵 36 直到 tick 9 殲滅、增援 +10 救援讓殲滅延後一 tick）、多方混戰、force-join、defender 抽籤確定性。**設計意圖**：(a)「攻擊 = 移動到敵格」與 RTS 通用直覺一致，鄰邊互磨的視覺與規則的脫節（看不到單位實際接觸）消失；(b) Multi-occupant 讓「我的單位疊在敵方城上同框互砍」的視覺成立，渲染層才有真實戰鬥的張力；(c) Defender 優勢給城堡防守一個結構性 advantage（主城是天生 defender），保留「攻方需要兵力優勢才敢進」的策略張力。**收斂風險**：step function 的階梯傷害仍保證 `O(log₂(amount))` tick 收斂（t=8 階段已 8 傷害，9 tick 內必爆雙方 ≤ 50 兵的 pair），但 multi-party 混戰可能出現「3 方各自互轟、總傷害是 2(N-1) 倍」的快速崩盤；若實測爛尾就回頭調傷害上限或加 tick-0 後的緩衝。
 - v1.1 — **戰鬥模型徹底重做**：§3.6 整段改寫為「count-only 互相抵銷 + per-pair ramp」。Tier 倍率（Soldier=1 / Knight=4 / Queen=12 / King=30）從戰鬥結算移除，tier 退回純視覺與升級階級。每對相鄰敵我格維護一個 `engagementTicks` 計數器：相鄰的第 0 個 tick 不傷害、之後每 tick 雙方各扣 `2^(engagementTicks - 1)`；pair 不再相鄰（任一方清空 / 易主 / 行軍走開）→ counter 丟棄，重新相鄰從 0 重數。§3.7 stalemate / drain 整節移除（新公式 ramp 已內建消耗，drain 失去意義）；`StalemateMap` / `stalemateTicks` / `applyDrainDeductions` 對應 engine 物件改名為 `EngagementMap` / `engagementTicks` 並併入 §3.6 結算階段。§3.5.4 #4 / #5 頭對頭碰撞改為一次性 `engagementTicks = 1` 結算（雙方各 -1，不建立持續 pair）。§3.2 step order 拿掉 `drain` 步驟。AC-08 / AC-17 / AC-19 對應重寫。設計意圖：(a) tier 抗打 / 輸出乘法的耦合在玩家層體感不明顯，反而讓低 count 大量壓制變得無解；移除後戰鬥是純粹的「人數抵銷 + 拖久爆炸」；(b) ramp 暴力收斂，永遠不會出現對峙打不死的爛尾。**收斂風險**：原 §3.7 / §3.5.5 / §3.5.6 的補丁價值消失，但 ramp 本身就保證 pair 在 log₂(count) 個 tick 內結束，比 stalemate drain 更強的收斂，AI 重啟時要重審「ramp 是否會在 index 3+ 之後莫名互滅造成不可控翻盤」。
 
 ## 1. 願景與背景
@@ -29,12 +30,13 @@
 ## 2. 名詞表
 
 - **Tick**：遊戲時鐘最小單位，2 秒 / tick。所有產兵、移動、戰鬥都在 tick 邊界結算。
-- **Tile / Province**：棋盤上的一格，是所有權與單位的最小單位。
-- **Stack**：駐紮在同一格的單位群，由 `(tier, count)` 表示。
-- **Marching Stack（行軍 stack）**：派遣後沿路徑移動的暫態單位群，獨立於格上駐紮 stack。
-- **Tier**：單位階級 —— Soldier / Knight / Queen / King。
-- **主城 (Main Castle)**：每個勢力的核心，失守即敗。
-- **Engagement counter (`engagementTicks`)**：每對相鄰敵我格獨立維護的 ramp 計數器（§3.6）；驅動戰鬥傷害指數成長。
+- **Tile / Province**：棋盤上的一格，是地形屬性（`isCastle`、初始 owner faction）與單位容器的最小單位。Tile 本身**不再持有 owner / count 欄位**（v1.2 起），所有權與兵力由 `occupants[]` 表達。
+- **Occupant**：駐紮在某 tile 上的單一 faction 單位群，由 `{ faction, amount, arrivalTick, isDefender }` 表示。一個 tile 可同時容納 0..N 個不同 faction 的 occupant；多 faction 共存即戰鬥狀態（§3.6）。
+- **Marching Stack（行軍 stack）**：派遣後沿路徑移動的暫態單位群，獨立於 tile 上的 occupant；抵達 tile 後依 §3.5.4 規則決定併入既有 occupant、新增 occupant、或合併並繼續行軍。
+- **Tier**：單位階級 —— Soldier / Knight / Queen / King。由 `deriveTier(amount)` 即時推導，只用於 sprite 顯示與升級階級語意（v1.1 起不再參與戰鬥公式）。
+- **主城 (Main Castle)**：每個勢力的核心 tile（`isCastle: true`），失守即敗。主城本身**天生為該 faction 的 defender**（開局即在 tile 上），無 arrivalTick 概念。
+- **Defender**：tile 上「最先抵達」（最小 `arrivalTick`）的 occupant，於 §3.6 戰鬥首 tick 享有單方攻擊優勢。Castle 上的原 faction 永遠是 defender（直到被殲滅）。
+- **CombatStartTick**：tile-level 狀態，當 tile 第一次出現 2+ 敵對 occupant 時鎖定為當下 tick；只要 tile 仍有 2+ 敵對 occupant 就維持不變，戰鬥結束（≤ 1 faction 存活）後清除。重新進入戰鬥時重設。
 
 ## 3. 玩法核心
 
@@ -65,33 +67,37 @@
 - 全域時鐘以 **2 秒 / tick** 推進。HUD 顯示當前 tick 數與下一 tick 倒數。
 - **Tick 編號約定**：Tick 0 為初始狀態（僅渲染、無結算）。Tick 1 起執行下述六步結算順序。產兵於 tick 2 首次觸發（「每 2 ticks +1」= tick 2, 4, 6, ...）。v0.12 期間還規範了四家 AI 的評估偏移（Tokugawa tick 1、Takeda tick 2 等，每 5 ticks 一次），隨 §4.3 一併移出 v1.0；`engine/ai.ts` 的 `shouldEvaluate` 程式碼仍存在但屬規格 orphan。
 - 暫停 / 繼續 / 變速 (1x / 2x) 支援；變速影響 tick 實際間隔。
-- 每個 tick 結算順序固定：
-  1. 移動推進（每 tick 沿路徑前進 1 格，包含 marching stack 入格、stack-collision 判定、與行軍抵達 claim — 由 §3.5.4 規則處理）
-  2. 戰鬥傷害結算（同步，含駐紮 vs 駐紮、駐紮 vs 行軍、行軍 vs 行軍）+ §3.6 engagement counter 推進
-  3. 主城被佔判定：遭佔領主城觸發該勢力敗北（§6.3）
-  4. 產兵（主城）
-  5. 升級判定（count 跨過閾值即時推導 tier）
-  6. 勝負判定
+- 每個 tick 結算順序固定（v1.2）：
+  1. **Movement + 抵達加法**：marching stack `idx++`、§3.5.4 抵達結算（含同陣營合併、新增 occupant、force-join），所有加法（amount += merged）寫回。
+  2. **Production（產兵）**：每座 castle 為「castleOwner faction 在該 castle tile 上的 occupant」amount +1（§3.3 細則）；亦屬加法。
+  3. **Combat（同 tile 戰鬥減法）**：§3.6 對每個 contested tile 結算傷害，所有減法（amount -= damage）寫回；同步殲滅 amount ≤ 0 的 occupant；更新 `combatStartTick`。
+  4. **Defeats**：castle tile 上若找不到 castleOwner faction 的 occupant → 該 faction `defeated = true`，依 §6.3 處理其留存 occupant / marching stack。
+  5. **Tier 推導**：每個 occupant 的 tier 由 `deriveTier(amount)` 即時更新（無狀態，純 derived）。
+  6. **勝負判定（§6.1 / §6.2）**。
 
-> 完整 step order（v1.1）：`movement (含 §3.5.4 行軍抵達 claim) → combat (含 §3.6 ramp counter 推進) → defeats → produce → victory`。v1.0 的 `drain (§3.7)` 階段隨 §3.7 一併於 v1.1 移除（counter 推進已併入 combat 階段、本身就用 ramp 取代 drain 的收斂角色）。駐紮空格不再有「相鄰自動 claim」phase（§3.6.1 於 v0.12 移除），owner 翻轉**只**在行軍 stack 真正進駐該格時發生。Castle overflow（v0.11 §3.5.5）隨 AI 一併移出 v1.0 PRD —— engine `applyCastleOverflow` 仍會在 produce 之後被呼叫（程式碼層面實作存在）但因 v1.0 沒有自動把 castle 推到 > 30 的 AI / 玩家邏輯，實際上不會 fire。
+> 完整 step order（v1.2）：`movement (含 §3.5.4 抵達加法) → produce → combat (§3.6 same-tile 減法) → defeats → victory`。**Production 移到 combat 之前**（v1.1 是 combat 後），原因：castle 產的兵可在當 tick 立即併入戰鬥的加法階段、被當作「增援」直接救活理論上會在本 tick 陣亡的單位。`upgrade` 不再是獨立 phase（純 derived，每次讀 occupant.amount 都即時推導）。Castle overflow（v0.11 §3.5.5）隨 AI 一併移出 v1.0 PRD — engine `applyCastleOverflow` 程式碼仍可能在 repo 內但因 v1.0 / v1.2 都沒有自動把 castle 推到 > 30 的邏輯，實際上不會 fire；v1.2 不依賴此 phase，未來 AI 重啟時要重新規格化。
 
 ### 3.3 城堡與產兵
 
-- **主城**：每個勢力 1 座，固定在棋盤角落。每 2 ticks (= 4s) 在城堡格 `count + 1`；若敵軍佔領則停止產兵，所有權變更為佔領方，但**佔領主城 = 該勢力立即敗北**。
-- **子城（future scope）**：MVP 不含；保留 `Province.isCastle` 介面供日後擴充。
-- 一般領地：不產兵，佔領僅用於擴張勢力範圍與切斷敵方路徑。
-- **空但仍屬己方的格子**：count = 0 但仍歸某勢力所有 → 維持所有權直到有敵方單位進入。
+- **主城**：每個勢力 1 座，固定在棋盤角落（`tile.isCastle === true && tile.castleOwner === <該勢力>`）。每 2 ticks (= 4s) 產兵一次：在 castle tile 上找到 `faction === castleOwner` 的 occupant，其 `amount += 1`。
+- **產兵時機**：屬 §3.2 step order step 2，**在 movement 加法之後、combat 減法之前**。於戰鬥中產的兵可在當 tick 立即作為「友軍援軍」併入 defender 的 amount，被 §3.6 傷害上限 `min(damage, amount)` 計算採納。
+- **產兵中斷條件**：castle tile 上找不到 `faction === castleOwner` 的 occupant 時，**該 tick 不產兵**（castle 已淪陷）。後續 §3.2 step 4 defeats 階段會把此 faction 標為 `defeated`，往後 castle 不再產兵（即使他人佔領；佔領者不會繼承 castle 的產能 — 落入新 owner 後 castle 本身仍是「孤兒設施」，待 future scope 處理）。
+- **Castle 被攻陷瞬間**：若同 tick combat 殲滅 castleOwner 的 occupant，當 tick 已產的 +1 amount 會在 combat 結算前先加上，但通常難敵 damage 衝擊；判定後該 faction 敗北。
+- **子城（future scope）**：MVP 不含；保留 `tile.isCastle` 介面供日後擴充。
+- 一般領地（`isCastle: false`）：不產兵，佔領僅用於擴張勢力範圍與切斷敵方路徑。
+- **空但「曾屬於某勢力」的格子**：v1.2 後 tile 本身無 `owner` 欄位，「歸屬」由 `occupants` derive。0 occupant 的非 castle tile = 完全中立空格（任何 faction 路徑經過視為 passable）；0 occupant 的 castle tile = 該 castleOwner 的「孤兒主城」，可被任何 faction 派遣抵達後重新獲得（§6 觸發敗北判定要看 castleOwner 是否找回 occupant）。
 
-### 3.4 單位、Stack 與升級
+### 3.4 單位、Occupant 與升級
 
-- 每格的單位狀態為 `(tier, count)`，整格作為一個單位顯示。
-- Tier 由 count 推導（純函數，無狀態）：
-  - `count < 5` → Soldier
-  - `5 ≤ count < 12` → Knight
-  - `12 ≤ count < 25` → Queen
-  - `count ≥ 25` → King
-- Tier 升級 / 降級為**隱含結果**：count 變動後即時更新 tier。畫面上顯示對應 sprite + 數字。
-- 同一格只能由單一勢力擁有；不同勢力進入同一格 = 戰鬥而非合併。
+- 每個 tile 的單位狀態以 `occupants: Occupant[]` 表達；每個 occupant 是 `{ faction, amount, arrivalTick, isDefender }`。0 occupant = 空格；1 occupant = 該 faction 獨佔；2+ occupant 且 faction 不全同 = 戰鬥狀態（§3.6 觸發）。
+- 同 faction 同時間在同 tile **只能有一個 occupant**；新抵達的同 faction 單位（行軍抵達或增援）併入既有 occupant 的 `amount`，不新增 entry。
+- 每個 occupant 的 tier 由 `deriveTier(amount)` 即時推導（純函數）：
+  - `amount < 5` → Soldier
+  - `5 ≤ amount < 12` → Knight
+  - `12 ≤ amount < 25` → Queen
+  - `amount ≥ 25` → King
+- Tier 升級 / 降級為**隱含結果**：amount 變動後即時更新 tier。畫面上顯示對應 sprite + 數字（同 tile 多 occupant 時依 §5.1 多 sprite 並陳規則渲染）。
+- **不同 faction 進入同 tile = 共存進入戰鬥**，不再合併、不再一次性決勝。詳見 §3.6。
 
 > 閾值 5 / 12 / 25 沿用 v0.9 的數字。原始決定理由（v0.8 playtest 戰場累積天花板觀察）依賴 AI 規則行為，已隨 AI 整段移出 v1.0；v1 acceptance 不再用 AI 收斂去倒推這幾個閾值。等 UI + 基礎機制次輪 PRD 重新看玩家體感後再決定要不要調整。
 
@@ -108,124 +114,223 @@
 
 #### 3.5.2 路徑規則
 
-- 路徑用 BFS 搜尋，passable = 己方格 + 空無主格（neutral 且 count = 0）。
-- **目標格允許為敵方**（攻擊行動）：目標格本身不需要 passable，但中間經過的所有格必須 passable。
-- 目標格為己方 → 合併補充。
-- 目標格為空 → 佔領。
-- 目標格為敵方 → 抵達瞬間轉為攻擊（見 3.5.4）。
+- 路徑用 BFS 搜尋。**Passable（中間經過格）的定義（v1.2 multi-occupant 版）**：
+  - `occupants.length === 0` （空格），或
+  - `occupants.length === 1 && occupants[0].faction === selfFaction` （純己方獨佔）。
+  - 任何含敵對 faction 的 tile（包括 contested 戰鬥中的 tile）**不**可作為中間經過格。
+- **目標格不需要 passable**：可以是敵方獨佔、contested 戰鬥中、或空格。BFS 終點不檢查 passable，只檢查中間經過格。
+- 目標格為己方獨佔 → 抵達後併入該 occupant amount（補充 / 增援）。
+- 目標格為空 → 抵達後新增為己方 occupant。
+- 目標格為敵方獨佔 → 抵達後加為新 occupant，§3.6 戰鬥於下 tick 觸發（也可能於同 tick 觸發，看抵達後是否同 tile 有 2+ faction）。
+- 目標格為 contested（已 2+ faction 在打）→ 抵達後依 §3.5.4 #3 force-join 規則加入。
 - 無路徑：來源與目標被敵方完全切斷且非相鄰時，顯示紅線拒絕派遣。
+- **行軍途中 passable 失效**：dispatch 時 BFS 通過的路徑，若行軍途中某中間格因敵方抵達而變 contested → marching stack 抵達該格時觸發 §3.5.4 #3 force-join（**不**繞路、**不**停下，直接捲入戰鬥）。設計理由：規則明確、AI / 玩家不需要學「我的兵會不會繞路」的隱晦行為。繞路屬 future scope（§8）。
 
 #### 3.5.3 行軍 stack 行為
 
-- 派遣瞬間從來源格扣除對應 count，建立獨立 marching stack：
+- 派遣瞬間從**來源 tile 的己方 occupant** 扣除對應 amount，建立獨立 marching stack：
 
   ```ts
   type MarchingStack = {
     id: string;                 // 唯一 ID（用於 collision tiebreak）
     faction: FactionId;
     count: number;              // tier 不存欄位，由 deriveTier(count) 即時推導
-    path: Tile[];               // BFS 計算的整條路徑（含起點與終點）
+    path: TileId[];             // BFS 計算的整條路徑（含起點與終點）
     idx: number;                // 當前位置 = path[idx]，下 tick 移到 path[idx+1]
     dispatchedAtTick: number;   // 派遣時 tick 數，§3.5.4 規則 #2 tiebreak 用
   };
   ```
 
-- **tier 不存欄位**：渲染（選擇 sprite）由 `deriveTier(count)` 即時推導。原因：避免 stack 合併 / 受傷時忘記同步 tier 造成 bug；單一資料源 = count。v1.1 起戰鬥不再用 power 派生值（§3.6 完全以 count 結算），tier 退回純視覺意義。
+- **tier 不存欄位**：渲染（選擇 sprite）由 `deriveTier(count)` 即時推導。原因：避免 stack 合併 / 受傷時忘記同步 tier 造成 bug；單一資料源 = count。v1.1 起戰鬥不再用 power 派生值，tier 退回純視覺意義（v1.2 維持）。
 - 每 tick 沿 `path` 前進 1 格（`idx++`）。
-- Marching stack 不佔據格子所有權，渲染為小型移動 sprite 沿路徑跑動。
-- 抵達 path 終點（`idx === path.length - 1`）時觸發 §3.5.4 的抵達結算。
+- Marching stack **不**是 tile occupant — 它是 transient 移動實體，獨立於 tile 的 `occupants[]`；渲染為小型移動 sprite 沿路徑跑動。
+- 抵達 path 終點（`idx === path.length - 1`）時觸發 §3.5.4 抵達結算 → 變成 occupant（新增或併入既有）。
+- **中途也可能被「召喚成 occupant」**：抵達非終點但 tile 為 contested → §3.5.4 #3 force-join，path 中止。
 - 剩餘步數 = `path.length - 1 - idx`。`0` = 此 tick 已抵達終點。
 
-#### 3.5.4 行軍碰撞與抵達規則
+#### 3.5.4 行軍抵達規則（v1.2 — multi-occupant 加法階段）
 
-當多個 stack 在同一 tick 進入同一格 / 相鄰格時，依下列順序處理（**原子性，所有發生於同 tick 的事件同步結算後寫回**）：
+v1.2 後**所有戰鬥都發生在同 tile**（§3.6），§3.5.4 不再處理任何傷害結算 — 它只處理 tick 的**加法階段**：marching stack 抵達 tile 後如何變 occupant、如何併入既有同陣營 occupant、以及多 stack 同 tick 抵達時的合併路徑選擇。
 
-1. **同勢力 marching stack 進入己方駐紮格**：合併 count，若該格非派遣終點，marching stack 繼續沿原路徑。
-2. **同勢力多個 marching stack 同 tick 進同一格**：合併為單一 stack（count 加總），合併後的 path 依下列順序決定：
-   - **若任一參與合併的 stack 以此格為終點**（即 `idx === path.length - 1`）→ 合併後 stack 停留在此格，作為駐紮 stack 入駐（或合入既有駐紮 stack）。
-   - **否則**取「**剩餘步數最少**」（`path.length - 1 - idx` 最小）的 stack 的剩餘路徑作為合併後 path。
-   - **Tiebreak**：剩餘步數相同 → 取 `dispatchedAtTick` **較早者**（先派遣優先）。再相同 → 取 `id` 字典序較小者（完全確定性）。
-3. **同勢力 marching stack 抵達空格 / neutral 空格（非戰鬥）**：放下停留，所有權轉為該勢力，count 入駐。
-4. **敵方 marching stack 同 tick 進同一格**：**頭對頭碰撞**，視同 §3.6 `engagementTicks = 1` 的一次性結算 —— **每對 (i, j) 對 i 各扣 1**（多方 3+ 碰撞時 i 扣 (參與者數 - 1)）。**不**建立持續 pair、**不**寫入 EngagementMap（碰撞是 transient 事件，下 tick 就解散）。倖存方行為依**雙方是否以此格為終點**分三子場景：
+當 marching stack 在某 tick 推進到一個 tile（無論是否終點），依下列規則處理（**原子性，所有同 tick 抵達事件先 dry-run 再同步寫回**）：
 
-   | 子場景                              | 倖存方（count > 0）行為                                                      |
-   | ----------------------------------- | ---------------------------------------------------------------------------- |
-   | **(a) 雙方皆終點**                  | 倖存方停留在此格、入駐並轉所有權；另一方歸零 → 該格歸倖存方                  |
-   | **(b) 雙方皆非終點**                | 倖存方繼續沿原路徑（`idx++` 已在 tick 推進階段完成）；該格仍是原所有權       |
-   | **(c) 混合：一方終點 / 一方路過**   | 倖存方若為「終點方」→ 停留入駐；若為「路過方」→ 繼續其原路徑、不入駐此格    |
+##### 1. 同陣營多 marching stack 同 tick 抵達同 tile → **合併為單一抵達事件**
 
-   雙方歸零（同歸於盡）：該格保持原所有權、無單位入駐、無人繼續行軍。
+- 合併 amount：`mergedAmount = sum(stack.count for stack in arrivals)`
+- 合併 path 選擇：
+  - **若任一參與合併的 stack 以此 tile 為終點**（`idx === path.length - 1`）→ 合併後 stack 視為「終點抵達」，後續走 #2 (a) 規則。
+  - **否則**取「剩餘步數最少」（`path.length - 1 - idx` 最小）的 stack 的剩餘 path。
+  - Tiebreak：剩餘步數相同 → `dispatchedAtTick` 較早者；再相同 → `id` 字典序較小者。
 
-5. **敵方 marching stack 與敵方駐紮 stack 同 tick 抵達同格**：駐紮方視為「終點方」參與 §3.6 `engagementTicks = 1` 結算（**雙方各扣 1，一次性，不寫入 EngagementMap**）。倖存方依 #4 (c) 子場景判斷：駐紮方倖存 → 留下；marching 方倖存且為終點 → 取代所有權留下；marching 方倖存且非終點 → 繼續原路徑、該格成為空格（無 count）。
-6. **路徑經過格被敵方臨時切入（敵方剛佔下中間格）**：marching stack 停在前一格（`idx` 不再前進），下 tick 從相鄰格觸發 §3.6 戰鬥；不自動繞路（MVP 簡化，列入 future scope）。
+##### 2. 抵達 tile 上既有 occupants 與 marching stack 的互動
 
-> 規則設計原則：所有同 tick 事件先計算「將發生什麼」（dry-run），再同步寫回，避免順序依賴造成 bug。
+按抵達 tile 上 occupants 的狀態分類（用合併後的 stack `(faction, amount, isTerminus)` 對 tile 操作）：
+
+| 抵達情境                                                                       | 行為                                                                                                                                                                                |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(a) Tile 空（0 occupant）+ stack 終點**                                       | 新增 occupant `{ faction, amount, arrivalTick: currentTick, isDefender: true }`；marching stack 消滅。                                                                                |
+| **(b) Tile 空 + stack 非終點**                                                  | Marching stack 不變成 occupant，繼續沿 path 前進（純過路）。tile 維持空格。                                                                                                          |
+| **(c) Tile 上只有同陣營 occupant + stack 終點**                                 | 併入既有 occupant 的 `amount`（`existing.amount += merged.amount`），既有 occupant 的 `arrivalTick` / `isDefender` 不變。Marching stack 消滅。                                          |
+| **(d) Tile 上只有同陣營 occupant + stack 非終點**                               | Marching stack 不變 occupant，繼續沿 path 前進（純過路，**不**併入既有 amount）。原因：保留派遣意圖 — 派出去的兵就是要去更遠的目標，不該被路過格吸收。                              |
+| **(e) Tile 上有敵對 occupant（含 contested 多 faction），無論 stack 是否終點** | **Force-join**：marching stack 強制變 occupant 加入 tile。<br>• 若 tile 已有同陣營 occupant → 併入既有（同 #1 #2(c) 合併規則）。<br>• 若 tile 無同陣營 occupant → 新增 occupant `{ faction, amount, arrivalTick: currentTick, isDefender: false }`（永遠不是 defender — defender 是已在 tile 上的 occupant）。<br>Marching stack `path` 一律丟棄，不再繼續行軍。 |
+
+##### 3. 同 tick 內多陣營 marching stack 同時抵達**空 tile** 的 defender 抽籤
+
+- 若一個 tile 空，同 tick 有 2+ 不同 faction marching stack 抵達（皆視為「新進駐」），用 `state.rng` 從這幾家中**隨機抽一個**作為 defender；其餘 faction 一律 `isDefender: false`。
+- 每家 faction 在該 tile 上的 occupant 入駐後 amount = 各自合併後的 mergedAmount；同 faction 同步用 §3.5.4 #1 規則合併成一個 occupant。
+- 抽中 defender 的 occupant `arrivalTick` 與其他入侵者**同為 currentTick**（孖生），但 `isDefender: true` 唯一存在於抽中那家。
+- 抽籤用 `state.rng.shuffle(participatingFactions)[0]` 維持 deterministic（同 seed 必同結果）。
+
+##### 4. 行軍路徑「中途」被切入（路徑上某 tile 突然 contested）
+
+- Marching stack 抵達該 tile 時走 §3.5.4 #2 (e) — force-join、加入戰鬥、path 丟棄。
+- v1.0 期 §3.5.4 #6「停在前一格從相鄰戰鬥」**徹底廢除**，因為鄰邊戰鬥模型已不存在。
+
+> **設計原則**：所有抵達事件 dry-run 後同步寫回；同 tick 內順序無關（多個 stack、多個 tile 互不影響、可並行解析）。
+
+> **頭對頭碰撞規則（v1.0 §3.5.4 #4/#5）廢除**：v1.2 後敵方 marching stack 同 tick 抵達同 tile = 兩家都變 occupant，下 tick 走 §3.6 同 tile 戰鬥。**不再一次性互砍**。倖存 / 同歸於盡判定全部交給 §3.6 處理。
 
 > **§3.5.5 / §3.5.6（已移除，v1.0）**：原 v0.11 加入的 castle 自動溢出與 castle vs castle BFS hops 例外，皆為 AI 收斂機制的補強。AI 部分整段移出 v1.0 後一併下線；engine `src/engine/overflow.ts` 程式碼仍在 repo 內但 PRD 已不規範其行為，未來 AI 重啟時要重審規格。完整 v0.12 描述見 git tag `archive/prd-v0.12`。
 
-### 3.6 戰鬥公式（v1.1 — count-only + per-pair ramp）
+### 3.6 戰鬥公式（v1.2 — 同 tile multi-occupant + step-function ramp）
 
-**結算對象**：每對**相鄰的敵我格**（owner 不同、雙方 count > 0；駐紮 vs 駐紮、駐紮 vs 行軍駐紮的同格組合）。同勢力相鄰格（含 NEUTRAL 之間）自動跳過。頭對頭行軍碰撞另見 §3.5.4 #4 / #5（用 ramp tick 1 一次性結算，不寫入 counter）。
+**結算對象**：每個 tile，若 `occupants` 中存在 2+ 不同 faction → 該 tile 進入戰鬥狀態。單方獨佔（含 0 / 1 occupant）不觸發。
 
-**每對 pair 維護一個 `engagementTicks: number`**（key = `pairKey(tileA_id, tileB_id)`，小座標在前；無向）。初次出現於本 tick `combatPairs` 時 counter 為 0。
-
-**每 tick 結算順序（同步、dry-run，所有 pair 同時讀寫）**：
-
-```
-prev   = engagementMap.get(key) ?? 0
-damage = prev === 0 ? 0 : 2 ** (prev - 1)
-new_count(a) = max(0, count(a) - sum_over_pairs(a)(damage))
-new_count(b) = max(0, count(b) - sum_over_pairs(b)(damage))
-next   = prev + 1
-engagementMap.set(key, next)
-```
-
-- **Tier 不參與戰鬥**：v1.1 起完全用 `count` 結算，`POWER_PER_TIER` / `power = count × tier_multiplier` 派生值整套移除。Tier 仍由 `deriveTier(count)` 即時推導，但只用於 sprite 顯示與升級階級語意。
-- **Ramp 節奏**：相鄰的第 0 個 tick (`prev === 0`) 不造成傷害（給玩家視覺上的「對峙開始」反饋）；第 1 tick 各扣 1；第 2 tick 各扣 2；第 n tick 各扣 `2^(n-1)`。Counter 永遠 +1，不會因任何條件重置。
-- **多敵相鄰累加**：若一格同時與 k 個敵方相鄰格成對，本 tick 受到 k 個 pair 各自 `damage` 累加扣除（再 clamp 至 0）。每對 pair 的 counter 獨立推進。
-- **Pair 解散 = counter 丟棄**：若某 pair 不在本 tick `combatPairs` 中（任一方 count 歸零 / 易主 / 行軍走開 / 非相鄰），其 key 不寫入 next map → counter 被丟棄。日後該 pair 再度出現 → 從 0 重數。
-- **Count 降到 0** = 該格清空（仍保留所有權直到敵方進入）。Count 變動後立即重新推導 tier。
-
-**佔領**：若某格被清空後，下一 tick 有相鄰己方單位（含派遣抵達者），則該格所有權轉為該勢力，count 累加駐入。**注意**：被清空的格子 owner 不變，因此**不會**與原 owner 的鄰格組成 §3.6 pair；但**會**與其他敵方鄰格繼續配對嗎？不會，因為配對要求**雙方 count > 0**。
-
-**範例計算（AC-08 driver）**：
-
-- 場景：6 Knight (count 6) 與 5 Knight (count 5) 相鄰，初始 engagementMap 不含此 pair。
-- tick 1：`prev = 0`，`damage = 0`，雙方 count 不變 (6, 5)；counter 寫入為 1。
-- tick 2：`prev = 1`，`damage = 1`，雙方各扣 1 → (5, 4)；counter = 2。
-- tick 3：`prev = 2`，`damage = 2`，各扣 2 → (3, 2)；counter = 3。
-- tick 4：`prev = 3`，`damage = 4`，各扣 4 → (max(0, 3-4), max(0, 2-4)) = (0, 0)；counter = 4。
-- tick 5：雙方 count = 0，pair 從 combatPairs 移除 → counter 丟棄。
-
-**設計意圖**：
-- 戰鬥是純粹「人數抵銷」，玩家直覺更清楚（5 vs 7 = 7 留 2，不需要心算 tier 倍率）。
-- Ramp 在 `O(log₂(count))` 個 tick 內強制終局，不可能爛尾。同時前 1–2 個 tick 傷害低，留出玩家派援軍 / 撤退的反應窗口。
-- 移除 tier 倍率後，King vs Soldier 不再質變壓殺，戰場累積天花板由 §3.4 升級閾值（5/12/25）與產兵速度（§3.3）控制，不再由戰鬥公式本身擔保。
-
-**實作層規格（engine）**：
+**Tile-level 戰鬥狀態欄位**：
 
 ```ts
-type PairKey = string;       // pairKey(a, b)：小 TileId 在前
-type EngagementMap = ReadonlyMap<PairKey, number>;
-
-type CombatPair = {
-  readonly a: TileId;        // pair key 排序後的 a
-  readonly b: TileId;
-  readonly damage: number;   // 本 tick 雙方各受的傷害（dry-run 對稱）
-  readonly engagementTicks: number;  // 本 tick 使用的 prev counter（用於 event log / 觀測）
+type Tile = {
+  readonly id: TileId;
+  readonly isCastle: boolean;
+  readonly castleOwner: FactionId | null;  // 設計時就決定的 castle 所屬 faction，永不變動；非 castle = null
+  readonly occupants: readonly Occupant[];
+  readonly combatStartTick: number | null;  // tile 上首次出現 2+ 敵對 faction 時鎖定的 tick；戰鬥結束清為 null
 };
 
-type CombatResult = {
-  readonly state: GameState;             // 已套用傷害與寫入新 engagementMap
-  readonly pairs: readonly CombatPair[]; // 本 tick 結算的 pair 列表
+type Occupant = {
+  readonly faction: FactionId;
+  readonly amount: number;
+  readonly arrivalTick: number;
+  readonly isDefender: boolean;
 };
 ```
 
-- `resolveAdjacentCombat(state)` 同時推進 counter 並套用傷害；v1.0 期 `updateStalemates` / `applyDrainDeductions` 兩個分離函數一併移除，併入 §3.6 單階段結算。
-- 寫入 next counter 規則：**只有本 tick 雙方 count 仍 > 0 的 pair** 才寫入下一個 counter（pair 仍存在）；任一方歸零 → 不寫入（pair 解散）。
-- Pair 不在本 tick `combatPairs` 中（已解散）→ 自動從 `nextMap` 移除（同 v1.0 行為，語意不變）。
+**`combatStartTick` 的設定 / 清除規則**：
+- 設定：tile 從「≤ 1 faction」變成「2+ faction」的那一 tick，`combatStartTick = currentTick`。
+- 清除：tile 從「2+ faction」回到「≤ 1 faction」（殲滅 / 同歸於盡）的那一 tick，`combatStartTick = null`。
+- 戰鬥期間（持續 2+ faction）→ **不重設**，即使有增援抵達或新入侵者加入也維持原值。
 
-> **§3.6.1（已移除，v0.12）**：原「相鄰勢力空格佔領（adjacent claim）」規則於 v0.12 撤回。駐紮空格的 owner 翻轉**只**由 §3.5.4 的行軍 stack 抵達觸發。設計理由與收斂風險見 changelog v0.12 與 §11.1。
+**Combat tick `t` 定義**：`t = currentTick - tile.combatStartTick`（從 0 起算）。
+
+**傷害公式（step function）**：
+
+```
+damage(t) = 2 ** Math.floor(Math.log2(Math.max(t, 1)))
+```
+
+對應表：
+
+| t（combat tick） | damage |
+| ---------------- | ------ |
+| 0                | 1      |
+| 1                | 1      |
+| 2–3              | 2      |
+| 4–7              | 4      |
+| 8–15             | 8      |
+| 16–31            | 16     |
+| ...              | 2^k    |
+
+**駐紮方 tick-0 優勢**：當 `t === 0`，**只有 defender occupant 攻擊**，所有非 defender occupant 該 tick 不還手。`t ≥ 1` 起所有 occupant 互打。
+
+**每 tick 結算順序**（dry-run，所有計算先讀「加法階段後的 amount」、最後同步寫回）：
+
+```
+for each tile with len(occupants) >= 2 and >= 2 distinct factions:
+    t = currentTick - tile.combatStartTick
+    base = damage(t)
+
+    for each occupant i:
+        i.outgoing = 0
+        if t == 0 and not i.isDefender:
+            continue  # 入侵者首 tick 不還手
+        for each occupant j ≠ i with j.faction ≠ i.faction:
+            actual = min(base, i.amount)  # 自身 amount 不足時封頂；對每個 j 獨立計算
+            j.incoming += actual
+
+    # 同步減血（dry-run 寫回）
+    for each occupant i:
+        i.amount = max(0, i.amount - i.incoming)
+
+    # 殲滅退出
+    occupants = [o for o in occupants if o.amount > 0]
+
+    # 戰鬥結束判定
+    remaining_factions = distinct faction in occupants
+    if len(remaining_factions) <= 1:
+        tile.combatStartTick = null
+```
+
+**重點規則**：
+
+- **多方混戰獨立計算**：occupant i 對「每個」敵對 occupant j 各發動一次攻擊，**每次都以 i 自己當下的 amount 套上限**（不會因為打了一個 j 就減損對下一個 j 的輸出）；i 自己受的總傷害 = `sum_over_j(min(base, j.amount))`。同陣營 occupant 不互打（但 v1.2 規則保證同 tile 同 faction 只有 1 個 occupant，理論上不會同 faction 多 entry）。
+- **傷害上限**：`actual = min(base, attacker.amount)`。`attacker.amount` 取**加法階段結束後**的值（即增援已併入後的 amount）。
+- **同 tick 內加法優先於減法**：增援併入 occupant amount（§3.5.4 #2(c)、#2(e)）發生在 §3.6 傷害結算**之前**。castle 產兵（§3.3）也是「加法」，同 tick 順序定義於 §3.2 step order。
+- **殲滅判定**：amount 在減法結算後 ≤ 0 → 該 occupant 從 `occupants[]` 移除。
+- **同歸於盡**：所有 occupant 同 tick 全歸零 → tile 變空（`occupants = []`），`combatStartTick = null`，無勝方。
+- **戰鬥結束 = ≤ 1 faction 存活**：若剛好 1 faction 存活且為多 occupant（不可能，同 faction 同 tile 只 1 entry，此 case 不存在），或 1 faction 1 occupant，戰鬥終止；該 faction 取得 tile 控制（若該 tile 是 castle 且新 owner ≠ castleOwner → §6 觸發敗北）。
+- **Defender 屬性的延續**：戰鬥中 `isDefender: true` 的 occupant 被殲滅 → 其 isDefender 屬性消失（occupant 被移除）。剩下的 occupant 若再進入新戰鬥（之後又有敵方入侵），則新戰鬥開始時，當下 tile 上**最小 `arrivalTick`** 的 occupant 重新被授予 `isDefender: true`（若有多家同最小 arrivalTick → 用 §3.5.4 #3 抽籤規則）。
+- **增援不改變 defender 身分**：同 faction 增援併入既有 occupant 不改其 `isDefender`；新 faction 入侵（變新 occupant）一律 `isDefender: false`。
+
+**佔領語意**：
+
+- Tile 「歸屬」由 `occupants` derive：`occupants.length === 1 ? occupants[0].faction : (occupants.length === 0 ? castleOwner ?? null : 'CONTESTED')`。**`Province.owner` 欄位徹底刪除**（v1.2）。
+- BFS passable 判定（§3.5.2）改以 derived ownership 為據。
+- Castle 失守判定（§6）：`tile.isCastle && (tile.occupants.length === 0 || (tile.occupants.length === 1 && occupants[0].faction !== tile.castleOwner) || (tile.occupants.length >= 2 && no occupant has faction === tile.castleOwner))` — 即 castle 上找不到原 owner faction 的 occupant → 該 faction 敗北。
+
+**範例計算 1（AC-V2-01 driver）— 駐紮 50 vs 入侵 36，無增援**：
+
+| tick | combat tick t | damage | A→B 實際 | B→A 實際 | A 殘 | B 殘 | 備註 |
+| ---- | ------------- | ------ | -------- | -------- | ---- | ---- | ---- |
+| 0    | 0             | 1      | -1       | 0        | 50   | 35   | tick-0 駐紮優勢：A defender 攻 B，B 不還手 |
+| 1    | 1             | 1      | -1       | -1       | 49   | 34   |  |
+| 2    | 2             | 2      | -2       | -2       | 47   | 32   |  |
+| 3    | 3             | 2      | -2       | -2       | 45   | 30   |  |
+| 4    | 4             | 4      | -4       | -4       | 41   | 26   |  |
+| 5    | 5             | 4      | -4       | -4       | 37   | 22   |  |
+| 6    | 6             | 4      | -4       | -4       | 33   | 18   |  |
+| 7    | 7             | 4      | -4       | -4       | 29   | 14   |  |
+| 8    | 8             | 8      | -8       | -8       | 21   | 6    |  |
+| 9    | 9             | 8      | -8       | -6       | 15   | 0    | B 實際 = min(8, 6) = 6（B 剩 6，封頂）；A 實際 = min(8, 21) = 8；B 歿 |
+
+> Combat tick `t = currentTick - combatStartTick`。表中假設 combat 開始於 tick 0（即 tile 在 tick 0 就有 2 個敵對 occupant）。實際遊戲中 currentTick 從 1 起算，但 combat tick 仍從 0 起算。
+
+**範例計算 2（AC-V2-02 driver）— 同上但 tick 9 有 B 友軍 +10 增援**：
+
+| tick | 加法（增援）        | combat tick t | damage | A→B 實際 | B→A 實際 | A 殘 | B 殘 |
+| ---- | ------------------- | ------------- | ------ | -------- | -------- | ---- | ---- |
+| 8    | —                   | 8             | 8      | -8       | -8       | 21   | 6    |
+| 9    | B +10（合併為 16）  | 9             | 8      | -8       | -8       | 13   | 8    |
+| 10   | —                   | 10            | 8      | -8       | -8       | 5    | 0    |
+
+tick 9 結算詳細：
+1. 加法階段（§3.2 step order step 1 → step 2 produce）：B 友軍從相鄰 tile 抵達，併入既有 B occupant：`B.amount = 6 + 10 = 16`。
+2. 減法階段（§3.2 step order step 3 combat）：`t = 9`，`damage = 8`。
+   - A→B：`min(8, A.amount=21) = 8`。
+   - B→A：`min(8, B.amount=16) = 8`（加法後的 16 足以打滿 8）。
+3. 套用：A = 21-8 = 13；B = 16-8 = 8。雙方 > 0，戰鬥繼續。
+
+無增援版本 B 早在 tick 9 陣亡（殘值 0、A 殘 15）；有增援版本 B 延後一 tick 才陣亡（tick 10 殘 0、A 殘 5）。
+
+**設計意圖**：
+
+- 同 tile multi-occupant 讓「攻擊 = 進入敵格」與 RTS 通用直覺一致，視覺上多 sprite 在同格互砍對應遊戲規則。
+- Step function 比 v1.1 線性 ramp 更平緩前段（t=0–1 都只 1 傷害），給玩家 1–2 ticks 觀察情勢、派援軍的視窗；後段在 t ≥ 4 起仍快速升爆，保證收斂。
+- Tick-0 駐紮優勢給 castle / 守土結構性激勵：玩家攻方知道要打主城至少先賠一 tick 傷害，不能一兵試水。
+- 增援機制 + 同 tick 加法優先讓「援軍救援」變成戰術核心；玩家或 AI 看到自己 occupant 即將陣亡時可派相鄰友軍救一 tick。
+
+**收斂保證**：對任意 2-faction 對戰，雙方 amount = a, b（a ≤ b）→ 約 `log₂(a) + log₂(a/2) + ... ≈ 2·log₂(a)` 個 tick 內結束（step function 後段每 tick 砍掉 `damage(t)` ≈ `t/2`，累積扣 `damage` 是幾何級數）。多 faction 混戰更快，每方受 `(N-1)·damage(t)` 傷害。
+
+> **§3.6.1（已移除，v0.12）**：原「相鄰勢力空格佔領（adjacent claim）」規則於 v0.12 撤回。v1.2 後 tile ownership 由 `occupants` derive，「鄰邊 claim」概念徹底消失，§3.6.1 不再有 revival 空間。
 
 ### 3.7 弱勢平衡（已移除，v1.1）
 
@@ -243,7 +348,7 @@ v0.12 以前 §3.5 / §3.6 / §3.7 多處用「相鄰」、「鄰格」、「距
 - **距離（Distance）= Manhattan**：`d((ax, ay), (bx, by)) = |ax−bx| + |ay−by|`。配合 4-conn 鄰格，BFS 跳數 = Manhattan 距離（在無障礙時），實際 BFS 跳數 ≥ Manhattan（有 passable 限制時）。
 - **棋盤邊界**：`0 ≤ x < boardSize`、`0 ≤ y < boardSize`。鄰格落在邊界外 = 不存在（既不參與 BFS 也不參與戰鬥配對）。
 - **派遣路徑（Player）**：玩家拖曳派遣**沒有 hop 上限**，只要 BFS 找得到一條 §3.5.2 passable 路徑就可派遣，無論距離多遠。v0.12 期間 AI rule #3 `ATTACK_RANGE_HOPS = 8` 是 AI 戰術上的自限，與玩家無關，v1.0 隨 AI 一併下線；engine `findPath` API 本身就不檢查 hops。
-- **同格定義**：同一 tile id 的兩 stack（駐紮 + 行軍抵達 / 兩條行軍同時抵達）視為「在同格」，走 §3.5.4 規則。**不存在「同格但不同 sub-cell」**：每 tile 一個 owner、一個 count、一個 tier，整格為單位。
+- **同格定義（v1.2 更新）**：同一 tile id 的多 occupant（含原有駐紮 + 行軍抵達後新增、多條行軍同 tick 抵達後合併）視為「在同格」，走 §3.5.4 抵達加法規則與 §3.6 同 tile 戰鬥規則。**v1.2 起一個 tile 可同時有 0..N 個 occupant**（每個不同 faction 各 1 個）；沒有「sub-cell」概念，每個 occupant 在視覺上共享同 tile 顯示空間（多 sprite 並陳，渲染細節見 §5.1）。每 occupant 內部單一 amount / derived tier；同 faction 在同 tile 永遠只 1 個 occupant entry。
 
 > 設計理由：先把這些寫成 PRD 條目，未來改棋盤大小、改派遣 UI、改路徑視覺化、引入地形效果，都有單一 source of truth 可指。
 
@@ -307,63 +412,96 @@ v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI
 
 ### 6.1 勝利
 
-- 玩家佔領**所有其他勢力的主城** → 勝利畫面。
+- 玩家「佔領所有其他勢力的主城」 → 勝利畫面。「佔領 castle X」於 v1.2 定義為：castle X 的 tile 上找不到 `faction === X.castleOwner` 的 occupant（即原 owner faction 被殲滅），且該 tick 結算後 castleOwner faction 被標為 `defeated`。
 - 或：在所有其他勢力皆已敗北（被其他勢力滅了）的狀態下玩家主城仍在 → 勝利。
 
 ### 6.2 敗北
 
-- 玩家主城被任一敵方勢力佔領 → 敗北畫面。
+- 玩家主城 tile 上找不到玩家 faction 的 occupant → 敗北畫面（不論奪城者是誰）。
 
 ### 6.3 非玩家勢力敗北
 
-- 非玩家勢力主城被佔領 → 該勢力 `defeated = true`（沿用 `GameState`），其餘城外格立即變為 Neutral 所有，stack 保留作為野怪（不再行動）。
-- 敗北勢力的留存 stack 在後續結算中視同 `NEUTRAL` owner：正常參與 §3.6 戰鬥與 engagement counter；不主動派遣、不產兵。
+- 非玩家勢力主城淪陷 → 該勢力 `defeated = true`（沿用 `GameState`）。
+- 敗北 faction 的留存單位處置（v1.2）：
+  - **既有 tile occupant**：留在原 tile 上，amount 不變，但 `faction` 視同 `NEUTRAL`（轉為野怪）。後續 §3.6 戰鬥按 NEUTRAL 規則參與（不主動還手、不產兵，但仍會被打）。
+  - **行軍中的 marching stack**：v1.2 簡化處理 — `defeated` 觸發瞬間，該 faction 所有 marching stack **立即消滅**（不再抵達任何 tile）。原因：敗北瞬間發生於 castle 淪陷的 tick，此時繼續推進其 marching stack 違反「敗北 = 立即停止行動」直覺；且 multi-occupant 模型下讓死掉 faction 的 stack 繼續抵達會造成 ownership 標籤混亂。
+- 敗北勢力的留存 occupant 在後續結算中視同 `NEUTRAL`：正常被打、不主動攻擊（因為 NEUTRAL 無 defender 角色，§3.6 對 NEUTRAL occupant 的 outgoing damage 視為 0；其他 faction 對 NEUTRAL occupant 的 incoming 正常計算）。**例外**：若 NEUTRAL occupant 同 tile 有多家敵對 faction 在打，NEUTRAL 不算「敵對 faction 之一」 — 戰鬥仍在那些 active faction 之間結算，NEUTRAL 是純被動 punching bag。
 
 ## 7. Acceptance Criteria（可驗證）
 
-每條都可由人類手動或自動化測試驗證。AC-04 / AC-05 / AC-08 等純邏輯項可在 vitest 中跑自動測試；UI 相關項（AC-01 / 06 / 07 / 09 / 11 / 12 / 13 / 14）走 manual smoke。v0.12 期間 AI 相關 AC（AC-15、AC-22、AC-27..AC-35）隨 §4 一併移出 v1.0；v1 acceptance 不依賴任何 AI 行為。
+> **v1.2 大規模重編**：原 AC-01..AC-39 **整段作廢**，新規從 `AC-V2-01` 起。原因：v1.2 戰鬥模型全換（鄰邊 → 同 tile multi-occupant），多條 AC（08 / 17 / 18 / 19 / 20 / 21 / 36）語意全變；其餘看似不受影響的 AC（01 / 02 / 03 / 04 / 05 / 06 / 07 等）也因為 Province schema 改動（移除 `owner`、加入 `occupants[]`）連帶 test fixture 全需重寫。為避免 PR / git log 中 AC 號意義混亂，PRD / MILESTONES / commit / PR description 一律改用 `AC-V2-XX` 前綴。
+>
+> **PR / Test 編號規則**：
+> - 新測試 `it("[AC-V2-XX] ...")` 命名（注意 `V2-` 在中間，整體仍是 ASCII）。
+> - 舊 `it("[AC-08] ...")` 等若 test 行為仍適用新模型，可重命名為 `it("[AC-V2-NN] ...")`；行為失效則整條刪除。
+>
+> 原 AC-01..AC-39 完整描述見 git tag `archive/prd-v1.1`（或本檔 v1.1 commit）。下方 §7.1 列出 v1.2 → v1.1 對照，§7.2 為新 AC-V2 表。
 
-| #     | 條件                                                                                                                            | 驗證方式                                                                                                          |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| AC-01 | 啟動後可見 **11x11** 棋盤、4 主城在四角、玩家為 Tokugawa                                                                        | 開啟瀏覽器肉眼確認                                                                                                |
-| AC-02 | Tick 計數每 2 秒 +1，HUD 顯示                                                                                                   | 觀察 10 秒應為 5 ticks                                                                                            |
-| AC-03 | 主城所在格每 4 秒 count +1                                                                                                      | 暫停所有派遣，觀察 20 秒應 +5                                                                                     |
-| AC-04 | 當格 count 達 5 → sprite 變為 Knight；達 12 → Queen；達 25 → King (v0.9 閾值)                                                  | Headless 測試：強制 setCount，斷言 deriveTier 回傳正確 tier                                                       |
-| AC-05 | count 從 12 掉到 11 → sprite 退回 Knight；從 5 掉到 4 → 退回 Soldier (v0.9 閾值)                                                | Headless 測試：模擬戰鬥減 count，斷言 tier 更新                                                                   |
-| AC-06 | 從己方格 hold-drag 到 5 格外目標 → 顯示 BFS 路徑高亮，**目標格為敵方時仍可派遣**                                                | 操作確認；嘗試 drag 到敵方相鄰格與 5 格外敵方格                                                                   |
-| AC-07 | 派遣後來源 count 減少對應數，目標格在抵達 tick 後 count 增加（或進入戰鬥）                                                      | 觀察兩格 count 變化吻合；測試比例 50% / 100%                                                                      |
-| AC-08 | 6 Knight vs 5 Knight 相鄰 ramp 收斂（v1.1）：advance(1) → (6,5) no-dmg；advance(2) → (5,4)；advance(3) → (3,2)；advance(4) → (0,0) | Headless 測試：setUp 後逐 tick advance，斷言 count 序列吻合 §3.6 ramp 範例                                       |
-| AC-09 | 空格被相鄰己方派遣/推進佔領，所有權變更，HUD 計數更新                                                                           | 操作確認                                                                                                          |
-| AC-10 | 佔領敵方主城 → 該 AI 勢力 `defeated`，其餘領地變 Neutral                                                                        | 操作確認 + 控制台檢查；或 Headless 跑「玩家秒殺」場景                                                             |
-| AC-11 | 玩家主城被佔領 → 顯示「敗北」畫面 + 重新開始按鈕                                                                                | 操作確認；重新開始可回初始狀態                                                                                    |
-| AC-12 | 玩家佔領所有 3 個 AI 主城 → 顯示「勝利」畫面                                                                                    | 操作確認                                                                                                          |
-| AC-13 | 暫停按鈕停止 tick，恢復後從停止處繼續                                                                                           | 暫停 5 秒後恢復，tick 數連續                                                                                      |
-| AC-14 | 2x 速度按下後 tick 間隔 = 1 秒                                                                                                  | 計時 10 秒應為 10 ticks                                                                                           |
-| ~~AC-15~~ | _AI 行為類，§4 於 v1.0 移出，AC 一併下線_ | — |
-| AC-16 | 主城派遣 100% 時來源至少保留 1 兵                                                                                               | 操作 / Headless：主城 count = 10，派遣 100%，斷言來源剩 1、marching stack count = 9                               |
-| AC-17 | 敵方 marching stack 同 tick 進同格 → 頭對頭碰撞用 §3.6 `engagementTicks = 1` 一次性結算（雙方各扣 1，不寫入 engagementMap） | Headless：兩 marching stack 同時抵達中間格，斷言雙方 count 各 -1 且 `state.engagements` 不含此 pair key |
-| AC-18 | 路徑被切：marching stack 在前一格停下，下 tick 從相鄰戰鬥                                                                       | Headless：派遣中讓敵方切入路徑，斷言 marching stack idx 停滯且觸發 3.6                                            |
-| AC-19 | §3.6 ramp 收斂（v1.1）：兩相鄰 3 Soldier 對峙，advance(1) 後 (3,3) no-dmg；advance(2) → (2,2)；advance(3) → (0,0)；advance(4) pair 已解散 | Headless：擺 3 vs 3 對峙逐 tick advance，斷言 count 序列 + engagementMap 狀態（tick 3 後 key 消失） |
-| AC-20 | 同勢力雙 marching stack 同 tick 入同格 → 合併、path 取剩餘步數最少者，tiebreak 取早派遣者                                       | Headless：派遣 stack A（剩 3 步）與 stack B（剩 1 步）同時抵達；斷言合併後 count 加總且 path 用 B 的剩餘 path     |
-| AC-21 | 敵方 marching stack 頭對頭（雙方非終點）→ 倖存方繼續原路徑、不入駐碰撞格                                                       | Headless：擺好兩條路徑交叉的 stack，斷言碰撞 tick 後倖存方 idx 仍前進、碰撞格無新主                               |
-| ~~AC-22~~ | _AI RNG 確定性類，§4.2 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-23~~ | _§3.6.1 於 v0.12 移除，原 adjacent claim 單一勢力翻 owner 場景作廢_ | — |
-| ~~AC-24~~ | _§3.6.1 於 v0.12 移除，原多勢力戰力決勝場景作廢_ | — |
-| ~~AC-25~~ | _§3.6.1 於 v0.12 移除，原 claim 不變更 count 場景作廢_ | — |
-| ~~AC-26~~ | _§3.6.1 hysteresis 隨 §3.6.1 於 v0.12 一併移除_ | — |
-| ~~AC-27~~ | _AI rule #2 castle 分階保護，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-28~~ | _AI rule #2 Soldier 禁止派兵，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-29~~ | _AI rule #3 距離放寬，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-30~~ | _AI rule #3 距離受限，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-31~~ | _AI rule #3 castle reserve，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-32~~ | _AI rule #3 派遣量 ≤ 0，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-33~~ | _Castle 自動溢出 (§3.5.5)，於 v1.0 移出 PRD，AC 一併下線_ | — |
-| ~~AC-34~~ | _AI rule #2.5 集結，§4.1 於 v1.0 移出，AC 一併下線_ | — |
-| ~~AC-35~~ | _Castle vs castle BFS 例外 (§3.5.6)，於 v1.0 移出 PRD，AC 一併下線_ | — |
-| AC-36 | §3.8 4-conn 鄰格：tile `(5,5)` 對 `(6,5)` / `(4,5)` / `(5,6)` / `(5,4)` 皆是鄰格；對 `(6,6)` / `(4,4)` / `(6,4)` / `(4,6)` 皆**不是**鄰格（戰鬥不配對、BFS 不視為一跳） | Headless：擺 6 個敵我格驗 §3.6 `resolveAdjacentCombat` 只配 4 對；BFS `findPath((5,5)→(6,6))` 必須繞行非對角路徑 |
-| AC-37 | §4 idle 模式：scenario `aiConfig` 全填 `"idle"` 跑 100 ticks，非玩家勢力 marching stacks count 始終 = 0；TOKUGAWA 主城 count 仍每 2 ticks +1（§3.3 產兵照常） | Headless：建 idle scenario 跑 100 ticks，斷言 `state.marchingStacks` 全程 ≤ 玩家 scripted 派遣數；非玩家 castle count 持平爬升 |
-| AC-38 | §4 scripted 模式：scenario `scriptedCommands` 指定 `{atTick: 5, from: [10,0], to: [9,0], ratio: 1.0}`，TAKEDA 的 aiConfig = `"scripted"` → tick 5 真的派一條 marching stack；其餘 tick 不動 | Headless：advance(10) 後斷言只有 tick 5 出現 TAKEDA marching stack 一筆，其餘 tick 為 0 |
-| AC-39 | §3.8 玩家派遣無 hop 上限：玩家 hold-drag 從主城 (0,0) 到 BFS 路徑長 = 18 hops 的目標格（全程己方 passable），dispatch 應該成功；同樣路徑長但中間切一格非 passable → dispatch 顯示紅色拒絕 | UI 操作 + Headless `findPath` 雙端驗：路徑全 passable → 回傳路徑陣列；中斷 passable → 回傳 null |
+### 7.1 舊 AC 作廢索引（v1.2 → v1.1 對照）
+
+| 舊 AC      | v1.2 處置                                                              |
+| ---------- | ---------------------------------------------------------------------- |
+| ~~AC-01~~  | 重編為 AC-V2-01（11x11 棋盤、4 主城、玩家 Tokugawa）                  |
+| ~~AC-02~~  | 重編為 AC-V2-02（tick 計數每 2 秒）                                   |
+| ~~AC-03~~  | 重編為 AC-V2-03（castle 每 2 ticks +1 給 castleOwner occupant）       |
+| ~~AC-04~~  | 重編為 AC-V2-04（deriveTier 閾值 5/12/25）                            |
+| ~~AC-05~~  | 重編為 AC-V2-05（tier 降級）                                          |
+| ~~AC-06~~  | 重編為 AC-V2-06（拖曳派遣 + BFS 路徑高亮）                            |
+| ~~AC-07~~  | 重編為 AC-V2-07（派遣後來源 amount 減 / 目標 amount 加）             |
+| ~~AC-08~~  | 整段重寫為 AC-V2-08（同 tile 50 vs 36 step-function ramp）            |
+| ~~AC-09~~  | 重編為 AC-V2-09（空格被佔領 → derived owner 變更）                   |
+| ~~AC-10~~  | 重編為 AC-V2-25（佔領敵方主城 → defeated + 留存 occupant 轉 NEUTRAL）|
+| ~~AC-11~~  | 重編為 AC-V2-12（玩家敗北畫面）                                       |
+| ~~AC-12~~  | 重編為 AC-V2-27（玩家勝利畫面）                                       |
+| ~~AC-13~~  | 重編為 AC-V2-13（暫停 / 繼續）                                        |
+| ~~AC-14~~  | 重編為 AC-V2-14（2x 速度）                                            |
+| ~~AC-15~~  | 持續 deferred（AI 行為類）                                            |
+| ~~AC-16~~  | 重編為 AC-V2-15（主城派遣留 1）                                       |
+| ~~AC-17~~  | 整段廢除（頭對頭一次性碰撞模型不存在）→ 新增 AC-V2-16 force-join 取代 |
+| ~~AC-18~~  | 整段廢除（路徑被切停前一格不再適用）→ 新增 AC-V2-16 force-join 取代  |
+| ~~AC-19~~  | 整段重寫為 AC-V2-17（同 tile 3 vs 3 step-function ramp）              |
+| ~~AC-20~~  | 重編為 AC-V2-18（同陣營雙 stack 同 tick 抵達合併 + path 選擇）       |
+| ~~AC-21~~  | 整段廢除（頭對頭非終點概念不存在）→ AC-V2-16 涵蓋                    |
+| ~~AC-22~~  | 持續 deferred（AI 行為類）                                            |
+| ~~AC-23..26~~ | 持續廢除（§3.6.1 已於 v0.12 移除）                                 |
+| ~~AC-27..35~~ | 持續 deferred（AI 行為類）                                         |
+| ~~AC-36~~  | 一半重編為 AC-V2-19（4-conn BFS 鄰格），戰鬥配對部分廢除（v1.2 無鄰邊戰鬥） |
+| ~~AC-37~~  | 重編為 AC-V2-20（idle 模式）                                          |
+| ~~AC-38~~  | 重編為 AC-V2-21（scripted 模式）                                      |
+| ~~AC-39~~  | 重編為 AC-V2-22（玩家派遣無 hop 上限）                                |
+
+### 7.2 AC-V2 新表
+
+| #         | 條件                                                                                                                            | 驗證方式                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| AC-V2-01  | 啟動後可見 **11x11** 棋盤、4 主城在四角、玩家為 Tokugawa                                                                        | 開啟瀏覽器肉眼確認                                                                                                |
+| AC-V2-02  | Tick 計數每 2 秒 +1，HUD 顯示                                                                                                   | 觀察 10 秒應為 5 ticks                                                                                            |
+| AC-V2-03  | castle tile 每 2 ticks 對 castleOwner faction 的 occupant amount +1；無 castleOwner occupant 時暫停產兵                          | Headless：advance 20 ticks，斷言 castle occupant amount +10；移除 castleOwner occupant，斷言下 tick 不 +1         |
+| AC-V2-04  | occupant amount 達 5 → derived tier 為 Knight；達 12 → Queen；達 25 → King（閾值同 v0.9）                                       | Headless：setAmount(5/12/25)，斷言 deriveTier 回傳正確 tier                                                       |
+| AC-V2-05  | amount 從 12 掉到 11 → tier 退回 Knight；從 5 掉到 4 → 退回 Soldier                                                              | Headless：模擬戰鬥減 amount，斷言 derived tier 更新                                                              |
+| AC-V2-06  | 從己方 tile（含 castle 或一般領地）hold-drag 到 5 格外目標 → 顯示 BFS 路徑高亮，**目標格為敵方獨佔 / contested 時仍可派遣**     | 操作確認；嘗試 drag 到敵方相鄰格、敵方 5 格外、contested tile                                                     |
+| AC-V2-07  | 派遣後來源 tile 的己方 occupant amount 減少對應數；marching stack 抵達後在目標 tile 新增 occupant 或併入既有同陣營 occupant     | 觀察兩 tile amount 變化吻合；測試比例 50% / 100%                                                                  |
+| AC-V2-08  | **§3.6 case 1**：tile 上 A (TOKUGAWA, amount=50, isDefender=true, arrivalTick=0) + B (TAKEDA, amount=36, isDefender=false, arrivalTick=0)、combatStartTick=0；逐 tick advance 後 amount 序列吻合範例計算表（tick 9 結束時 A=15、B=0、B occupant 退出） | Headless：建場景、逐 tick advance、斷言 occupants[].amount 序列與 combatStartTick                                |
+| AC-V2-09  | 空格被相鄰己方派遣 / 推進抵達後 → derived owner 變為該勢力（占有 occupant.faction），HUD 計數更新                                | 操作確認 + Headless                                                                                              |
+| AC-V2-10  | 同 tile 3 個敵對 occupant（A 50 / B 30 / C 20，A 為 defender）：每 occupant 對另兩 occupant 各獨立發動一次攻擊，傷害上限以自身 amount 算（同 tick 內不會因為打了一個就減損下一個）；tick 0 只有 A 攻 B 和 C，B 與 C 互攻但不攻 A | Headless：逐 tick advance，斷言 incoming damage 矩陣計算正確                                                     |
+| AC-V2-11  | 同 tick 多 faction marching stack 抵達空 tile：用 `state.rng.shuffle` 抽 defender，同 seed 必同結果；其餘 isDefender=false       | Headless：固定 seed，運行 5 次斷言抽中的 defender faction 完全相同                                               |
+| AC-V2-12  | 玩家主城淪陷（castleOwner 在 castle tile 上 occupant 被殲滅）→ 敗北畫面 + 重新開始                                              | 操作確認 / Headless：刻意送敵入主城打殲滅                                                                         |
+| AC-V2-13  | 暫停按鈕停止 tick，恢復後從停止處繼續                                                                                           | 暫停 5 秒後恢復，tick 數連續                                                                                      |
+| AC-V2-14  | 2x 速度按下後 tick 間隔 = 1 秒                                                                                                  | 計時 10 秒應為 10 ticks                                                                                           |
+| AC-V2-15  | 主城派遣 100% 時來源至少保留 1 兵（即送 `count - 1`）                                                                          | 操作 / Headless：主城 amount=10、派遣 100%，斷言來源 amount=1、marching stack count=9                            |
+| AC-V2-16  | **§3.5.4 #2(e) force-join**：marching stack 抵達 contested tile（無論友軍 / 敵軍 / 是否終點）→ 強制變 occupant 加入戰鬥；同陣營 → 併入既有 occupant amount；新 faction → 新增 occupant `isDefender=false`；marching stack 原 path 丟棄 | Headless：擺好 contested A vs B tile + 第 3 faction（C）的 marching stack 抵達 → 斷言 C 變新 occupant、原 stack 從 state.marchingStacks 移除；另測同 faction 增援 case |
+| AC-V2-17  | **§3.6 case 1 reinforcement (case 2)**：同 AC-V2-08，但於 tick 9 進入結算前有一條友軍 marching stack（TAKEDA, count=10）抵達同 tile；當 tick 加法（B amount 6→16）先於減法（雙方各扣 8）；結算後 A=13、B=8；tick 10 結束時 A=5、B=0 | Headless：設定 marching stack arrivalTick=9，advance(10)，斷言序列                                                |
+| AC-V2-18  | 同陣營雙 marching stack 同 tick 抵達同 tile → 合併為單一加法事件；path 取剩餘步數最少；tiebreak 取早派遣者                       | Headless：派遣 stack A（剩 3 步）+ stack B（剩 1 步）同時抵達；斷言合併後 marching stack（若非終點）path 用 B 的剩餘 path、count 加總 |
+| AC-V2-19  | **§3.8 4-conn 鄰格**（BFS only）：tile `(5,5)` 對 `(6,5)/(4,5)/(5,6)/(5,4)` 皆鄰格；對 `(6,6)/(4,4)/(6,4)/(4,6)` 不鄰格；BFS `findPath((5,5)→(6,6))` 必須繞行非對角路徑。**戰鬥不再以鄰格為單位**（v1.2 戰鬥在同 tile，非鄰格） | Headless：擺場景驗 BFS 鄰格 + 路徑；不再驗鄰格戰鬥配對                                                            |
+| AC-V2-20  | scenario `aiConfig` 全填 `"idle"` 跑 100 ticks，非玩家勢力 marching stacks count 始終 = 0；TOKUGAWA castle occupant 仍每 2 ticks +1 | Headless：建 idle scenario 跑 100 ticks                                                                          |
+| AC-V2-21  | scenario `scriptedCommands` 指定 `{atTick: 5, from: [10,0], to: [9,0], ratio: 1.0}`、TAKEDA aiConfig=`"scripted"` → tick 5 真的派一條 marching stack | Headless：advance(10) 後斷言只有 tick 5 出現 TAKEDA marching stack 一筆                                          |
+| AC-V2-22  | 玩家派遣**無 hop 上限**：hold-drag 從主城到 BFS 路徑長 = 18 hops 的目標格（全程 passable）dispatch 成功；中間切一格非 passable → 紅色拒絕 | UI + Headless `findPath` 雙端驗                                                                                  |
+| AC-V2-23  | **BFS passable（v1.2 multi-occupant 版）**：contested tile（2+ faction）**不**可作為中間經過格；空 tile 或純己方獨佔 tile 可                                                                                                  | Headless：擺 contested tile 在路徑中間，斷言 BFS 跳過該 tile 或回傳 null（無繞路）；改用空 tile 中間，斷言 BFS 找到 |
+| AC-V2-24  | **同歸於盡**：兩家 amount 相同的 occupant 同 tick 互砍至 0 → occupants=[]、combatStartTick=null；下 tick tile 為空（無 owner、可被任何 faction 派遣抵達）                                                                       | Headless：擺 2 vs 2 對戰（兩家同 amount），advance 到雙方歸零，斷言 tile state                                   |
+| AC-V2-25  | 佔領敵方主城 → 該 AI 勢力 `defeated`，留存 occupants 轉 NEUTRAL（不主動還手、可被打），該 faction 所有 marching stack 立即消滅                                                                                                | 操作確認 + 控制台 / Headless 跑「玩家秒殺敵 castle」場景                                                          |
+| AC-V2-26  | **Castle 產兵與戰鬥同 tick**：A 在自家 castle 上 amount=1，B 入侵 amount=5，combatStartTick=0；advance(1) 應觀察到 castle 產兵 +1 → A 加法後 amount=2，combat 減法 A 對 B 扣 `min(1, 2)=1`、B 不還手（tick 0 駐紮優勢）→ A=2、B=4 | Headless：精確驗 step order step 2 (produce) 先於 step 3 (combat)                                                |
+| AC-V2-27  | 玩家佔領所有 3 個敵 castle → 顯示「勝利」畫面                                                                                   | 操作確認                                                                                                          |
+| AC-V2-28  | 同 tile 3 vs 3 對峙（兩家 amount=3，A 為 defender）：advance(1) → A=3 / B=2（tick 0 駐紮優勢，A 攻 B 不還手）；advance(2) → A=2 / B=1（tick 1，damage=1，互打）；advance(3) → A=0 / B=0（tick 2，damage=2，互砍至盡同歸於盡）；tile 變空、combatStartTick=null | Headless：擺 3 vs 3，逐 tick advance，斷言序列 + tile state                                                       |
 
 ## 8. 範圍外（Future Scope）
 
@@ -381,18 +519,26 @@ v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI
 
 ### 9.1 引擎層（純邏輯，無 Pixi/DOM 依賴 — 可 headless 跑）
 
-| 模組                       | 職責                                                |
-| -------------------------- | --------------------------------------------------- |
-| `src/engine/state.ts`      | `GameState`、`Province { tier, count, owner }`、行軍佇列 |
-| `src/engine/tick.ts`       | Tick 推進器（純函數 step(state) → state'）          |
-| `src/engine/upgrade.ts`    | `deriveTier(count)` 純函數                          |
-| `src/engine/combat.ts`     | `computeLoss(own, opp)` 純函數 + adjacency 結算     |
-| `src/engine/movement.ts`   | BFS 路徑 + marching stack 推進 + 碰撞解析           |
-| `src/engine/production.ts` | 主城產兵                                            |
-| `src/engine/victory.ts`    | 勝負判定                                            |
-| `src/engine/types.ts`      | 共用型別（Faction / Tier / Province / MarchingStack）|
+| 模組                       | 職責（v1.2）                                                |
+| -------------------------- | ----------------------------------------------------------- |
+| `src/engine/state.ts`      | `GameState`、`Province { id, isCastle, castleOwner, occupants[], combatStartTick }`、行軍佇列。**`owner` 欄位刪除**；`stalemates`/`engagements` 欄位刪除（v1.2 不再用） |
+| `src/engine/tick.ts`       | Tick 推進器（純函數 step(state) → state'）；step order v1.2：`movement → produce → combat → defeats → victory` |
+| `src/engine/upgrade.ts`    | `deriveTier(amount)` 純函數                                 |
+| `src/engine/combat.ts`     | **整檔重寫**：`resolveSameTileCombat(state)` — 對每個 contested tile 結算 §3.6 step-function ramp、defender tick-0 優勢、multi-party 獨立攻擊、damage 上限封頂；同時更新 `combatStartTick`（首戰設定、戰鬥結束清空）|
+| `src/engine/movement.ts`   | BFS 路徑（含 v1.2 passable 規則）+ marching stack 推進 + §3.5.4 抵達加法解析（含同陣營合併、新增 occupant、force-join）|
+| `src/engine/production.ts` | 主城產兵 — 為每個 castle 找到 castleOwner faction 的 occupant，amount +1；找不到 occupant 時 skip |
+| `src/engine/victory.ts`    | 勝負判定 — castle tile 上 castleOwner faction 無 occupant → defeated；defeated faction 留存 occupant 改 NEUTRAL、marching stack 立即消滅 |
+| `src/engine/types.ts`      | 共用型別 — `FactionId`、`Tier`、`TileId`、`Province`、`Occupant`、`MarchingStack`；**移除**：`StalemateMap`、`EngagementMap`、`PairKey`、`CombatPair`（鄰邊戰鬥模型 artifact） |
 
-> Engine 中 `src/engine/ai.ts`（含 `stepAi`、rule #1/#2/#2.5/#3 實作）、`src/engine/overflow.ts`（castle overflow phase）目前**仍在 repo 內**，`tick.ts` 也仍會呼叫 `stepAi` + `applyCastleOverflow`，但對應 PRD 規格（v0.12 §4 / §3.5.5）已隨 v1.0 移出。屬「規格 orphan」狀態：行為不在本 PRD 規範範圍，未來 AI 重啟時必須回頭重審。
+> **v1.1 → v1.2 schema diff**（已知 breaking change）：
+>
+> - `Province` 移除：`owner: FactionId`、`count: number`、`tier: Tier`（後者本就 derived，但若以 cache 欄存在則 v1.2 一併移除）。
+> - `Province` 新增：`castleOwner: FactionId | null`、`occupants: readonly Occupant[]`、`combatStartTick: number | null`。
+> - `GameState.engagements: EngagementMap`（v1.1 引入）：**移除**。
+> - `GameState.stalemates: StalemateMap`（v1.0 已移除，但若仍在 schema 內）：確認清除。
+> - `Province.lastClaimedAtTick`（v0.12 已移除）：確認 schema 清除。
+>
+> Engine 中 `src/engine/ai.ts`（含 `stepAi`、rule #1/#2/#2.5/#3 實作）、`src/engine/overflow.ts`（castle overflow phase）目前**仍在 repo 內**，但 v1.2 後其行為**幾乎必然錯**（讀取 `province.owner`、`province.count` 等已刪欄位 → typecheck fail）。M1.x 重啟 AI 規格前必須整檔重寫，**v1.2 動工時建議直接 stub 為 `return state`**（保留 export 簽名供 `tick.ts` 呼叫但無實際行為），避免 typecheck 卡死。
 
 ### 9.2 渲染層（Pixi.js）
 

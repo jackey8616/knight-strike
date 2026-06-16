@@ -2,7 +2,7 @@
 
 本文件把 [`PRD.md`](PRD.md) 切成交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
 
-> PRD 同步基準：**v1.0**（pruned baseline，AI 整段移出，等次輪 PRD 重設計）。當前 v1 acceptance 不涵蓋任何 AI 行為；本文件 M1.8 / M2.2.5–M2.2.8 / M3 等 AI 相關 milestone 統一標 **deferred**，等 AI 規格回到 PRD 後再重啟。v0.12 完整 AI milestone 描述見 git tag `archive/prd-v0.12`。
+> PRD 同步基準：**v1.2**（同 tile multi-occupant 戰鬥模型）。v1.1 期間「pair-based ramp counter」鄰邊戰鬥模型整段廢除，相關 milestone（M1.4 / M1.5 / M1.6 collision / M1.9 step order）需依新規重寫；v1.0 把 AI 整段移出 PRD 後 M1.8 / M2.2.5–M2.2.8 / M3 仍為 **deferred**。AC 編號自 v1.2 起一律 `AC-V2-XX`；本文件出現的舊 AC 編號（AC-08 / 17 / 18 / 19 / 20 / 21 / 36 等）應參考 PRD §7.1 對照表替換。v0.12 完整 AI milestone 描述見 git tag `archive/prd-v0.12`，v1.1 鄰邊戰鬥模型描述見 `archive/prd-v1.1`。
 
 工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
@@ -45,7 +45,8 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 - 檔案：`src/engine/types.ts`、`src/engine/state.ts`、`src/engine/util/rng.ts`、`src/engine/util/rng.test.ts`
 - 對應 PRD：§2、§3.1、§3.1.1、§3.5.3、§10.2
 - 依賴：M1.0
-- 完成定義：`FactionId` / `Tier` / `TileId` / `Province` / `MarchingStack`（含 `id` / `dispatchedAtTick`）/ `GameState` / `StalemateMap` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。`Province.lastClaimedAtTick` 欄位於 PRD v0.12 §3.6.1 移除後一併下線（歷史 M1.6.5 曾要求加入）。
+- 完成定義（v1.2）：`FactionId` / `Tier` / `TileId` / `Province { id, isCastle, castleOwner, occupants[], combatStartTick }` / `Occupant { faction, amount, arrivalTick, isDefender }` / `MarchingStack`（含 `id` / `dispatchedAtTick`）/ `GameState` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。
+- **v1.2 schema 移除**：`Province.owner`、`Province.count`、`Province.tier`、`Province.lastClaimedAtTick`、`GameState.engagements: EngagementMap`、`GameState.stalemates: StalemateMap` — 全部刪除。`StalemateMap` / `EngagementMap` 型別本身亦從 `types.ts` 移除。
 
 ### M1.2 — Upgrade（deriveTier）
 
@@ -60,34 +61,41 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 
 - 檔案：`src/engine/production.ts`、`src/engine/production.test.ts`
 - 對應 PRD：§3.2、§3.3
-- 對應 AC：AC-03
+- 對應 AC：AC-V2-03（原 AC-03，v1.2 重編）
 - 依賴：M1.1
-- 完成定義：每 2 ticks +1、敵方佔領中時不產兵；tick 0 不產、tick 2 首發。
+- 完成定義（v1.2）：每 2 ticks 對 castle tile 上「castleOwner faction 的 occupant」amount +1；無該 occupant 時 skip；tick 0 不產、tick 2 首發。
 
-### M1.4 — Combat formula + adjacency 結算
+### ~~M1.4 — Combat formula + adjacency 結算~~（v1.2 整段廢除）
 
-- 檔案：`src/engine/combat.ts`、`src/engine/combat.test.ts`
-- 對應 PRD：§3.6
-- 對應 AC：AC-08
-- 依賴：M1.2
-- 完成定義：`computeLoss(own, opp)` 純函數、相鄰 pair 同步雙寫、多敵相鄰累加 loss、AC-08 數字精確（10S vs 5K → 6 / 4 且 tier 降回）。
+> v1.0 / v1.1 期 §3.6 鄰邊戰鬥模型於 v1.2 整段移除；`computeLoss(own, opp)` / pair-based ramp counter 全失效。新規見下方 **M1.4-V2**。
 
-### M1.5 — Stalemate counter（drain mode）
+### M1.4-V2 — Same-tile Combat（§3.6 v1.2）
 
-- 檔案：`src/engine/combat.ts`（合入 `updateStalemates`）、`src/engine/combat.test.ts` 增 case
-- 對應 PRD：§3.7
-- 對應 AC：AC-19
-- 依賴：M1.4
-- 完成定義：3v3 對峙 advance(4) 仍 3、advance(5)=2、(6)=1、(7)=0 精確命中；pair 解散時 counter 丟棄；loss>0 時 counter 歸零、drain 不疊加 loss。
+- 檔案：`src/engine/combat.ts`（整檔重寫）、`src/engine/combat.test.ts`（整檔重寫）
+- 對應 PRD：§3.6 v1.2
+- 對應 AC：AC-V2-08（case 1 駐紮 50 vs 入侵 36）、AC-V2-10（多方混戰）、AC-V2-11（defender 抽籤）、AC-V2-17（case 2 增援）、AC-V2-24（同歸於盡）、AC-V2-26（castle 產兵與戰鬥同 tick）、AC-V2-28（3 vs 3 step ramp）
+- 依賴：M1.1（types.ts 新 Occupant schema）、M1.2
+- 完成定義：
+  - `resolveSameTileCombat(state)` 純函數、對每個 contested tile（occupants 含 2+ faction）結算 step-function 傷害 `damage(t) = 2^floor(log2(max(t,1)))`
+  - tick-0 駐紮優勢：t=0 時只有 isDefender=true 的 occupant 攻擊
+  - 多方混戰：每個 occupant 對每個敵對 occupant 各獨立發動一次攻擊，套 `min(base, attacker.amount)` 上限
+  - 增援：併入既有同陣營 occupant amount 必須在 §3.6 減法之前完成（§3.2 step order）
+  - combatStartTick 設定 / 清除規則正確（首戰設定、≤ 1 faction 後 null）
+  - defender 抽籤：同 tick 多 faction 同抵達空 tile 用 `state.rng.shuffle` 確定性抽選
+  - AC-V2-08 / 17 / 28 數字精確命中範例計算表
 
-### M1.6 — Movement：BFS + marching stack + 碰撞
+### ~~M1.5 — Stalemate counter（drain mode）~~（v1.1 已廢除）
+
+> 此 milestone 於 v1.1 §3.7 整段移除後即下線；v1.2 不 revive。
+
+### M1.6 — Movement：BFS + marching stack + §3.5.4 抵達加法
 
 - 檔案：`src/engine/movement.ts`、`src/engine/movement.test.ts`
-- 對應 PRD：§3.5.1（dispatch 留 1 規則）、§3.5.2、§3.5.3、§3.5.4
-- 對應 AC：AC-16、AC-17、AC-18、AC-20、AC-21
-- 依賴：M1.1、M1.4
-- 完成定義：BFS passable 規則正確、目標可為敵方、無路徑回 null；marching stack `dispatchedAtTick` / `id` 填齊；同勢力合併（最少剩餘步 + tiebreak）AC-20、頭對頭 AC-17/21、路徑被切 AC-18、主城留 1 AC-16 全綠。
-- 因公式 + 6 種 collision 子場景一檔太重，實作時可拆成「BFS + dispatch」與「collision 解析」兩個 sub-task（仍同檔）。
+- 對應 PRD：§3.5.1（dispatch 留 1）、§3.5.2 v1.2 passable、§3.5.3、§3.5.4 v1.2
+- 對應 AC：AC-V2-07、AC-V2-15、AC-V2-16（force-join）、AC-V2-18（同陣營合併）、AC-V2-22（玩家無 hop 上限）、AC-V2-23（BFS passable）
+- 依賴：M1.1、M1.4-V2
+- 完成定義（v1.2）：BFS passable = 空 tile 或純己方獨佔 tile；目標格可為敵方獨佔 / contested；marching stack `dispatchedAtTick` / `id` 填齊；§3.5.4 #1 同陣營合併、#2(a–e) 抵達分類正確（空 + 同 + 敵 + contested force-join）、#3 defender 抽籤；主城留 1。
+- v1.2 移除子規則：原 #4 / #5 頭對頭一次性碰撞、原 #6 路徑被切停前一格 → 全部由 force-join 取代。
 
 ### ~~M1.6.5 — Adjacent claim + Hysteresis~~（PRD v0.12 廢除）
 
@@ -129,10 +137,10 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 ### M1.9 — Tick orchestrator（step）
 
 - 檔案：`src/engine/tick.ts`、`src/engine/tick.test.ts`
-- 對應 PRD：§3.2（六步結算順序 + 注腳完整 step order）
-- 對應 AC：AC-02
-- 依賴：M1.3、M1.4、M1.5、M1.6、M1.7、M1.8（原 M1.6.5 已隨 PRD v0.12 §3.6.1 移除而廢除）
-- 完成定義：`step(state)` 嚴格依 PRD §3.2 注腳順序（v0.12）：`movement (含 §3.5.4 行軍抵達 claim) → combat → drain (§3.7) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`；純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊（tick 0 僅渲染、無結算；產兵於 tick 2 首次觸發；AI 評估偏移 1/2/3/4 + 每 5 ticks）。
+- 對應 PRD：§3.2 v1.2（五步結算順序）
+- 對應 AC：AC-V2-02、AC-V2-26（step order produce 先於 combat）
+- 依賴：M1.3、M1.4-V2、M1.6、M1.7（M1.5 已廢；M1.8 仍 deferred；原 M1.6.5 已於 PRD v0.12 §3.6.1 移除而廢除）
+- 完成定義（v1.2）：`step(state)` 嚴格依 PRD §3.2 v1.2 順序：`movement (§3.5.4 抵達加法) → produce → combat (§3.6 同 tile 減法) → defeats → victory`；純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊（tick 0 僅渲染、無結算；產兵於 tick 2 首次觸發）。AI 評估偏移已隨 §4 v1.0 移除；`stepAi` 仍可呼叫但屬 stub。
 
 ### M1.10 — Headless playtest CLI + scenario loader
 
@@ -335,24 +343,24 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 
 > 以下是 PRD v1.0 把 AI deferred 後新加的「次輪」工作。M1 / M2.0–M2.8 已 shipped 或屬 v1.0 active 範圍；下方 M2.9.5 / M2.9.7 是 v1.0 特有的補充。Turn 上限統一估 20 turn。
 
-### M2.9.5 — §3.8 基礎幾何形式化（regression）
+### M2.9.5 — §3.8 基礎幾何形式化（regression，v1.2 部分廢除）
 
-- **檔案**：`src/engine/combat.test.ts`（新增 4-conn 鄰格驗證 case）、`src/engine/movement.test.ts`（新增 BFS 非對角路徑驗證 case）
-- **對應 PRD**：§3.8、AC-36
-- **依賴**：無（純測試補強，engine 行為 v0.12 就是 4-conn）
-- **完成定義**：
-  - `it("[AC-36] 4-conn adjacency: combat pairs exclude diagonals")` 綠
-  - `it("[AC-36] BFS finds non-diagonal path to (5,5)→(6,6)")` 綠
-  - PR description 註明：v1.0 形式化 §3.8 後補的 regression test，engine 行為未改動
+- **檔案**：`src/engine/movement.test.ts`（新增 BFS 非對角路徑驗證 case）
+- **對應 PRD**：§3.8、AC-V2-19
+- **依賴**：無
+- **完成定義（v1.2 更新）**：
+  - `it("[AC-V2-19] BFS finds non-diagonal path to (5,5)→(6,6)")` 綠
+  - 原 `it("[AC-36] 4-conn adjacency: combat pairs exclude diagonals")` 整段廢除（v1.2 戰鬥不再以鄰格為單位 — 鄰格只用於 BFS 距離）
+  - PR description 註明：v1.2 後僅 BFS 鄰格部分有效，戰鬥配對概念不存在
 
 ### M2.9.7 — Scenario aiConfig 模式驗收
 
 - **檔案**：`src/scenarios/idle-target.json`（新；TOKUGAWA 玩家 + 三家 idle 主城作為 dispatch 目標）、`src/playtest/integration.test.ts`（新增 idle / scripted 兩條 case）
-- **對應 PRD**：§4、AC-37、AC-38
+- **對應 PRD**：§4、AC-V2-20、AC-V2-21
 - **依賴**：M1.10（playtest CLI）
 - **完成定義**：
-  - `it("[AC-37] aiConfig all idle: non-player marchingStacks stays 0 over 100 ticks")` 綠
-  - `it("[AC-38] aiConfig scripted: TAKEDA dispatches exactly once at scripted tick")` 綠
+  - `it("[AC-V2-20] aiConfig all idle: non-player marchingStacks stays 0 over 100 ticks")` 綠
+  - `it("[AC-V2-21] aiConfig scripted: TAKEDA dispatches exactly once at scripted tick")` 綠
   - `src/scenarios/idle-target.json` 是 v1.0 manual smoke 的預設場景（取代 v0.12 期間的 `default.json`，後者保留作 AI 重啟參考；MAIN 入口 default 改載 `idle-target.json`）
 
 ### v1.0 退出條件（合併 M2 + M2.9.5/.7）
@@ -483,6 +491,8 @@ pnpm build
 ---
 
 ## 對照表（milestone × AC）
+
+> **v1.2 註**：下表沿用 v1.0 / v1.1 期的 AC 編號（AC-01..AC-39），自 v1.2 起整段重編為 `AC-V2-XX`（見 PRD §7.1 對照表）。AC-08 / 17 / 18 / 19 / 20 / 21 / 36 對應的 milestone 行為已隨 v1.2 戰鬥模型改動而失效；下表保留作 v1.0 / v1.1 歷史索引，v1.2 後新測試一律掛 AC-V2 編號。
 
 | AC     | M1  | M2  | M3  | M4  |
 | ------ | --- | --- | --- | --- |
