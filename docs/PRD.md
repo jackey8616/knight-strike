@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.9
+**Version**: v0.10
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -12,6 +12,7 @@
 - v0.7 — §3.6.1 補 hysteresis 規則（claim 後 3 ticks 保護期）；Province 新增 lastClaimedAtTick 欄位；新增 AC-26
 - v0.8 — §4.1 Rule #2 分階累積保護避免主城被抽乾；Rule #3 ATTACK_RANGE_HOPS 4→8；§3.5.1 補 AI 派遣下限規則；新增 AC-27/28/29/30
 - v0.9 — §3.4 Tier 閾值降為 5/12/25；§4.1 ATTACK_POWER_RATIO 1.5→1.0；§4.1 Rule #3 castle source 保留 5 兵；§4.1 Rule #2 castle 分階閾值同步更新；新增 AC-31/32。M1 收斂導向，戰場累積機制議題保留至 M2 再議
+- v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（涵蓋 11x11 相鄰 corner castle 互攻路徑）；AC-30 距離數值同步更新。M1.11 最終嘗試
 
 ## 1. 願景與背景
 
@@ -340,10 +341,10 @@ function updateStalemates(
 
    若派遣量 ≤ 0，rule #3 不 fire。
 
-   常數：`ATTACK_RANGE_HOPS = 8`（v0.8 放寬，v0.9 不變）；`ATTACK_POWER_RATIO = 1.0`（v0.8 為 1.5，v0.9 放寬）。
+   常數：`ATTACK_RANGE_HOPS = 12`（v0.8 為 4，v0.9 為 8，v0.10 進一步放寬以涵蓋 11x11 相鄰 corner castle 互攻最短路徑 10 hops）；`ATTACK_POWER_RATIO = 1.0`（v0.8 為 1.5，v0.9 放寬）。
 
    設計意圖：
-   - `ATTACK_RANGE_HOPS = 8`：原值 4 在 11x11 default scenario 上不可能 fire（對角距離 20，前線推到中段時離敵方主城仍 14–15 格）。放寬到 8 讓前線推進到地圖中段時即可觸發進攻評估。
+   - `ATTACK_RANGE_HOPS = 12`：v0.8 設 4、v0.9 設 8 仍不夠 — 11x11 corner 對角 manhattan = 20、相鄰 corner = 10，castle 為 source 到敵 castle 最短路徑 ≥ 10 hops。提升至 12 涵蓋相鄰 corner 對戰（10 hops 路徑），保留對角戰（20 hops）走 frontier 累積路線。
    - `ATTACK_POWER_RATIO = 1.0`（v0.9）：v0.8 觀察 attacker source 戰力天花板（受戰場無累積機制限制）無法達到 1.5× 條件。放寬到 1.0× 允許「均勢進攻」，讓 castle 升 Queen 後能對等戰力進攻敵 castle，給遊戲明確的收斂機制。
    - Castle reserve 5：避免兩 castle 同時 rule #3 互攻時雙方主城留 1 兵被瞬間 drain，保留 5 兵讓主城在進攻派出後仍有 Knight tier 防禦力（power 20）抵擋反擊。
 
@@ -457,7 +458,7 @@ function updateStalemates(
 | AC-27 | Castle 分階累積保護（Knight 階）：TOKUGAWA 主城 count=8 (Knight) 相鄰空格 → rule #2 派出 `min(floor(8*0.25), 8-5) = 2` 兵，source 變 6 | Headless：stepAi 後斷言 marching stack count=2、source count=6                                                    |
 | AC-28 | Castle 分階累積保護（Soldier 階禁止派兵）：TOKUGAWA 主城 count=4 (Soldier) 相鄰空格、無其他合格 source、無敵方威脅、無進攻目標 → rule #2 不對主城 fire；fallthrough 走規則 #4（不動） | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 | AC-29 | Rule #3 距離放寬：TOKUGAWA 非主城格 (3,0) count=10 (Knight, power=40)、TAKEDA 主城 (10,0) count=3 (Soldier, power=3)、distance=7 (≤ 8) → rule #3 fire，派 `count-1 = 9` 兵；source.count → 1 | Headless：stepAi 後斷言 marching stack count=9、source count=1、path 終點 = TAKEDA 主城                          |
-| AC-30 | Rule #3 距離仍受限：source 到敵方主城最短路徑 = 9 hops (> 8) → rule #3 不 fire                                                  | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
+| AC-30 | Rule #3 距離仍受限：source 到敵方主城最短路徑 = 13 hops (> 12) → rule #3 不 fire                                                | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 | AC-31 | Rule #3 castle source 保留 5 兵：TOKUGAWA 主城 (0,0) count=14 (Queen, power 168)、TAKEDA 主城 (10,0) count=12 (Queen, power 144)、路徑 ≤ 8 hops、power ratio 1.0 滿足 → 派遣量 = 14 − 5 = 9，TOKUGAWA castle 保留 5（Knight） | Headless：stepAi 後斷言 marching stack count=9、source count=5、path 終點 = TAKEDA 主城                          |
 | AC-32 | Rule #3 派遣量 ≤ 0 時不 fire：TOKUGAWA 主城 count=5 (Knight, power 20)、TAKEDA 主城 count=5 (Knight, power 20)、ratio 1.0、hops 滿足 → 派遣量 = 5 − 5 = 0，跳過，rule #3 不 fire | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 
