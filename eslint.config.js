@@ -8,7 +8,6 @@ export default tseslint.config(
       "node_modules/**",
       "dist/**",
       "coverage/**",
-      "src/main.ts",
       "src/game/**",
       "src/map/**",
       "src/unit/**",

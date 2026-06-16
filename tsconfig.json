@@ -30,6 +30,7 @@
     }
   },
   "include": [
+    "src/main.ts",
     "src/engine/**/*.ts",
     "src/render/**/*.ts",
     "src/input/**/*.ts",
@@ -44,7 +45,6 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/main.ts",
     "src/game",
     "src/map",
     "src/unit",
