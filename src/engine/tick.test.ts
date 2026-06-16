@@ -33,7 +33,7 @@ function makeProvince(
   count: number,
   isCastle = false,
 ): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle, lastClaimedAtTick: null };
+  return { id: tileId(x, y), x, y, owner, count, isCastle };
 }
 
 type BuildOpts = {
@@ -243,16 +243,12 @@ describe("step runs castle overflow after produce (PRD §3.2 v0.11 step order)",
   it("produce push from count=30 to 31 immediately overflows the +1 to frontline", () => {
     // Castle starts at 30 (not over the threshold). On a production tick the
     // castle goes to 31, then overflow phase emits a marching stack count=1
-    // and the castle drops back to 30 — all within the same tick. The (2,0)
-    // tile is a TAK garrison (not NEUTRAL empty) so the claim phase between
-    // combat and overflow can't convert it and erase the frontline; loss=0
-    // both ways at count 1 vs 1, so the garrison still stands when overflow
-    // evaluates.
+    // and the castle drops back to 30 — all within the same tick.
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 30, true),
         makeProvince(1, 0, "TOKUGAWA", 1, false),
-        makeProvince(2, 0, "TAKEDA", 1, false),
+        makeProvince(2, 0, "NEUTRAL", 0, false),
       ],
       tick: 2,
     });

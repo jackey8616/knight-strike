@@ -1,5 +1,4 @@
 import { stepAi } from "@/engine/ai";
-import { applyClaimPhase } from "@/engine/claim";
 import {
   applyDrainDeductions,
   resolveAdjacentCombat,
@@ -195,7 +194,6 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
         owner: "NEUTRAL",
         count: 0,
         isCastle: false,
-        lastClaimedAtTick: null,
       });
     }
   }
@@ -208,7 +206,6 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       owner: t.owner,
       count: t.count,
       isCastle: t.isCastle,
-      lastClaimedAtTick: null,
     });
   }
   const aiConfig: Record<FactionId, AiMode> = {
@@ -281,12 +278,6 @@ export type SubEvent =
       readonly b: TileId;
       readonly lossA: number;
       readonly lossB: number;
-    }
-  | {
-      readonly type: "claim";
-      readonly tile: TileId;
-      readonly from: FactionId;
-      readonly to: FactionId;
     }
   | {
       readonly type: "stalemate_inc";
@@ -473,25 +464,9 @@ function stepWithEvents(state: GameState): {
   }
   s = applyDrainDeductions({ ...s, stalemates: su.nextMap }, su.drainDeductions);
 
-  // §3.2 step 3b: adjacent-empty claim ownership flips.
-  const beforeClaim = s;
-  s = applyClaimPhase(s);
-  if (s.provinces !== beforeClaim.provinces) {
-    for (const after of s.provinces.values()) {
-      const prev = beforeClaim.provinces.get(after.id);
-      if (prev === undefined) continue;
-      if (prev.owner !== after.owner) {
-        events.push({
-          type: "claim",
-          tile: after.id,
-          from: prev.owner,
-          to: after.owner,
-        });
-      }
-    }
-  }
-
-  // §3.2 step 3c: defeats.
+  // §3.2 step 3: defeats. (§3.6.1 adjacent-empty claim phase removed in
+  // v0.12 — owner now flips only via §3.5.4 marching arrival, already logged
+  // by the upstream marching-arrival diff.)
   const beforeDefeats = s.defeated;
   s = applyDefeats(s);
   for (const f of s.defeated) {

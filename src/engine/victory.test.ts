@@ -25,7 +25,7 @@ function makeProvince(
   count: number,
   isCastle = false,
 ): Province {
-  return { id: tileId(x, y), x, y, owner, count, isCastle, lastClaimedAtTick: null };
+  return { id: tileId(x, y), x, y, owner, count, isCastle };
 }
 
 function makeStack(
