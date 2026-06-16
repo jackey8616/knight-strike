@@ -308,6 +308,44 @@ describe("ai: rule #3 attack", () => {
     expect(to(stack)).toBe(tileId(4, 2));
     expect(stack.count).toBe(19); // count - 1 (keep one home)
   });
+
+  it("converges multiple field tiles onto the weakest enemy castle", () => {
+    const s = mkState({
+      boardSize: 5,
+      tiles: [
+        { x: 1, y: 1, faction: "TOKUGAWA", amount: 100 },
+        { x: 1, y: 3, faction: "TOKUGAWA", amount: 100 },
+        { x: 3, y: 2, faction: "TAKEDA", amount: 100, isCastle: true },
+      ],
+      aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
+      tick: 1,
+      claimEmptiesFor: "TOKUGAWA",
+    });
+    const next = stepAi(s);
+    // aggregate 99 + 99 = 198 ≥ 100 * 1.5 → both tiles march on the castle.
+    expect(next.marchingStacks).toHaveLength(2);
+    for (const stack of next.marchingStacks) {
+      expect(stack.faction).toBe("TOKUGAWA");
+      expect(to(stack)).toBe(tileId(3, 2));
+      expect(stack.count).toBe(99);
+    }
+    const froms = next.marchingStacks.map(from).sort();
+    expect(froms).toEqual([tileId(1, 1), tileId(1, 3)].sort());
+  });
+
+  it("declines when aggregate force can't beat the defender", () => {
+    const s = mkState({
+      boardSize: 5,
+      tiles: [
+        { x: 1, y: 1, faction: "TOKUGAWA", amount: 100 }, // 99 < 150
+        { x: 3, y: 2, faction: "TAKEDA", amount: 100, isCastle: true },
+      ],
+      aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
+      tick: 1,
+      claimEmptiesFor: "TOKUGAWA", // no expand / rally outlet either
+    });
+    expect(stepAi(s).marchingStacks).toHaveLength(0);
+  });
 });
 
 describe("ai: determinism", () => {

@@ -357,49 +357,137 @@ function tryRally(
   return dispatchedAny ? s : null;
 }
 
-// §4.1 rule #3: march on a reachable enemy castle when strong enough. Power is
-// raw count (count-only combat ramp); the striker keeps 1 troop home per
-// §3.5.1, so the comparison uses count-1 to mirror what actually marches out.
-function tryAttack(
+const ASSAULT_MIN_SOURCE = KNIGHT_THRESHOLD;
+
+function nearestEnemyCastleDist(
+  id: TileId,
+  enemyCastles: readonly Province[],
+): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const c of enemyCastles) {
+    const d = manhattan(id, c.id);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+// §4.1 rule #3 (v1.3 assault rewrite): the offensive. The old single-tile gate
+// (count - 1 ≥ defender × ratio) was unreachable — tiles cap at PRODUCTION_CAP
+// (100) yet a healthy castle self-replicates to ~100, so ratio 1.5 × 100 = 150
+// can never be met by one tile. Worse, an enemy castle deep in enemy land is
+// unroutable: findPath (§3.5.2) walks through empty / own tiles but treats any
+// hostile occupant as a wall, so the only hostile tiles a faction can reach are
+// its own frontier. Both together meant the AI never attacked anything and
+// every game stalemated.
+//
+// Fix: pick a reachable hostile *boundary* tile and converge MULTIPLE source
+// tiles' surplus on it. Power is raw count (§3.6 count-only). A contested tile
+// stops self-replicating (§3.3) and the AI only defends tiles near its castle,
+// so undefended frontier tiles fall to enough aggregate force; same-faction
+// stacks merge on arrival (§3.5.4). Targets are ranked: capture an enemy castle
+// outright if one is reachable, else push the frontier tile closest to an enemy
+// castle so the advance heads toward a win condition. Deterministic (no RNG) →
+// §4.2 determinism holds. Each striker keeps 1 troop home (§3.5.1).
+function tryAssault(
   state: GameState,
   faction: FactionId,
-  rng: Rng,
   profile: RuleProfile,
 ): GameState | null {
-  const targets = liveEnemyCastles(state, faction);
-  if (targets.length === 0) return null;
+  const enemyCastles = liveEnemyCastles(state, faction);
+  if (enemyCastles.length === 0) return null;
 
-  type Pair = { readonly source: Province; readonly target: Province };
-  const pairs: Pair[] = [];
-  for (const own of findOwnTiles(state, faction)) {
-    const count = ownAmount(own, faction);
-    if (count <= 1) continue;
-    const effectiveCount = count - 1;
-    for (const target of targets) {
-      const targetStrength = totalAmount(target);
-      if (effectiveCount < targetStrength * profile.attackPowerRatio) continue;
+  const ownTiles = findOwnTiles(state, faction);
+  if (ownTiles.length === 0) return null;
+
+  type Src = { readonly tile: Province; readonly send: number };
+  type Cand = {
+    readonly target: Province;
+    readonly srcs: readonly Src[];
+    readonly defender: number;
+    readonly isEnemyCastle: boolean;
+    readonly castleDist: number;
+  };
+  const cands: Cand[] = [];
+
+  for (const target of state.provinces.values()) {
+    if (!hasHostileOccupant(target, faction)) continue;
+    // Boundary check: a hostile tile fully ringed by other hostile tiles is
+    // unreachable (findPath can't cross them); skip the cheap-rejectable ones
+    // before paying for BFS.
+    let approachable = false;
+    for (const nb of neighborsOf(state, target.id)) {
+      if (!hasHostileOccupant(nb, faction)) {
+        approachable = true;
+        break;
+      }
+    }
+    if (!approachable) continue;
+
+    const defender = totalAmount(target);
+    const srcs: Src[] = [];
+    for (const own of ownTiles) {
+      if (own.isCastle) continue; // keep the home castle garrisoned
+      const count = ownAmount(own, faction);
+      if (count < ASSAULT_MIN_SOURCE) continue;
       const path = findPath(state, own.id, target.id, faction);
       if (path === null) continue;
       if (path.length - 1 > profile.attackHops) continue;
-      pairs.push({ source: own, target });
+      srcs.push({ tile: own, send: count - 1 });
+    }
+    if (srcs.length === 0) continue;
+
+    let aggregate = 0;
+    for (const s of srcs) aggregate += s.send;
+    if (aggregate < defender * profile.attackPowerRatio) continue;
+
+    cands.push({
+      target,
+      srcs,
+      defender,
+      isEnemyCastle:
+        target.isCastle &&
+        target.castleOwner !== null &&
+        target.castleOwner !== faction &&
+        target.castleOwner !== "NEUTRAL",
+      castleDist: nearestEnemyCastleDist(target.id, enemyCastles),
+    });
+  }
+  if (cands.length === 0) return null;
+
+  cands.sort((a, b) => {
+    if (a.isEnemyCastle !== b.isEnemyCastle) return a.isEnemyCastle ? -1 : 1;
+    if (a.castleDist !== b.castleDist) return a.castleDist - b.castleDist;
+    if (a.defender !== b.defender) return a.defender - b.defender;
+    return a.target.id < b.target.id ? -1 : 1;
+  });
+
+  const chosen = cands[0] as Cand;
+  const srcs = chosen.srcs
+    .slice()
+    .sort((a, b) => (a.tile.id < b.tile.id ? -1 : 1));
+  let s = state;
+  let dispatchedAny = false;
+  for (const src of srcs) {
+    const res = dispatch(s, {
+      from: src.tile.id,
+      to: chosen.target.id,
+      ratio: 1.0,
+      forceCount: src.send,
+    });
+    if (res.ok) {
+      s = res.state;
+      dispatchedAny = true;
     }
   }
-  if (pairs.length === 0) return null;
-  shuffleInPlace(rng, pairs);
-  for (const pair of pairs) {
-    const res = dispatch(state, {
-      from: pair.source.id,
-      to: pair.target.id,
-      ratio: 1.0,
-      forceCount: ownAmount(pair.source, faction) - 1,
-    });
-    if (res.ok) return res.state;
-  }
+  if (dispatchedAny) return s;
   return null;
 }
 
-// §4.1 priority order: threat → expand → rally → attack. First rule to produce
-// a dispatch wins this evaluation; the faction acts at most once per tick.
+// §4.1 priority order: threat → assault → expand → rally. Assault sits above
+// expand so a faction strong enough to break an enemy castle commits to it
+// instead of expanding into empty tiles forever (the v1.3 stalemate cause).
+// Assault self-gates on aggregate force, so early game it declines and the
+// faction grows via expand until it can mount a decisive convergence.
 function evaluateFaction(
   state: GameState,
   faction: FactionId,
@@ -408,12 +496,12 @@ function evaluateFaction(
   const rng = createRng(mixSeed(state.rngSeed, faction, state.tick));
   const r1 = tryDefense(state, faction, rng, profile);
   if (r1 !== null) return r1;
+  const ra = tryAssault(state, faction, profile);
+  if (ra !== null) return ra;
   const r2 = tryExpand(state, faction, rng, profile);
   if (r2 !== null) return r2;
   const r25 = tryRally(state, faction, rng, profile);
   if (r25 !== null) return r25;
-  const r3 = tryAttack(state, faction, rng, profile);
-  if (r3 !== null) return r3;
   return state;
 }
 
