@@ -1,4 +1,9 @@
+import { dispatch as engineDispatch } from "@/engine/movement";
+import { tileId as makeTileId } from "@/engine/state";
 import { step } from "@/engine/tick";
+import type {
+  DispatchRatio,
+} from "@/engine/movement";
 import type { FactionId, GameState, TileId } from "@/engine/types";
 import {
   createDispatchController,
@@ -194,6 +199,46 @@ async function bootstrap(): Promise<void> {
 
   renderAll();
   startTicker();
+
+  // DEV-only hook so headless verification can drive the engine through its
+  // public `dispatch` API without the synthetic-pointer-event-into-Pixi dance
+  // (Pixi v8 batches federated events per render frame and synthetic DOM
+  // PointerEvents don't reliably propagate tile.pointerover within a CDP
+  // session). Stripped in production builds.
+  if (import.meta.env.DEV) {
+    const w = window as unknown as {
+      __ks?: {
+        getState: () => GameState;
+        getTickInfo: () => { tick: number; paused: boolean; speed: Speed };
+        playerDispatch: (
+          fromX: number,
+          fromY: number,
+          toX: number,
+          toY: number,
+          ratio: DispatchRatio,
+        ) => { ok: boolean; reason?: string };
+        setPaused: (v: boolean) => void;
+      };
+    };
+    w.__ks = {
+      getState: () => state,
+      getTickInfo: () => ({ tick: state.tick, paused, speed }),
+      playerDispatch: (fromX, fromY, toX, toY, ratio) => {
+        const res = engineDispatch(state, {
+          from: makeTileId(fromX, fromY),
+          to: makeTileId(toX, toY),
+          ratio,
+        });
+        if (res.ok) {
+          state = res.state;
+          renderAll();
+          return { ok: true };
+        }
+        return { ok: false, reason: res.reason };
+      },
+      setPaused,
+    };
+  }
 
   const keyboard = createKeyboardController({
     isPaused: () => paused,
