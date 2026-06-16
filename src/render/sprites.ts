@@ -8,21 +8,31 @@ import type { Tier } from "@/engine/types";
 // (pawn → helm → crown → double crown), so SOLDIER/KNIGHT/QUEEN/KING read
 // differently at a glance instead of relying on raw scale like the M2
 // placeholder did.
+//
+// Each shape gets a black stroke after its fill. Pixi tint is multiplicative
+// (texture × tint), so pure-black stroke pixels stay black no matter the
+// faction colour, giving every unit a dark outline against the same-coloured
+// tile background. Fill stays white so it tints cleanly to the faction hue.
 
 const SIZE = 64;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
+const OUTLINE_COLOR = 0x000000;
+const OUTLINE_WIDTH = 2;
 
 function pawnBody(g: Graphics): void {
   // base
   g.ellipse(CX, CY + 20, 16, 4);
   g.fill({ color: 0xffffff, alpha: 0.95 });
+  g.stroke({ color: OUTLINE_COLOR, width: OUTLINE_WIDTH, alpha: 1 });
   // body
   g.roundRect(CX - 10, CY - 2, 20, 22, 4);
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: OUTLINE_WIDTH, alpha: 1 });
   // head
   g.circle(CX, CY - 8, 8);
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: OUTLINE_WIDTH, alpha: 1 });
 }
 
 function addHelm(g: Graphics): void {
@@ -32,6 +42,7 @@ function addHelm(g: Graphics): void {
   g.lineTo(CX + 10, CY - 12);
   g.closePath();
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: OUTLINE_WIDTH, alpha: 1 });
 }
 
 function addCrown(g: Graphics): void {
@@ -45,9 +56,11 @@ function addCrown(g: Graphics): void {
   g.lineTo(CX + 12, CY - 12);
   g.closePath();
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: OUTLINE_WIDTH, alpha: 1 });
   // jewel
   g.circle(CX, CY - 16, 2);
   g.fill({ color: 0xffffff, alpha: 0.7 });
+  g.stroke({ color: OUTLINE_COLOR, width: 1, alpha: 1 });
 }
 
 function addBigCrown(g: Graphics): void {
@@ -55,8 +68,10 @@ function addBigCrown(g: Graphics): void {
   // taller centre cross
   g.rect(CX - 1, CY - 30, 2, 6);
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: 1, alpha: 1 });
   g.rect(CX - 3, CY - 28, 6, 2);
   g.fill({ color: 0xffffff, alpha: 1 });
+  g.stroke({ color: OUTLINE_COLOR, width: 1, alpha: 1 });
 }
 
 function buildTexture(app: Application, draw: (g: Graphics) => void): Texture {
