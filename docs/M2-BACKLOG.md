@@ -1,12 +1,14 @@
 # M2 Backlog（M1 期間挖出的設計議題）
 
-本文件記錄 M1 平衡 / 收斂期間發現、但**不屬於 engine bug**、由設計層處理的議題。每條附 M1.11 期間實測的數據與當時的修法嘗試結果，避免 M2 重蹈覆轍。
+> **v1.0 deferred-with-AI 註記**：本文件 P0 / P1 / P2 全部議題皆是 AI 行為設計議題，隨 PRD v1.0 把 §4 整段移出後一併 deferred。下方內容保留作為「AI 規格回到 PRD 時的重啟參考」（含 M1.11 實測數據、v0.7–v0.10 嘗試結果），但 v1.0 工作不對任何 P0/P1/P2 項採取行動。AI 規格重啟時建議從這份 backlog + git tag `archive/prd-v0.12` 一起回看。
 
-詳細變遷見 [`docs/PRD.md`](./PRD.md) §11.1 與 changelog v0.6–v0.10。
+本文件記錄 M1 平衡 / 收斂期間發現、但**不屬於 engine bug**、由設計層處理的議題。每條附 M1.11 期間實測的數據與當時的修法嘗試結果，避免 AI 重啟時重蹈覆轍。
+
+詳細變遷見 git tag `archive/prd-v0.12` 的 PRD.md §11.1 與 changelog v0.6–v0.12。
 
 ---
 
-## P0 — Game Convergence
+## P0 — Game Convergence（deferred-with-AI）
 
 ### 戰場累積機制缺失
 
@@ -48,7 +50,7 @@
 
 ---
 
-## P1 — Balance（M2 中後段）
+## P1 — Balance（deferred-with-AI）
 
 ### 勢力位置不對稱
 
@@ -68,7 +70,7 @@
 
 ---
 
-## P2 — Polish
+## P2 — Polish（deferred-with-AI）
 
 ### Default scenario 是否限定 11x11 4-corner
 

@@ -1,8 +1,8 @@
 # MILESTONES — Knight Strike
 
-本文件把 [`PRD.md`](PRD.md) v0.10 切成 4 個交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
+本文件把 [`PRD.md`](PRD.md) 切成交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
 
-> PRD 同步基準：v0.12（AC-01 ~ AC-35；§3.6.1 已於 v0.12 移除，M1.6.5 留作歷史；§3.5.5 castle overflow + §4.1 rule #2.5 集結 + §3.5.6 castle vs castle 例外為當前 P0 收斂手段；§4.1 castle 分階保護 + rule #3 距離/reserve；§11.1/§11.2 收斂限制與門檻調整）。
+> PRD 同步基準：**v1.0**（pruned baseline，AI 整段移出，等次輪 PRD 重設計）。當前 v1 acceptance 不涵蓋任何 AI 行為；本文件 M1.8 / M2.2.5–M2.2.8 / M3 等 AI 相關 milestone 統一標 **deferred**，等 AI 規格回到 PRD 後再重啟。v0.12 完整 AI milestone 描述見 git tag `archive/prd-v0.12`。
 
 工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
@@ -18,22 +18,18 @@
 
 ---
 
-## M1 — Engine Core + Headless Playtest
+## M1 — Engine Core + Headless Playtest（已 shipped，v0.12 期間完成）
 
-**目標**：一行 `pnpm playtest` 能跑完整局，engine 層所有 AC 自動驗。
+> **歷史 milestone**：M1 全段於 v0.12 完工並通過 manual smoke。本 milestone 下的 sub-tasks 細節（含 AI 相關 M1.8）保留作 reference，但 AI 部分已隨 PRD v1.0 標 deferred。v1 工作不會再回頭動 M1 sub-tasks，只有 engine bug fix 才重新打開。
 
-**涵蓋 PRD**：§2、§3.1–§3.7、§4、§6、§10、§11.1、§11.2（§3.6.1 於 v0.12 移除，M1 範圍變更見下方 M1.6.5 歷史註記）
-**涵蓋 AC**：AC-02、AC-03、AC-04、AC-05、AC-08、AC-15、AC-16、AC-17、AC-18、AC-19、AC-20、AC-21、AC-22、AC-27、AC-28、AC-29、AC-30、AC-31、AC-32（AC-23/24/25/26 隨 PRD v0.12 §3.6.1 移除而下線）
-**退出條件**：
+**v0.12 退出條件（已達成）**：
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test:run && \
 pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 ```
 
-全綠且無例外、engine line coverage ≥ 90%、所有列出的 AC vitest 案例綠燈。`--max-ticks` 平局視為合法結局（見 PRD §11.2）。
-
-**Turn 上限**：60
+當時涵蓋 AC：AC-02 / 03 / 04 / 05 / 08 / 16 / 17 / 18 / 19 / 20 / 21（加 AC-15 / 22 / 27..32 的 AI 部分，已隨 v1.0 下線）。
 
 ### M1.0 — 環境準備（toolchain）
 
@@ -105,7 +101,11 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 - 依賴：M1.1
 - 完成定義：玩家主城失守 → loss；唯一存活勢力 → win；敗北勢力的 stack 轉 NEUTRAL owner 行為符 §6.3。
 
-### M1.8 — AI 狀態機 + RNG shuffle + 評估錯開
+### ~~M1.8 — AI 狀態機 + RNG shuffle + 評估錯開~~（PRD v1.0 deferred）
+
+> **deferred 註記**：本 sub-milestone 對應 PRD v0.12 §4，於 v1.0 隨 §4 整段移出 PRD。engine `src/engine/ai.ts` 仍在 repo 內但屬規格 orphan；下方原文保留作為「歷史曾如何實作」的參考，AI 規格回到 PRD 後可能整段重寫。
+
+---
 
 - 檔案：`src/engine/ai.ts`、`src/engine/ai.test.ts`
 - 對應 PRD：§4.1、§4.2、§4.3、§3.5.1（AI 派遣下限）、§10.2、§11.1（v0.8 baseline 註記）
@@ -153,29 +153,23 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 
 ---
 
-## M2 — 渲染、輸入、UI + P0 收斂機制（可手動對局）
+## M2 — 渲染、輸入、UI（v1.0 進行中）
 
-**目標**：`pnpm dev` 開瀏覽器，能用滑鼠手動打完一場速勝；AI vs AI spectator 對局能在 500 ticks 內穩定收斂。
+**v1.0 目標**：`pnpm dev` 開瀏覽器，玩家能用滑鼠手動派遣、看到完整視覺回饋、有 HUD/end screen，能在沒有 AI 的環境裡跟 scripted/靜默對手完成一場對局。
 
-**涵蓋 PRD**：§5、§9.2、§9.3、§9.4、**§3.5.5、§3.5.6、§4.1 rule #2.5、§11.1 v0.11 解法、§11.2 v0.11 update**
-**涵蓋 AC**：AC-01、AC-06、AC-07、AC-09、AC-11、AC-12、AC-13、AC-14、**AC-33、AC-34、AC-35**（+ AC-16 UI 端整合驗證）
-**退出條件**：
+**涵蓋 PRD**：§5、§9.2、§9.3、§9.4
+**涵蓋 AC**：AC-01、AC-06、AC-07、AC-09、AC-11、AC-12、AC-13、AC-14（+ AC-16 UI 端整合驗證）
+**退出條件（v1.0 新版，AI gate 移除後）**：
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test:run && \
-pnpm build && \
-pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed 42
+pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 ```
 
-前四條全綠 + spectator 100-run 滿足三條 v0.11 acceptance（PRD §11.2 v0.11 update）：
+加上 `pnpm dev` 後人類在瀏覽器內完成 M2.9 manual smoke 五步驟全綠。
 
-- **結束率 ≥ 50%**（至少 50 場非 stalemate 終止）
-- **任一勢力勝率 ≤ 50%**（無單勢力壓倒性偏袒）
-- **平均場長 ≤ 400 ticks**（保留「12–20 分鐘對局」願景）
+> v0.12 期間 M2 還有一條 spectator 100-run convergence gate（結束率 ≥ 50% / 勝率 ≤ 50% / 場長 ≤ 400 ticks），隨 AI 移出 v1.0 一併下線。Sub-tasks M2.2.5 / M2.2.6 / M2.2.7 / M2.2.8 統一標 **deferred-with-AI**，等次輪 AI PRD 設計回到 PRD 時再決定要不要 revive。
 
-加上 `pnpm dev` 後人類在瀏覽器內完成一場「玩家主動速勝」對局。engine 層 P0 收斂機制（M2.2.6–M2.2.8）為 v0.11 新增規格，**動公式 / 動規則**；除此以外 M2 階段 engine 不大改（< 50 行 diff）。
-
-**Turn 上限**：60（含 M2.2.6/.7/.8 三個子 task）
+**v1.0 Turn 上限**：剩餘 M2.3–M2.8 約 40–50 turn（含 M2.9 manual smoke）。
 
 ### M2.0 — Pixi `Application` + 入口
 
@@ -200,7 +194,7 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
 - 完成定義：每格 stack 對應 tier sprite + count 數字；tier 切換 GSAP 金光 scale 動畫；戰鬥 bump + tint flash。
 - 註：M2 可用一張 sprite + tint / scale 區分 tier；完整 5 種 sprite 留 M4。
 
-### M2.2.5 — AI Spectator Mode（早期 AI 觀察站）
+### ~~M2.2.5 — AI Spectator Mode~~（v1.0 deferred-with-AI；已 shipped 程式碼仍在 repo）
 
 - **檔案**：
   - `src/main.ts`（加 spectator entry 邏輯）
@@ -234,7 +228,7 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
 
 觀察結果不在這個 task 處理，但會影響後續 M2 task 順序與 BACKLOG 優先級。
 
-### M2.2.6 — Castle 溢出 + AI Rule #2.5 集結（v0.11 P0 主力）
+### ~~M2.2.6 — Castle 溢出 + AI Rule #2.5 集結~~（v1.0 deferred-with-AI；已 shipped 程式碼仍在 repo）
 
 - **檔案**：
   - `src/engine/overflow.ts`（新）+ `src/engine/overflow.test.ts`
@@ -250,7 +244,7 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
   - AC-33 / AC-34 vitest 綠（`it("[AC-33] ...")`、`it("[AC-34] ...")`）
   - Spectator 觀察（人工跑 `pnpm dev`）：戰場 tile median count 上升至 ≥ 3、最高 power 至少觸及 Queen tier（≥ 60）
 
-### M2.2.7 — Castle vs castle BFS hops 例外
+### ~~M2.2.7 — Castle vs castle BFS hops 例外~~（v1.0 deferred-with-AI；尚未實作）
 
 - **檔案**：
   - `src/engine/movement.ts`（BFS attack range 條件加例外分支）+ `src/engine/movement.test.ts` 新增 case
@@ -264,7 +258,7 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
   - AC-35 vitest 綠
   - Spectator 觀察 100 ticks AI rule #3 fire 次數 > 0（M1.11 為 0）
 
-### M2.2.8 — Spectator 100-run 收斂回歸（v0.11 acceptance gate）
+### ~~M2.2.8 — Spectator 100-run 收斂回歸~~（v1.0 deferred-with-AI；尚未跑）
 
 - **檔案**：無新檔；PR comment 報告 + `src/scenarios/spectator-4ai.json` 若有調參記錄
 - **對應 PRD**：§11.2 v0.11 update（M2 退出條件）
@@ -336,7 +330,13 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
 
 ---
 
-## M3 — AI 平衡與完整體驗
+## ~~M3 — AI 平衡與完整體驗~~（v1.0 deferred-with-AI）
+
+> **deferred 註記**：整段 M3 對應 v0.12 §4 / §10.4 acceptance（AI rule 微調、勝率 ±15% 達標、AC-10/15 強化），隨 AI 移出 v1.0 一併下線。下方原文保留作為「AI 重啟後可能怎麼走」的方向參考。AI 回到 PRD 後 M3 應該整段重寫，不要直接照搬。
+
+---
+
+
 
 **目標**：對 AI 對局有節奏、勝率不偏、視覺反饋順。
 

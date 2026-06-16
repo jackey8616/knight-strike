@@ -1,7 +1,7 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.12
-**Status**: Draft（pre-implementation）
+**Version**: v1.0
+**Status**: Pruned baseline — AI work deferred; UI + 基礎機制 next round
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
 - v0.2 — 棋盤改 11x11、技術棧改 Pixi.js、操作方案重設、戰鬥公式重做、新增 §10 Headless Playtest
@@ -15,10 +15,11 @@
 - v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（M1.11 最終嘗試）；最終 ship 版本 revert engine 回 v0.8 baseline；新增 §11.1/§11.2 標記 M1 收斂限制與 M1.11 acceptance band 調整；引擎不再對 11x11 corner-castle scenario 保證終結率（見 [`M2-BACKLOG.md`](./M2-BACKLOG.md)）
 - v0.11 — §3.5.5 新增 Castle 自動溢出規則（`CASTLE_OVERFLOW_THRESHOLD = 30`）；§3.5.6 新增 Castle vs castle BFS hops 例外；§4.1 新增 Rule #2.5 集結（順序：威脅 → 擴張 → 集結 → 進攻 → 囤兵）；§3.2 step order 加 `castle overflow` phase（produce 之後、upgrade 之前）；新增 AC-33/34/35；§11.1 補 v0.11 解法；§11.2 把「平均場長 100–400 ticks + 結束率 ≥ 50% + 任一勢力勝率 ≤ 50%」重啟為 M2 退出條件。M2 P0 收斂導向（[`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0、[`docs/MILESTONES.md`](./MILESTONES.md) M2.2.6–M2.2.8）
 - v0.12 — 移除 §3.6.1 相鄰勢力空格佔領（含 hysteresis）。理由：v0.6 引入的「相鄰自動翻 owner」與玩家對「走過 / 打贏的格才屬於我」的直覺相違，視覺上像是領土莫名其妙就染色到鄰格、且削弱主動派遣的戰略意義。撤掉後駐紮空格 owner 翻轉**只剩** §3.5.4 的行軍 stack 抵達 claim；§3.2 step order 移除 3b claim phase；AC-23/24/25/26 刪除。`Province.lastClaimedAtTick` 欄位於 PRD 失去語意，engine schema 可同步清掉（細節不在本文件範圍）。**收斂風險**：§3.6.1 v0.6/v0.7 的補強作用消失，M2.2.8 acceptance 若失守需回頭調 v0.11 P0 機制（§3.5.5 / §4.1 rule #2.5 / §3.5.6 參數）而非復活 §3.6.1。
+- v1.0 — **重大 scope 重設**：把 AI 設計（PRD §4 規則、§3.5.5 castle overflow、§3.5.6 castle vs castle 例外、§10 playtest balance 重心、§11 收斂限制）整段移出本 PRD，等 UI + 基礎機制建好後再回頭重寫。本次也順手砍 AI 相關 AC：AC-15（AI 30-tick 擴張）、AC-22（AI RNG 確定性）、AC-27..AC-35（rule #2 castle 分階保護 / rule #3 距離+reserve+派遣量 / castle 溢出 / rule #2.5 集結 / castle vs castle BFS 例外）。**Engine 程式碼層 `src/engine/ai.ts` / `ai.test.ts` / `overflow.ts` / `overflow.test.ts` / `src/playtest/runner.ts` 的 AI 分類邏輯與 spectator-4ai scenario 保留在 repo 內**，但屬「規格 orphan」狀態：對應的 PRD 章節已不存在、不在 v1 acceptance 內、未來 AI 重啟時必跟新規格對齊（程式碼不保證直接可用）。pre-prune 完整 v0.12 快照見 git tag `archive/prd-v0.12` (commit `5714dc5`)。本 v1.0 是「UI + 基礎機制」次輪設計的起點 baseline，**不是**最終 v1.0 release。
 
 ## 1. 願景與背景
 
-重製日本免費小品《国家大作戦》(lm_exp, 2005 年前後)，以 Web 技術交付。45° 斜俯視棋盤、像素風角色、即時 tick 戰棋。目標：**單場 12–20 分鐘內結束的中節奏對 AI 戰**。
+重製日本免費小品《国家大作戦》(lm_exp, 2005 年前後)，以 Web 技術交付。45° 斜俯視棋盤、像素風角色、即時 tick 戰棋。**最終願景**：單場 12–20 分鐘內結束的中節奏對 AI 戰；**v1.0 中繼目標**：先把 UI + 基礎機制（操作流暢、視覺回饋、規則一致）做穩，AI 行為等次輪 PRD 重新設計後再導入。
 
 **Tech Stack**：Vite + TypeScript + **Pixi.js v8** + GSAP。
 
@@ -41,7 +42,7 @@
 - **11x11** 方格。主城置於四角（座標 `(0,0) / (10,0) / (0,10) / (10,10)`）。
 - 4 個玩家勢力（Tokugawa / Takeda / Oda / Uesugi），各佔據一個角落主城。
 - Neutral 勢力佔據地圖中央 1–3 格山賊據點，不產兵但可被任何勢力佔領（佔領後變為己方一般領地）。Neutral 山賊起始 count = 3（與主城同 Soldier tier，無威脅但需 1–2 次派遣才能掃除）。
-- 玩家固定操作 Tokugawa，其餘三勢力由 AI 控制。
+- 玩家固定操作 Tokugawa。其餘三勢力的控制方式（自動 AI / 完全靜默 / scripted 演示）在 v1.0 未定，等次輪 PRD 重新指定。
 
 ### 3.1.1 開局起始 count
 
@@ -56,12 +57,12 @@
 - 主城每 4 ticks +1，從 3 升到 Knight (5) 需 **8 ticks = 16s**；玩家有明確「第一個升級里程碑」可感受節奏。
 - 主城下限 1 兵的保護下，起始 3 允許首派最多 2 兵出去探路或夾擊 neutral，不至於整局只能囤兵。
 - 起始太低（0 或 1）→ 開局 30s 之內什麼都做不了，無聊。
-- 起始太高（≥5 已是 Knight）→ AI 進攻規則 #3 在開局就可能觸發，造成早期翻車。
+- 起始太高（≥5 已是 Knight）→ 早期戰力跨閾值，可能造成一波殺光的非預期翻車（v0.12 期 AI rule #3 觀察結果，原則保留）。
 
 ### 3.2 即時 Tick 引擎
 
 - 全域時鐘以 **2 秒 / tick** 推進。HUD 顯示當前 tick 數與下一 tick 倒數。
-- **Tick 編號約定**：Tick 0 為初始狀態（僅渲染、無結算）。Tick 1 起執行下述六步結算順序。產兵於 tick 2 首次觸發（「每 2 ticks +1」= tick 2, 4, 6, ...）。AI 起始評估偏移（§4.3）以 tick 1 為基準：Tokugawa 從 tick 1 評估、Takeda tick 2、Oda tick 3、Uesugi tick 4，之後每 5 ticks 一次。
+- **Tick 編號約定**：Tick 0 為初始狀態（僅渲染、無結算）。Tick 1 起執行下述六步結算順序。產兵於 tick 2 首次觸發（「每 2 ticks +1」= tick 2, 4, 6, ...）。v0.12 期間還規範了四家 AI 的評估偏移（Tokugawa tick 1、Takeda tick 2 等，每 5 ticks 一次），隨 §4.3 一併移出 v1.0；`engine/ai.ts` 的 `shouldEvaluate` 程式碼仍存在但屬規格 orphan。
 - 暫停 / 繼續 / 變速 (1x / 2x) 支援；變速影響 tick 實際間隔。
 - 每個 tick 結算順序固定：
   1. 移動推進（每 tick 沿路徑前進 1 格，包含 marching stack 入格、stack-collision 判定、與行軍抵達 claim — 由 §3.5.4 規則處理）
@@ -71,7 +72,7 @@
   5. 升級判定（count 跨過閾值即時推導 tier）
   6. 勝負判定
 
-> 完整 step order（v0.12）：`movement (含 §3.5.4 行軍抵達 claim) → combat → drain (§3.7) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`。駐紮空格不再有「相鄰自動 claim」phase（§3.6.1 已於 v0.12 移除），owner 翻轉**只**在行軍 stack 真正進駐該格時發生。Castle overflow 在 produce 之後、upgrade 之前：剛產的兵若讓主城超過 `CASTLE_OVERFLOW_THRESHOLD`，同 tick 內就能溢出；tier 由 count 即時推導，overflow 後 count 是即時的，upgrade phase 仍能正確反映。
+> 完整 step order（v1.0）：`movement (含 §3.5.4 行軍抵達 claim) → combat → drain (§3.7) → defeats → produce → upgrade → victory`。駐紮空格不再有「相鄰自動 claim」phase（§3.6.1 於 v0.12 移除），owner 翻轉**只**在行軍 stack 真正進駐該格時發生。Castle overflow（v0.11 §3.5.5）隨 AI 一併移出 v1.0 PRD —— engine `applyCastleOverflow` 仍會在 produce 之後被呼叫（程式碼層面實作存在）但因 v1.0 沒有自動把 castle 推到 > 30 的 AI / 玩家邏輯，實際上不會 fire。
 
 ### 3.3 城堡與產兵
 
@@ -91,7 +92,7 @@
 - Tier 升級 / 降級為**隱含結果**：count 變動後即時更新 tier。畫面上顯示對應 sprite + 數字。
 - 同一格只能由單一勢力擁有；不同勢力進入同一格 = 戰鬥而非合併。
 
-> 閾值 5 / 12 / 25（v0.9 從原 5/15/30 下調）。v0.9 將 Queen / King 閾值從 15/30 降為 12/25，原因：v0.8 playtest 顯示戰場 tile 累積速率不足，non-castle source 從未跨越 Queen 閾值 (power 60+) → rule #3 無法 fire → 遊戲無法收斂。降低閾值讓戰場兵在合理時間內能達高 tier，並讓 castle 也能在 200 ticks 內穩定升 Queen。此調整為 M1 收斂導向，M2 之後若戰場累積機制（如集結點）建立，可考慮恢復原值。
+> 閾值 5 / 12 / 25 沿用 v0.9 的數字。原始決定理由（v0.8 playtest 戰場累積天花板觀察）依賴 AI 規則行為，已隨 AI 整段移出 v1.0；v1 acceptance 不再用 AI 收斂去倒推這幾個閾值。等 UI + 基礎機制次輪 PRD 重新看玩家體感後再決定要不要調整。
 
 ### 3.5 移動、派駐、路徑、行軍碰撞
 
@@ -100,14 +101,9 @@
 - 玩家在**己方任意格**按下左鍵，拖到**目標格**放開：派遣該格的單位前往目標。
 - 拖曳過程：畫一條從來源到目標的高亮路徑（BFS 最短路徑）；若無路徑則顯示紅色不可派遣提示。
 - 派遣比例滑桿（25% / 50% / 75% / 100%，記憶上次選擇，預設 100%）。最少派遣 1 兵。
-- **主城派遣下限**：
-  - **玩家手動派遣**：主城作為來源時，無論滑桿選何比例，**至少留下 1 兵**。例如主城 count = 10 且選 100%，派遣 9、留 1。若 count = 1 則無法派遣。
-  - **AI rule #2 派遣**：依 §4.1 分階累積保護，主城派出後至少保留該階 tier 閾值兵力（Knight: 5 / Queen: 15 / King: 30 後無下限保護）。
-  - **AI rule #3 派遣**：派遣量 = `source.count - reserve`：
-    - 非主城 source：reserve = 1（避免抽空前線格留下真空帶）
-    - 主城 source：reserve = 5（保留 Knight tier 防禦力，避免互攻同歸於盡）
-    - 若派遣量 ≤ 0，rule #3 不 fire
-  - 設計意圖：玩家對「全押進攻」有充分操作權，AI 在擴張階段保守、進攻階段果斷但留下防守底氣。
+- **主城派遣下限**：主城作為來源時，無論滑桿選何比例，**至少留下 1 兵**。例如主城 count = 10 且選 100%，派遣 9、留 1。若 count = 1 則無法派遣。
+  - 設計意圖：避免玩家不小心把主城清空、立刻被相鄰格反吃。
+  - v0.12 期間還細分了 AI rule #2 / #3 各自的 reserve 規則（Knight 5 / Queen 15 / 主城進攻 reserve 5 等），隨 §4 一併移出 v1.0；engine `dispatch()` API 仍保留 `forceCount` escape hatch 給未來 AI 規格重啟使用。
 
 #### 3.5.2 路徑規則
 
@@ -164,35 +160,7 @@
 
 > 規則設計原則：所有同 tick 事件先計算「將發生什麼」（dry-run），再同步寫回，避免順序依賴造成 bug。
 
-#### 3.5.5 Castle 自動溢出（v0.11）
-
-每 tick 在 produce phase 之後、upgrade phase 之前，對每個己方 castle 執行自動溢出判定。**屬 engine 規則，非 AI 決策**；不在 §4.1 短路評估鏈內，不受 §4.3 評估錯開影響（每 tick 對每個 castle 評估）。
-
-- **觸發條件**：`castle.count > CASTLE_OVERFLOW_THRESHOLD`（= **30**，對齊 King tier 入口）
-- **溢出量**：`overflow = min(2, castle.count - 30)`，即每 tick 最多向外推 2 兵
-- **目標選擇**（BFS 距離最近優先，距離相同用 §4.2 同套 RNG `seed + tick + castle.id` 派生 tiebreak）：
-  1. **Frontline 己方 tile**：tile 為己方、相鄰至少 1 格非己方（敵方或 NEUTRAL 皆算；NEUTRAL `count = 0` 空格也算「非己方」）
-  2. 若無 frontline → 最近「非己方相鄰」的己方 tile（castle 自身排除）
-  3. 若仍無 → 跳過該 castle 本 tick 溢出
-- **動作**：產生標準 marching stack（§3.5.3），`source = castle.id`、`count = overflow`、`faction = castle.owner`、`path = BFS(castle, target)`、`idx = 0`、`dispatchedAtTick = currentTick`。從 castle 扣除對應 count。
-- **路徑**：BFS passable 規則同 §3.5.2（己方 + 空無主格）。Frontline 本身為己方 → 抵達後走 §3.5.4 #1（同勢力合併）。
-- **與 §4.1 rule #2 / #3 的關係**：
-  - Rule #2（擴張）：castle.count 對應 King 階時 50% 派出，與 overflow 觸發條件互斥前可同時 fire（rule #2 在 AI evaluate phase 派、overflow 在 castle overflow phase 派），兩條 marching stack 各自獨立。
-  - Rule #3（進攻）：rule #3 派遣量 = `count - 5`，若 fire 後 castle.count 跌至 ≤ 30 則 overflow 不觸發；若仍 > 30 則同 tick 兩條 marching 並行。
-
-**設計理由**：M1.11 diag 確認戰場 tile cap 在 Soldier–low-Knight 是因為「castle 為唯一兵源、產能未過剩前不會主動向前線輸送」。Overflow 把「主城兵滿即自動推進」變成 engine 層保證，給戰場累積一個結構性的兵源管道，不依賴 AI 評估節奏。
-
-#### 3.5.6 Castle vs castle BFS 例外（v0.11）
-
-§4.1 rule #3（進攻）使用 BFS 路徑，預設受 `ATTACK_RANGE_HOPS` 上限限制。**例外**：當 source 為己方 castle 且 target 為敵方 castle 時，hops 上限**不適用**，BFS 距離可為任意值。
-
-- 其他條件**保留**：
-  - 路徑中間格須 §3.5.2 passable（己方 + 空無主格）
-  - Target 為敵方 castle 終點
-  - 戰力差條件 `source.power ≥ target.power × ATTACK_POWER_RATIO`
-  - §3.5.1 主城 reserve = 5（派遣量 = `castle.count - 5`，若 ≤ 0 不 fire）
-
-**設計理由**：corner-castle scenario 中對角 castle 互攻最短路徑 ≥ 20 hops、相鄰 corner ≥ 10 hops，硬編 `ATTACK_RANGE_HOPS = 8` 永遠不滿足。M1.11 v0.10 嘗試放寬至 12 仍無解（partition 後路徑己方 passable 條件不成立）。本例外給「集結成功 → 戰線推到敵 castle 旁 → 一波決勝」一條贏路；要求路徑全己方 passable 確保不是「無中生有的長程進攻」，仍受戰場累積進度約束。
+> **§3.5.5 / §3.5.6（已移除，v1.0）**：原 v0.11 加入的 castle 自動溢出與 castle vs castle BFS hops 例外，皆為 AI 收斂機制的補強。AI 部分整段移出 v1.0 後一併下線；engine `src/engine/overflow.ts` 程式碼仍在 repo 內但 PRD 已不規範其行為，未來 AI 重啟時要重審規格。完整 v0.12 描述見 git tag `archive/prd-v0.12`。
 
 ### 3.6 戰鬥公式（初稿，playtest 微調）
 
@@ -288,71 +256,11 @@ function updateStalemates(
 
 見 AC-19。
 
-## 4. AI 行為（MVP 版）
+## 4. AI 行為（**整段移出 v1.0**）
 
-每個 AI 勢力獨立跑簡單狀態機，每 5 ticks 評估一次。
-
-### 4.1 規則（**短路執行**：依序檢查，**第一條觸發即執行並退出本次評估**）
-
-1. **威脅評估**：若主城相鄰 2 格內有敵軍，從最近己方格調 50% 兵力回防（受 §3.5.1 主城下限保護）。
-2. **擴張**：若有未控制的相鄰空格且自身某格滿足派兵條件，派該格部分兵力去佔領。派兵條件依 source 類型分流：
-
-   - **非主城格**（`isCastle = false`）：
-     - 條件：`count ≥ EXPAND_MIN_STACK` (= 5)
-     - 派出比例：50%
-
-   - **主城格**（`isCastle = true`）— 分階累積保護（v0.9 對齊 §3.4 新閾值 5/12/25）：
-     - `count < KNIGHT_RESERVE` (= 5, Soldier 階)：**禁止派兵**（讓主城先長到 Knight）
-     - `KNIGHT_RESERVE ≤ count < QUEEN_RESERVE` (= 5–11, Knight 階)：派出 25%，但派出後 source 至少保留 5 兵
-     - `QUEEN_RESERVE ≤ count < KING_THRESHOLD` (= 12–24, Queen 階)：派出 33%，但派出後 source 至少保留 12 兵
-     - `count ≥ KING_THRESHOLD` (= 25, King 階)：派出 50%（無 tier 保護，正常擴張）
-
-   設計意圖：避免主城被 rule #2 永久鎖在 Knight 入口閾值。分階保護讓主城邊升級邊溢出，而非整段累積期完全靜默。King tier (≥ 30) 後完全解除限制，模擬「兵力溢滿」的戰略中樞。
-
-2.5. **集結（rally，v0.11）**：把分散的非主城兵向前線 anchor 流，配合 §3.5.5 castle overflow 形成「主城 → 前線 anchor」的累積管道。
-
-   - **候選 anchor**：所有「非主城、frontline 己方 tile」（frontline 定義同 §3.5.5：自己己方、相鄰至少 1 格非己方；NEUTRAL 空格亦算非己方）。
-   - **Anchor 選擇**：候選中 count 最大者；tie 用 §4.2 同套 RNG（`rngSeed + factionId + tick` 派生）shuffle 後取首。若無候選 → rule #2.5 不 fire，繼續評估 rule #3。
-   - **動作**：anchor 的相鄰己方 tile（**主城本身不參與集結**，以保留 §4.1 rule #2 castle 分階保護的純度；非主城相鄰己方皆派）各派 50% 兵向 anchor 行軍；source 至少留 1 兵（與 §3.5.1 AI rule #3 非主城 reserve = 1 一致）。
-   - **派遣量**：每個 source 派 `min(floor(source.count * 0.5), source.count - 1)` 兵；若 ≤ 0 該 source 跳過。所有合格 source 一次性產生 marching stack（不互相阻擋）。
-
-   設計意圖：rule #2 的擴張只把 castle 兵分散派去佔鄰格、單一 tile 無法累積；rule #2.5 把分散的非主城兵「向 anchor 流」，讓戰場兵在合理時間內升到 Knight / Queen tier。anchor 限定 frontline 確保集結方向有戰術意義（兵集中到前線、不是後方）；anchor 限定非主城避免與 castle overflow 的「主城向外推」方向衝突。
-
-3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（**己方 power**（即 `tilePower(source.count)`，使用 source 全 count 計算）` ≥ 敵方主城 power × `ATTACK_POWER_RATIO`），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護）。派遣量 = `source.count - reserve`，其中 reserve：
-
-   - 非主城 source：reserve = 1
-   - 主城 source：reserve = 5（Knight tier 保護）
-
-   若派遣量 ≤ 0，rule #3 不 fire。
-
-   常數：`ATTACK_RANGE_HOPS = 12`（v0.8 為 4，v0.9 為 8，v0.10 進一步放寬以涵蓋 11x11 相鄰 corner castle 互攻最短路徑 10 hops）；`ATTACK_POWER_RATIO = 1.0`（v0.8 為 1.5，v0.9 放寬）。
-
-   **§3.5.6 例外（v0.11）**：source 為己方 castle 且 target 為敵方 castle 時 hops 上限不適用；BFS 距離可為任意值，其他條件（路徑全己方 passable、戰力差、castle reserve）皆保留。
-
-   設計意圖：
-   - `ATTACK_RANGE_HOPS = 12`：v0.8 設 4、v0.9 設 8 仍不夠 — 11x11 corner 對角 manhattan = 20、相鄰 corner = 10，castle 為 source 到敵 castle 最短路徑 ≥ 10 hops。提升至 12 涵蓋相鄰 corner 對戰（10 hops 路徑），保留對角戰（20 hops）走 frontier 累積路線。
-   - `ATTACK_POWER_RATIO = 1.0`（v0.9）：v0.8 觀察 attacker source 戰力天花板（受戰場無累積機制限制）無法達到 1.5× 條件。放寬到 1.0× 允許「均勢進攻」，讓 castle 升 Queen 後能對等戰力進攻敵 castle，給遊戲明確的收斂機制。
-   - Castle reserve 5：避免兩 castle 同時 rule #3 互攻時雙方主城留 1 兵被瞬間 drain，保留 5 兵讓主城在進攻派出後仍有 Knight tier 防禦力（power 20）抵擋反擊。
-
-4. **囤兵**：以上皆不滿足時不動，等下次評估。
-
-### 4.2 評估順序 RNG shuffle（避免 deterministic bias）
-
-當 AI 在某條規則中**選候選**（己方格、目標格、進攻路線）時，候選清單以**確定性 PRNG**（seed 來自 §10.2 的 `rngSeed` + 勢力 ID + tick）做 Fisher–Yates shuffle 後再 iterate。例如：
-
-- 規則 #1「從最近己方格調兵」→ 取距離最小的候選集合（可能 ties），shuffle 後取第一個。
-- 規則 #2「自身某格 stack ≥ 5」→ 篩出所有合格來源格，shuffle 後 iterate 直到找到可派遣空格組合。
-- 規則 #3「己方格能在 ≤ 4 格內到敵方主城」→ 篩出所有合格 (來源, 目標) pair，shuffle 後取第一個滿足戰力差條件的。
-
-> 設計意圖：純座標掃描會讓 AI 永遠先從 NW 角下手，造成對局可預測且空間不平衡；shuffle 引入多樣性但仍可重現（同 seed 同結果）。
-
-### 4.3 評估間隔錯開
-
-四家 AI（含玩家若 AFK）各自獨立 5-tick 評估週期，但**起始 tick 偏移**錯開：Tokugawa tick 1、Takeda tick 2、Oda tick 3、Uesugi tick 4 開始評估，後續每 5 ticks 一次。避免同一 tick 大量 AI 同時下令造成 lag spike。
-
-§4.1 所有規則（含 v0.11 新增的 rule #2.5 集結）皆走同套 evalOffset：rule #1/#2/#2.5/#3/#4 在同一次評估內依序短路檢查、第一條觸發即退出本次評估。§3.5.5 castle overflow **不在此節奏內**（屬 engine 規則，每 tick 對每個 castle 評估，見 §3.5.5）。
-
-三家 AI 行為相同；難度差異留待 future scope。
+> 原 v0.11 §4.1（rule #1/#2/#2.5/#3/#4 短路狀態機）、§4.2（評估順序 RNG shuffle）、§4.3（評估間隔錯開）整段於 v1.0 移出 PRD，等 UI + 基礎機制（§5、§3.5.x 玩家視角）穩定後再回頭重新設計。**當下沒有正式 AI 規格**；engine `src/engine/ai.ts` 程式碼仍在 repo 內、`stepAi` 仍會被 `tick.ts` 與 `playtest/runner.ts` 呼叫，但屬 spec orphan 狀態 —— 任何 AI 行為觀察都不能拿來當 v1 acceptance 的依據。
+>
+> 完整 v0.12 AI 規格見 git tag `archive/prd-v0.12`。重啟 AI 設計時建議從 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0 議題 + v0.12 §11.1 根因分析回看。
 
 ## 5. 視覺與 UI
 
@@ -400,20 +308,20 @@ function updateStalemates(
 ### 6.1 勝利
 
 - 玩家佔領**所有其他勢力的主城** → 勝利畫面。
-- 或：在所有其他勢力皆已敗北（被其他 AI 滅了）的狀態下玩家主城仍在 → 勝利。
+- 或：在所有其他勢力皆已敗北（被其他勢力滅了）的狀態下玩家主城仍在 → 勝利。
 
 ### 6.2 敗北
 
 - 玩家主城被任一敵方勢力佔領 → 敗北畫面。
 
-### 6.3 AI 勢力敗北
+### 6.3 非玩家勢力敗北
 
-- AI 勢力主城被佔領 → 該勢力 `defeated = true`（沿用 `GameState`），其餘城外格立即變為 Neutral 所有，stack 保留作為野怪（不再行動）。
+- 非玩家勢力主城被佔領 → 該勢力 `defeated = true`（沿用 `GameState`），其餘城外格立即變為 Neutral 所有，stack 保留作為野怪（不再行動）。
 - 敗北勢力的留存 stack 在後續結算中視同 `NEUTRAL` owner：正常參與 §3.6 戰鬥與 §3.7 stalemate counter；不主動派遣、不產兵。
 
 ## 7. Acceptance Criteria（可驗證）
 
-每條都可由人類手動或自動化測試驗證。AC-04 / AC-05 / AC-08 等純邏輯項可在 Headless Playtest（見 §10）中跑自動測試。
+每條都可由人類手動或自動化測試驗證。AC-04 / AC-05 / AC-08 等純邏輯項可在 vitest 中跑自動測試；UI 相關項（AC-01 / 06 / 07 / 09 / 11 / 12 / 13 / 14）走 manual smoke。v0.12 期間 AI 相關 AC（AC-15、AC-22、AC-27..AC-35）隨 §4 一併移出 v1.0；v1 acceptance 不依賴任何 AI 行為。
 
 | #     | 條件                                                                                                                            | 驗證方式                                                                                                          |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -431,27 +339,27 @@ function updateStalemates(
 | AC-12 | 玩家佔領所有 3 個 AI 主城 → 顯示「勝利」畫面                                                                                    | 操作確認                                                                                                          |
 | AC-13 | 暫停按鈕停止 tick，恢復後從停止處繼續                                                                                           | 暫停 5 秒後恢復，tick 數連續                                                                                      |
 | AC-14 | 2x 速度按下後 tick 間隔 = 1 秒                                                                                                  | 計時 10 秒應為 10 ticks                                                                                           |
-| AC-15 | AI 勢力會擴張：開局後 30 ticks 內每 AI 至少佔領 1 個鄰格                                                                        | Headless 跑 30 ticks，斷言每 AI 控制格數 ≥ 2                                                                      |
+| ~~AC-15~~ | _AI 行為類，§4 於 v1.0 移出，AC 一併下線_ | — |
 | AC-16 | 主城派遣 100% 時來源至少保留 1 兵                                                                                               | 操作 / Headless：主城 count = 10，派遣 100%，斷言來源剩 1、marching stack count = 9                               |
 | AC-17 | 敵方 marching stack 同 tick 進同格 → 頭對頭碰撞使用 3.6 公式                                                                    | Headless：兩 marching stack 同時抵達中間格，斷言 loss 計算與 3.6 一致                                             |
 | AC-18 | 路徑被切：marching stack 在前一格停下，下 tick 從相鄰戰鬥                                                                       | Headless：派遣中讓敵方切入路徑，斷言 marching stack idx 停滯且觸發 3.6                                            |
 | AC-19 | 僵局持續消耗：兩相鄰 3 Soldier 對峙（loss = 0），第 5 tick 起每 tick 雙方 count 各 −1 直到歸零                                  | Headless：擺 3 vs 3 對峙，advance(4) 後雙方 count = 3；advance(5) 後 = 2；advance(6) 後 = 1；advance(7) 後 = 0      |
 | AC-20 | 同勢力雙 marching stack 同 tick 入同格 → 合併、path 取剩餘步數最少者，tiebreak 取早派遣者                                       | Headless：派遣 stack A（剩 3 步）與 stack B（剩 1 步）同時抵達；斷言合併後 count 加總且 path 用 B 的剩餘 path     |
 | AC-21 | 敵方 marching stack 頭對頭（雙方非終點）→ 倖存方繼續原路徑、不入駐碰撞格                                                       | Headless：擺好兩條路徑交叉的 stack，斷言碰撞 tick 後倖存方 idx 仍前進、碰撞格無新主                               |
-| AC-22 | AI 評估順序 RNG shuffle：同 seed 重跑 100 場結果完全相同；不同 seed 結果分佈不同                                                | Headless：`pnpm playtest scenario.json --runs 100 --seed 42` 兩次跑結果 hash 一致；換 seed → hash 不同            |
+| ~~AC-22~~ | _AI RNG 確定性類，§4.2 於 v1.0 移出，AC 一併下線_ | — |
 | ~~AC-23~~ | _§3.6.1 於 v0.12 移除，原 adjacent claim 單一勢力翻 owner 場景作廢_ | — |
 | ~~AC-24~~ | _§3.6.1 於 v0.12 移除，原多勢力戰力決勝場景作廢_ | — |
 | ~~AC-25~~ | _§3.6.1 於 v0.12 移除，原 claim 不變更 count 場景作廢_ | — |
 | ~~AC-26~~ | _§3.6.1 hysteresis 隨 §3.6.1 於 v0.12 一併移除_ | — |
-| AC-27 | Castle 分階累積保護（Knight 階）：TOKUGAWA 主城 count=8 (Knight) 相鄰空格 → rule #2 派出 `min(floor(8*0.25), 8-5) = 2` 兵，source 變 6 | Headless：stepAi 後斷言 marching stack count=2、source count=6                                                    |
-| AC-28 | Castle 分階累積保護（Soldier 階禁止派兵）：TOKUGAWA 主城 count=4 (Soldier) 相鄰空格、無其他合格 source、無敵方威脅、無進攻目標 → rule #2 不對主城 fire；fallthrough 走規則 #4（不動） | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
-| AC-29 | Rule #3 距離放寬：TOKUGAWA 非主城格 (3,0) count=10 (Knight, power=40)、TAKEDA 主城 (10,0) count=3 (Soldier, power=3)、distance=7 (≤ 8) → rule #3 fire，派 `count-1 = 9` 兵；source.count → 1 | Headless：stepAi 後斷言 marching stack count=9、source count=1、path 終點 = TAKEDA 主城                          |
-| AC-30 | Rule #3 距離仍受限：source 到敵方主城最短路徑 = 13 hops (> 12) → rule #3 不 fire                                                | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
-| AC-31 | Rule #3 castle source 保留 5 兵：TOKUGAWA 主城 (0,0) count=14 (Queen, power 168)、TAKEDA 主城 (10,0) count=12 (Queen, power 144)、路徑 ≤ 8 hops、power ratio 1.0 滿足 → 派遣量 = 14 − 5 = 9，TOKUGAWA castle 保留 5（Knight） | Headless：stepAi 後斷言 marching stack count=9、source count=5、path 終點 = TAKEDA 主城                          |
-| AC-32 | Rule #3 派遣量 ≤ 0 時不 fire：TOKUGAWA 主城 count=5 (Knight, power 20)、TAKEDA 主城 count=5 (Knight, power 20)、ratio 1.0、hops 滿足 → 派遣量 = 5 − 5 = 0，跳過，rule #3 不 fire | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
-| AC-33 | §3.5.5 Castle 溢出：TOKUGAWA castle (0,0) count=32 (King)、相鄰 (1,0) 己方 frontline tile count=1（相鄰至少 1 格非己方） → 1 tick castle overflow phase 後產生 marching stack count=`min(2, 32-30)`=2、castle count=30；若 castle count=30（**不**> 30）→ 不觸發 | Headless：兩場景分別 stepCastleOverflow，斷言觸發/不觸發、castle count 與 marching stack 完全符 |
-| AC-34 | §4.1 Rule #2.5 集結 anchor 選擇：TOKUGAWA 非主城 frontline A count=8 (Knight)、B count=5 (Knight)，A 相鄰己方非主城 tile S1 count=4、S2 count=6 → rule #2.5 fire，anchor = A（count 較大），S1 派 `min(floor(4*0.5), 4-1)=2` 兵、S2 派 `min(floor(6*0.5), 6-1)=3` 兵向 A | Headless：stepAi 後斷言 marching stack 終點 = A、count 精確                            |
-| AC-35 | §3.5.6 Castle vs castle BFS hops 例外：TOKUGAWA 主城 (0,0) count=30 (King, power 900)、TAKEDA 主城 (10,10) count=3 (Soldier, power 3)、路徑全己方 passable 但 hops = 15 (> `ATTACK_RANGE_HOPS = 8`) → rule #3 fire，派遣量 = 30 − 5 = 25；若路徑中間有非己方非 castle tile（中斷 passable） → rule #3 不 fire | Headless：兩場景分別 stepAi 斷言 fire / 不 fire                                       |
+| ~~AC-27~~ | _AI rule #2 castle 分階保護，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-28~~ | _AI rule #2 Soldier 禁止派兵，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-29~~ | _AI rule #3 距離放寬，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-30~~ | _AI rule #3 距離受限，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-31~~ | _AI rule #3 castle reserve，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-32~~ | _AI rule #3 派遣量 ≤ 0，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-33~~ | _Castle 自動溢出 (§3.5.5)，於 v1.0 移出 PRD，AC 一併下線_ | — |
+| ~~AC-34~~ | _AI rule #2.5 集結，§4.1 於 v1.0 移出，AC 一併下線_ | — |
+| ~~AC-35~~ | _Castle vs castle BFS 例外 (§3.5.6)，於 v1.0 移出 PRD，AC 一併下線_ | — |
 
 ## 8. 範圍外（Future Scope）
 
@@ -477,9 +385,10 @@ function updateStalemates(
 | `src/engine/combat.ts`     | `computeLoss(own, opp)` 純函數 + adjacency 結算     |
 | `src/engine/movement.ts`   | BFS 路徑 + marching stack 推進 + 碰撞解析           |
 | `src/engine/production.ts` | 主城產兵                                            |
-| `src/engine/ai.ts`         | AI 狀態機                                           |
 | `src/engine/victory.ts`    | 勝負判定                                            |
 | `src/engine/types.ts`      | 共用型別（Faction / Tier / Province / MarchingStack）|
+
+> Engine 中 `src/engine/ai.ts`（含 `stepAi`、rule #1/#2/#2.5/#3 實作）、`src/engine/overflow.ts`（castle overflow phase）目前**仍在 repo 內**，`tick.ts` 也仍會呼叫 `stepAi` + `applyCastleOverflow`，但對應 PRD 規格（v0.12 §4 / §3.5.5）已隨 v1.0 移出。屬「規格 orphan」狀態：行為不在本 PRD 規範範圍，未來 AI 重啟時必須回頭重審。
 
 ### 9.2 渲染層（Pixi.js）
 
@@ -517,135 +426,24 @@ function updateStalemates(
 - `src/main.ts`、`src/manager/*`、`src/map/*`、`src/unit/*`、`src/event/*`、`src/game/*`、`src/namedMap/*`、`index.html` → **重構保留概念，重寫實作**。`Faction` / `FactionId` / `Province` 型別概念遷入 `src/engine/types.ts`。
 - 移除 `three` 與 `@types/three` 相依；新增 `pixi.js` (^8.x)。GSAP 保留。
 
-## 10. Headless Playtest 腳本規格
+## 10. Headless Playtest 腳本規格（**降格為工具，非 acceptance 工具**）
 
-引擎層完全無 Pixi/DOM 依賴 → 可在 Node 跑純邏輯模擬，用於 **balance 測試、回歸測試、formula 微調**。
-
-### 10.1 CLI 入口
-
-```bash
-pnpm playtest <scenario.json>                  # 跑單場
-pnpm playtest <scenario.json> --runs 100       # 跑 100 場統計勝率
-pnpm playtest <scenario.json> --log events     # 輸出 per-event 詳細 log
-pnpm playtest <scenario.json> --max-ticks 500  # 超時平局
-```
-
-實作位置：`src/playtest/cli.ts`，由 `tsx src/playtest/cli.ts` 執行。
-
-### 10.2 Scenario 檔格式
-
-```json
-{
-  "boardSize": 11,
-  "initialState": [
-    { "x": 0,  "y": 0,  "owner": "TOKUGAWA", "count": 3, "isCastle": true },
-    { "x": 10, "y": 0,  "owner": "TAKEDA",   "count": 3, "isCastle": true },
-    { "x": 0,  "y": 10, "owner": "ODA",      "count": 3, "isCastle": true },
-    { "x": 10, "y": 10, "owner": "UESUGI",   "count": 3, "isCastle": true },
-    { "x": 5,  "y": 5,  "owner": "NEUTRAL",  "count": 3, "isCastle": false }
-  ],
-  "aiConfig": {
-    "TOKUGAWA": "default",
-    "TAKEDA":   "default",
-    "ODA":      "default",
-    "UESUGI":   "default"
-  },
-  "scriptedCommands": [
-    { "atTick": 3,  "from": [0,0], "to": [1,0], "ratio": 1.0 },
-    { "atTick": 10, "from": [1,0], "to": [2,0], "ratio": 0.5 }
-  ],
-  "rngSeed": 42
-}
-```
-
-- `aiConfig` 任一勢力填 `"default"` = 跑 AI；填 `"scripted"` = 只聽 `scriptedCommands`；填 `"idle"` = 不動。
-- `rngSeed` 必填 → 完全可重現。
-
-### 10.3 輸出格式
-
-**Summary（預設）**：
-
-```
-Scenario: default-11x11
-Runs: 100
-Results:
-  TOKUGAWA wins: 24 (24%)
-  TAKEDA wins:   31 (31%)
-  ODA wins:      22 (22%)
-  UESUGI wins:   18 (18%)
-  Stalemate:      5 (5%)
-Avg game length: 187 ticks (374s @ 1x)
-Median:          164 ticks
-P95:             312 ticks
-```
-
-**Detail mode (`--log events`)**：每 tick 一行 JSON，含產兵 / 派遣 / 戰鬥 / 佔領 / 升級 / 敗北事件。
-
-### 10.4 用途與驗收
-
-| 用途           | 驗證方式                                                                   |
-| -------------- | -------------------------------------------------------------------------- |
-| Balance 檢查   | 100 場勝率所有勢力差距 ≤ ±10%（位置不對稱可能造成天然差距，但需在可控範圍） |
-| Formula 回歸   | 改公式前後跑相同 seed 100 場，diff 平均場長、勝率變化                      |
-| AC 自動驗證    | AC-04 / 05 / 08 / 15 / 17 / 18 / 19 用 playtest 框架寫成 vitest 測試       |
-| 發布前 smoke   | `pnpm playtest src/scenarios/default.json --runs 10` 過 = 引擎可玩         |
-
-### 10.5 與單元測試的分工
-
-- **vitest 單元測試**：純函數（`deriveTier`、`computeLoss`、BFS）。
-- **vitest 整合測試**：呼叫 playtest engine API、設場景、advance、斷言。
-- **CLI playtest**：人類觸發的探索性壓測，產出統計報告，不掛 CI。
+> 原 v0.12 §10 把 playtest CLI 定位為 AI balance 探索工具（100-run 勝率分佈 / 平均場長）。v1.0 把 AI 移出 PRD 後，這層 acceptance 用途**暫停**：勝率、場長都沒意義（沒有自動派兵的對手）。
+>
+> CLI 本身（`src/playtest/cli.ts`、`runScenario` API、scenario JSON 格式、event log）仍保留在 repo，繼續服務兩個用途：
+>
+> - **引擎回歸 / scripted smoke**：`aiConfig` 全填 `"idle"`、用 `scriptedCommands` 走完一條預先寫好的劇本（夾擊敵 castle、引發 stalemate drain、頭對頭碰撞等），驗 §3.5 / §3.6 / §3.7 engine 行為。
+> - **單元 / 整合測試後盾**：`src/playtest/integration.test.ts` 仍會被 vitest 跑，作為跨模組行為的回歸網。
+>
+> AI-driven 統計用途（100-run 勝率）等 AI 回到 PRD 後再考慮重啟。
 
 ## 11. 驗證計畫（總覽）
 
-| 階段             | 工具                                       | 範圍                                          |
-| ---------------- | ------------------------------------------ | --------------------------------------------- |
-| 開發中           | vitest 單元 / 整合測試                     | AC-04 / 05 / 08 / 15 / 17 / 18 / 19           |
+| 階段             | 工具                                       | 範圍                                                  |
+| ---------------- | ------------------------------------------ | ----------------------------------------------------- |
+| 開發中           | vitest 單元 / 整合測試                     | AC-04 / 05 / 08 / 17 / 18 / 19 / 20 / 21              |
 | Manual smoke     | `pnpm dev` + 瀏覽器                        | AC-01 / 02 / 03 / 06 / 07 / 09 / 11 / 12 / 13 / 14 / 16 |
-| Balance 探索     | `pnpm playtest --runs 100`                 | 勝率分佈、場均長度                            |
-| 發布前 sign-off  | `/run` skill 跑三場：速勝 / 敗北 / AI 互打 | 端到端體感                                    |
-| PR 驗證          | `/verify` skill                            | 最後一次端到端跑通                            |
+| Scripted smoke   | `pnpm playtest <scripted.json>`            | 引擎行為回歸（無 AI、純 scripted 劇本驗 §3.5–§3.7）   |
+| PR 驗證          | `/verify` skill                            | 最後一次端到端跑通                                    |
 
-### 11.1 M1 收斂限制（v0.10 起 ship-as-is）
-
-**M1 已知限制**：在當前 default scenario (11x11、4-corner castle、AI rule 短路 + RNG shuffle) + §3.6 戰鬥公式（**§3.6.1 於 v0.12 移除**，M1 期間曾啟用）的組合下，default playtest 多數對局會跑滿 `max-ticks` 平局。M1.11 嘗試過下列調整皆無法改善終結率：
-
-- ~~v0.6 §3.6.1 相鄰勢力空格佔領~~（v0.12 已移除規則本身，不再作為收斂手段）
-- ~~v0.7 §3.6.1 hysteresis 防震盪~~（隨 §3.6.1 一併移除）
-- v0.8 §4.1 castle 分階累積保護 + rule #3 ATTACK_RANGE_HOPS 4→8
-- v0.9 §3.4 tier 5/15/30→5/12/25 + ATTACK_POWER_RATIO 1.5→1.0 + rule #3 castle reserve 1→5
-- v0.10 §4.1 ATTACK_RANGE_HOPS 8→12
-
-v0.9 / v0.10 已 **revert 回 v0.8 baseline**；PRD changelog 與 §3.4 / §4.1 內 v0.9 / v0.10 描述保留作歷史，但**實作為 v0.8 baseline**（tier 5/15/30、ratio 1.5、hops 8、castle reserve 1）。
-
-**根因**（M1.11 diag 確認，500-tick 整局 0 castle take-down）：
-1. **戰場累積機制缺失**：rule #2 採分散擴張，戰場 tile 永遠 cap 在 Soldier / low-Knight，無法形成集結戰力突破 castle 防線。
-2. **對角 castle 互攻路徑不可達**：corner 對角 manhattan = 20，相鄰 corner = 10；rule #3 hops 限制怎麼放，BFS 路徑仍要求中間 tile 全為己方 passable，partition 後不成立。
-
-不屬於 engine bug — 162+ 條 AC 全綠、無 NaN / 負 count / tier-count 不一致。屬於 AI 設計層議題，留至 M2 處理（規劃方向見 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md)）。
-
-**v0.11 解法（M2.2.6–M2.2.8）**：
-
-1. **§3.5.5 Castle 自動溢出**（engine 規則）：`castle.count > 30` 每 tick 推 1–2 兵到最近 frontline，給戰場累積建立「主城溢出 → 前線」的兵源管道，解根因 1。
-2. **§4.1 Rule #2.5 集結**（AI 規則）：把分散的非主城兵向 frontline anchor 流，配合 castle overflow 形成「主城 → 前線 anchor」的累積閉環。
-3. **§3.5.6 Castle vs castle BFS 例外**（engine 規則）：source castle → target castle 移除 hops 上限（路徑全己方 passable 仍要求），解根因 2 在「集結成功推到 castle 旁」之後仍卡 hops 不足的問題。
-
-v0.11 acceptance：spectator 100-run 結束率 ≥ 50%、任一勢力勝率 ≤ 50%、平均場長 ≤ 400 ticks（見 [`docs/MILESTONES.md`](./MILESTONES.md) M2 退出條件與 M2.2.8 回歸 task）。
-
-### 11.2 M1.11 驗收門檻調整（取代原 100–400 ticks 平均場長）
-
-原 MILESTONES.md M1.11 要求「平均場長 100–400 ticks」。基於 §11.1 收斂限制，調整為：
-
-- **引擎邏輯**：所有 AC 全綠（M1 規格 162+ tests + AC-15 整合；§3.6.1 claim/hysteresis 對應的 14 條 test 隨 v0.12 移除而下線，總數同步下修）。
-- **Playtest**：`pnpm playtest src/scenarios/default.json --runs 10 --log events --max-ticks 500` 無 crash / NaN / 負 count / 主城自殺 / tier-count 不一致即過。
-- **`max-ticks` 平局視為合法結局**：在 stalemate 統計中正常計入，不算 engine bug。終結率不再列為強制門檻。
-
-調整後 M1.11 仍要求 manual smoke 由人類執行並肉眼觀察 event log，但「平均場長 100–400」一行從 acceptance 條款轉為 M2 的回歸目標。
-
-**v0.11 update（M2.2.6–M2.2.8 完工後）**：M2 退出條件重啟以下三條為硬門檻（取代 v0.10 「不在 acceptance 內」狀態）：
-
-- **結束率 ≥ 50%**：`pnpm playtest src/scenarios/default.json --runs 100 --max-ticks 500` 至少 50 場非 stalemate 終止
-- **任一勢力勝率 ≤ 50%**：避免單一勢力被新規則過度偏袒
-- **平均場長 ≤ 400 ticks**：保留「12–20 分鐘對局」的願景門檻（PRD §1）
-
-未過 → 回頭調 §3.5.5 / §4.1 rule #2.5 / §3.5.6 參數，但 PRD 文字不動（屬實作層調參，不改規格）。
+> v0.10/v0.11 的「100-run 結束率 / 勝率分佈 / 平均場長」acceptance 隨 AI 一併移出 v1.0。v1 acceptance 的具體門檻在「UI + 基礎機制」次輪 PRD 重新訂定。完整 v0.12 收斂限制與 acceptance gate 描述見 git tag `archive/prd-v0.12`。
