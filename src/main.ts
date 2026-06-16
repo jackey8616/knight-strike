@@ -6,12 +6,15 @@ import { buildInitialState } from "@/playtest/runner";
 import { createRenderApp } from "@/render/app";
 import { createBoardRenderer } from "@/render/board";
 import { createUnitsRenderer } from "@/render/units";
-import { defaultScenario } from "@/scenarios/default";
+import { spectator4aiScenario } from "@/scenarios/spectator-4ai";
+import { createMinimalHud } from "@/ui/minimal-hud";
 
 const KNIGHT_TEXTURE_URL = "knight.png";
 
 const TICK_INTERVAL_MS = 2000;
 const MOUNT_ID = "app";
+
+type Speed = 1 | 2;
 
 async function bootstrap(): Promise<void> {
   const container = document.getElementById(MOUNT_ID);
@@ -21,7 +24,7 @@ async function bootstrap(): Promise<void> {
 
   const render = await createRenderApp(container);
   const knightTexture = (await Assets.load(KNIGHT_TEXTURE_URL)) as Texture;
-  let state: GameState = buildInitialState(defaultScenario);
+  let state: GameState = buildInitialState(spectator4aiScenario);
 
   const board = createBoardRenderer(state, {
     onPointerOver: (id: TileId) => {
@@ -39,6 +42,8 @@ async function bootstrap(): Promise<void> {
   const units = createUnitsRenderer(state, knightTexture);
   board.container.addChild(units.container);
 
+  const hud = createMinimalHud(document.body);
+
   board.resize(render.app.screen.width, render.app.screen.height);
 
   const onResize = (): void => {
@@ -46,17 +51,73 @@ async function bootstrap(): Promise<void> {
   };
   window.addEventListener("resize", onResize);
 
-  const tickHandle = window.setInterval(() => {
+  let paused = false;
+  let speed: Speed = 1;
+  let tickHandle: number | null = null;
+
+  function intervalForSpeed(s: Speed): number {
+    return TICK_INTERVAL_MS / s;
+  }
+
+  function tickOnce(): void {
     state = step(state);
     board.update(state);
     units.update(state);
-  }, TICK_INTERVAL_MS);
+    hud.update(state, { paused, speed });
+  }
+
+  function stopTicker(): void {
+    if (tickHandle !== null) {
+      window.clearInterval(tickHandle);
+      tickHandle = null;
+    }
+  }
+
+  function startTicker(): void {
+    stopTicker();
+    tickHandle = window.setInterval(tickOnce, intervalForSpeed(speed));
+  }
+
+  hud.update(state, { paused, speed });
+  startTicker();
+
+  const onKeyDown = (e: KeyboardEvent): void => {
+    if (e.repeat) return;
+    switch (e.key) {
+      case " ":
+      case "Spacebar": {
+        e.preventDefault();
+        paused = !paused;
+        if (paused) stopTicker();
+        else startTicker();
+        hud.update(state, { paused, speed });
+        break;
+      }
+      case "1": {
+        speed = 1;
+        if (!paused) startTicker();
+        hud.update(state, { paused, speed });
+        break;
+      }
+      case "2": {
+        speed = 2;
+        if (!paused) startTicker();
+        hud.update(state, { paused, speed });
+        break;
+      }
+      default:
+        break;
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
 
   window.addEventListener(
     "beforeunload",
     () => {
-      window.clearInterval(tickHandle);
+      stopTicker();
       window.removeEventListener("resize", onResize);
+      window.removeEventListener("keydown", onKeyDown);
+      hud.destroy();
       units.destroy();
       board.destroy();
       render.destroy();

@@ -1,0 +1,18 @@
+{
+  "name": "spectator-4ai",
+  "boardSize": 11,
+  "initialState": [
+    { "x": 0, "y": 0, "owner": "TOKUGAWA", "count": 3, "isCastle": true },
+    { "x": 10, "y": 0, "owner": "TAKEDA", "count": 3, "isCastle": true },
+    { "x": 0, "y": 10, "owner": "ODA", "count": 3, "isCastle": true },
+    { "x": 10, "y": 10, "owner": "UESUGI", "count": 3, "isCastle": true },
+    { "x": 5, "y": 5, "owner": "NEUTRAL", "count": 3, "isCastle": false }
+  ],
+  "aiConfig": {
+    "TOKUGAWA": "default",
+    "TAKEDA": "default",
+    "ODA": "default",
+    "UESUGI": "default"
+  },
+  "rngSeed": 42
+}
