@@ -21,14 +21,16 @@ const TIER_RANK: Readonly<Record<Tier, number>> = {
   KING: 3,
 };
 
-// PRD §5.1: per-tier silhouettes now ship via `sprites.ts`; we keep a modest
-// scale ramp so higher tiers also visually loom larger than lower ones inside
-// the same tile diamond.
+// PRD §5.1: per-tier silhouettes ship via `sprites.ts`; we keep a modest scale
+// ramp so higher tiers also visually loom larger. Capped under 1.0 so even
+// King sprites stay slightly smaller than the tile diamond — at 1.0 the
+// crown extended high enough to overlap the row above, making the board
+// feel crowded once production filled it with garrisons.
 const TIER_TILE_FRACTION: Readonly<Record<Tier, number>> = {
-  SOLDIER: 0.55,
-  KNIGHT: 0.7,
-  QUEEN: 0.85,
-  KING: 1.0,
+  SOLDIER: 0.4,
+  KNIGHT: 0.5,
+  QUEEN: 0.6,
+  KING: 0.7,
 };
 
 const UPGRADE_FLASH_COLOR = 0xffe480;
