@@ -178,7 +178,7 @@ pnpm build
 
 加上 `pnpm dev` 後人類在瀏覽器內完成一場「玩家主動速勝」對局；engine 層此階段不大改（小於 50 行 diff、不動公式）。
 
-**Turn 上限**：45
+**Turn 上限**：50
 
 ### M2.0 — Pixi `Application` + 入口
 
@@ -202,6 +202,40 @@ pnpm build
 - 依賴：M2.1
 - 完成定義：每格 stack 對應 tier sprite + count 數字；tier 切換 GSAP 金光 scale 動畫；戰鬥 bump + tint flash。
 - 註：M2 可用一張 sprite + tint / scale 區分 tier；完整 5 種 sprite 留 M4。
+
+### M2.2.5 — AI Spectator Mode（早期 AI 觀察站）
+
+- **檔案**：
+  - `src/main.ts`（加 spectator entry 邏輯）
+  - `src/scenarios/spectator-4ai.json`（新 scenario）
+  - `src/ui/minimal-hud.ts`（新建，極簡 HUD，M2.7 完整 HUD 出現後可刪）
+- **對應 PRD**：無新規格，純 debug / observation 工具
+- **依賴**：M2.0、M2.1、M2.2
+- **完成定義**：
+  - `pnpm dev` 預設載入 `spectator-4ai.json`
+  - 4 勢力全 AI（含 TOKUGAWA），玩家本回合無互動
+  - 渲染顯示：棋盤、主城、單位 tier sprite、count 數字、tier 升級動畫、戰鬥 bump
+  - tick 自動推進（預設 1x = 2s/tick，可用 keyboard `Space` 暫停、`1`/`2` 變速 — 若 M2.6 keyboard 還未做則僅 Space）
+  - 右上角極簡 HUD：`Tick: N | TOK:X TAK:Y ODA:Z UES:W`（4 個數字是各勢力控制格數）
+  - 不需要 marching stack 動畫（M2.3 才做）—— AI 派遣的單位可暫時用 sprite 瞬移呈現
+  - 不需要 dispatch 手勢、不需要完整 faction panel、不需要 tile info hover、不需要 end screen
+- **Turn 上限**：5
+- **重要設計約束**：
+  - spectator-4ai.json **使用 default scenario 同樣的開局**（4 角主城 count=3），不要為了「跑得通」改參數
+  - 此 task 完成後人類會用此 mode 觀察 AI 行為、判斷 BACKLOG P0 議題的解法
+  - 觀察過程中發現新議題，依 CLAUDE.md「文件互動規則」寫入 BACKLOG，**不要在這個 task 修 AI**
+
+#### Spectator 觀察清單（給人類用，task 結束後跑）
+
+人類執行 `pnpm dev` 後觀察：
+
+1. Castle 是否如 M1.11 diagnose 所示穩定在 3-6（v0.8 baseline）？
+2. AI rule #2 派兵的「來源 → 目標」視覺上是不是一直主城 → 相鄰空格？
+3. 戰場 tile 是不是大量 1-2 count 的小 stack 散佈？
+4. 兩相鄰敵格戰鬥時，是否如 stalemate counter 預期觸發 drain？
+5. claim phase 觸發時，視覺上有沒有「格子瞬間易主但無單位移動」的奇怪感？
+
+觀察結果不在這個 task 處理，但會影響後續 M2 task 順序與 BACKLOG 優先級。
 
 ### M2.3 — Marching stack 動畫 + 拖曳路徑虛線
 
