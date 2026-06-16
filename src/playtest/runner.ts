@@ -235,6 +235,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
         castleOwner: null,
         occupants: [],
         combatStartTick: null,
+        lastClaimedFaction: null,
       });
     }
   }
@@ -259,6 +260,9 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       castleOwner: t.isCastle ? t.owner : null,
       occupants,
       combatStartTick: null,
+      // Initial garrison's faction stamps the tile so derivedOwner reflects
+      // colour even if the occupant later dies before someone else claims.
+      lastClaimedFaction: t.count > 0 ? t.owner : null,
     });
   }
   const aiConfig: Record<FactionId, AiMode> = {

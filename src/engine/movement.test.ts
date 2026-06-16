@@ -28,6 +28,7 @@ function emptyState(boardSize = 5): GameState {
         castleOwner: null,
         occupants: [],
         combatStartTick: null,
+        lastClaimedFaction: null,
       });
     }
   }
@@ -237,6 +238,81 @@ describe("advanceMarching — basic arrivals", () => {
     expect(out.marchingStacks).toHaveLength(1);
     expect(out.marchingStacks[0]?.idx).toBe(1);
     expect(out.provinces.get(tileId(1, 0))?.occupants).toHaveLength(0);
+  });
+
+  it("[AC-V2-30] walk-through claim: non-terminus pass-through sets lastClaimedFaction", () => {
+    const s0 = emptyState(3);
+    const stack: MarchingStack = {
+      id: "m1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0), tileId(2, 0)],
+      idx: 0,
+      dispatchedAtTick: 0,
+    };
+    const s = { ...s0, marchingStacks: [stack], tick: 1 };
+    const out = advanceMarching(s);
+    const passed = out.provinces.get(tileId(1, 0));
+    // Tile stays empty but is claimed
+    expect(passed?.occupants).toHaveLength(0);
+    expect(passed?.lastClaimedFaction).toBe("TOKUGAWA");
+  });
+
+  it("[AC-V2-30] walk-through claim: terminus landing also stamps lastClaimedFaction", () => {
+    const s0 = emptyState(3);
+    const stack: MarchingStack = {
+      id: "m1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0)],
+      idx: 0,
+      dispatchedAtTick: 0,
+    };
+    const s = { ...s0, marchingStacks: [stack], tick: 1 };
+    const out = advanceMarching(s);
+    expect(out.provinces.get(tileId(1, 0))?.lastClaimedFaction).toBe("TOKUGAWA");
+  });
+
+  it("[AC-V2-30] force-join into contested leaves lastClaimedFaction alone", () => {
+    let s = emptyState(3);
+    s = setOccupants(s, 1, 0, [
+      occ("TAKEDA", 3, 0, true),
+      occ("ODA", 3, 0, false),
+    ]);
+    // Pre-existing claim from TAKEDA
+    const prov = s.provinces.get(tileId(1, 0));
+    if (prov === undefined) throw new Error("no province");
+    const next = new Map(s.provinces);
+    next.set(tileId(1, 0), { ...prov, lastClaimedFaction: "TAKEDA" });
+    s = { ...s, provinces: next };
+
+    const stack: MarchingStack = {
+      id: "m1",
+      faction: "TOKUGAWA",
+      count: 4,
+      path: [tileId(0, 0), tileId(1, 0)],
+      idx: 0,
+      dispatchedAtTick: 0,
+    };
+    s = { ...s, marchingStacks: [stack], tick: 1 };
+    const out = advanceMarching(s);
+    // Tile is now contested with 3 occupants; lastClaimedFaction stays TAKEDA
+    expect(out.provinces.get(tileId(1, 0))?.lastClaimedFaction).toBe("TAKEDA");
+  });
+
+  it("relaxed BFS passable: passes through enemy-empty intermediate (no hostile amount > 0)", () => {
+    let s = setOccupants(emptyState(), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
+    // Empty enemy-claimed tile (no occupants, just lastClaimedFaction)
+    const id1 = tileId(1, 0);
+    const prov = s.provinces.get(id1);
+    if (prov === undefined) throw new Error("no province");
+    const next = new Map(s.provinces);
+    next.set(id1, { ...prov, lastClaimedFaction: "TAKEDA" });
+    s = { ...s, provinces: next };
+
+    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
+    expect(path).not.toBeNull();
+    expect(path?.[1]).toBe(id1); // walks through the enemy-claimed empty
   });
 
   it("[AC-V2-07] same-faction terminus merge: amount adds to existing occupant", () => {

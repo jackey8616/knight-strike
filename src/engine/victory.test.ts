@@ -46,6 +46,7 @@ function tile(
     castleOwner: opts.castleOwner ?? null,
     occupants,
     combatStartTick: null,
+    lastClaimedFaction: null,
   };
 }
 

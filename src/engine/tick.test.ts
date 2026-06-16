@@ -53,6 +53,7 @@ function tile(
     castleOwner: opts.castleOwner ?? null,
     occupants,
     combatStartTick: opts.combatStartTick ?? null,
+    lastClaimedFaction: null,
   };
 }
 
@@ -62,60 +63,103 @@ describe("step (tick orchestrator)", () => {
     expect(step(s).tick).toBe(6);
   });
 
-  it("[AC-V2-26] production runs before combat: castle defender gets +1 then attacks", () => {
-    const id = tileId(0, 0);
+  it("[AC-V2-26] non-contested castle self-replicates each tick (produce phase fires)", () => {
+    // v1.3 rule: production only fires on non-contested tiles. Set up four
+    // castles all uncontested with amount > 1, advance one tick, and verify
+    // each castle's occupant +1.
+    const provinces = new Map([
+      [
+        tileId(0, 0),
+        tile(tileId(0, 0), [occ("TOKUGAWA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "TOKUGAWA",
+        }),
+      ],
+      [
+        tileId(10, 0),
+        tile(tileId(10, 0), [occ("TAKEDA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "TAKEDA",
+        }),
+      ],
+      [
+        tileId(0, 10),
+        tile(tileId(0, 10), [occ("ODA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "ODA",
+        }),
+      ],
+      [
+        tileId(10, 10),
+        tile(tileId(10, 10), [occ("UESUGI", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "UESUGI",
+        }),
+      ],
+    ]);
+    const out = step(makeState(provinces, 1));
+    for (const id of [
+      tileId(0, 0),
+      tileId(10, 0),
+      tileId(0, 10),
+      tileId(10, 10),
+    ]) {
+      const tk = out.provinces.get(id) as Province;
+      expect(tk.occupants[0]?.amount).toBe(4);
+    }
+  });
+
+  it("contested tile does NOT produce during the produce phase (v1.3 §3.3)", () => {
+    // TOK + TAK both on the same tile — produce should skip.
+    const id = tileId(5, 5);
     const provinces = new Map([
       [
         id,
         tile(
           id,
-          [occ("TOKUGAWA", 1, 0, true), occ("TAKEDA", 5, 0, false)],
-          { isCastle: true, castleOwner: "TOKUGAWA", combatStartTick: null },
+          [
+            occ("TOKUGAWA", 5, 0, true),
+            occ("TAKEDA", 5, 0, false),
+          ],
+          { combatStartTick: 0 },
         ),
       ],
-      // Need other castles so applyDefeats doesn't kill everyone
+      // Keep both factions alive with castles so applyDefeats stays quiet.
+      [
+        tileId(0, 0),
+        tile(tileId(0, 0), [occ("TOKUGAWA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "TOKUGAWA",
+        }),
+      ],
       [
         tileId(10, 0),
-        tile(
-          tileId(10, 0),
-          [occ("TAKEDA", 3, 0, true)],
-          { isCastle: true, castleOwner: "TAKEDA" },
-        ),
+        tile(tileId(10, 0), [occ("TAKEDA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "TAKEDA",
+        }),
       ],
       [
         tileId(0, 10),
-        tile(
-          tileId(0, 10),
-          [occ("ODA", 3, 0, true)],
-          { isCastle: true, castleOwner: "ODA" },
-        ),
+        tile(tileId(0, 10), [occ("ODA", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "ODA",
+        }),
       ],
       [
         tileId(10, 10),
-        tile(
-          tileId(10, 10),
-          [occ("UESUGI", 3, 0, true)],
-          { isCastle: true, castleOwner: "UESUGI" },
-        ),
+        tile(tileId(10, 10), [occ("UESUGI", 3, 0, true)], {
+          isCastle: true,
+          castleOwner: "UESUGI",
+        }),
       ],
     ]);
-    // Step with tick currently 1 → after step, state.tick becomes 2.
-    // (Production gates on `tick > 0`, so we start at 1 to exercise it.)
-    // During the step at state.tick = 1:
-    //   1. movement: no stacks → no-op
-    //   2. produce: TOKUGAWA amount 1 → 2 (castle owner gains +1)
-    //   3. combat: combatStartTick=0, t = 1-0 = 1, damage=1, both attack.
-    //      A→B = min(1, 2) = 1, B→A = min(1, 5) = 1.
-    //      But wait — the v1.2 test wants to show production preceding combat
-    //      at t=0. So setup combatStartTick=null and start tick=1: then
-    //      combat first runs with tick=1, combatStartTick gets set to 1,
-    //      t=0, defender (TOK) attacks TAK for min(1, 2)=1; TAK silent.
-    //      TOK ends at 2 (1 + produce); TAK ends at 4 (5 - 1).
     const out = step(makeState(provinces, 1));
-    const final = out.provinces.get(id) as Province;
-    const tok = final.occupants.find((o) => o.faction === "TOKUGAWA");
-    const tak = final.occupants.find((o) => o.faction === "TAKEDA");
-    expect(tok?.amount).toBe(2);
+    const contested = out.provinces.get(id) as Province;
+    const tok = contested.occupants.find((o) => o.faction === "TOKUGAWA");
+    const tak = contested.occupants.find((o) => o.faction === "TAKEDA");
+    // No produce; t=1 damage=1, both attack → both lose 1.
+    expect(tok?.amount).toBe(4);
     expect(tak?.amount).toBe(4);
   });
 

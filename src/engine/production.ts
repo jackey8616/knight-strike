@@ -1,12 +1,10 @@
-import { findOccupant } from "./state";
+import { isContested } from "./state";
 import type { GameState, Occupant, Province, TileId } from "./types";
 
-// PRD §3.3 v1.2: castles produce 1 unit per tick, added to the castleOwner's
-// occupant on that tile. If the castleOwner has no occupant (castle empty
-// or contested without owner presence), production is skipped this tick.
-// Step order (§3.2) puts production between movement and combat, so the
-// newly produced unit can immediately participate in the same-tick combat
-// addition phase as reinforcement.
+// PRD §3.3 v1.3 self-replicate: any tile not in combat with a non-NEUTRAL
+// non-defeated occupant whose amount is > 1 and < cap grows +1 per tick.
+// amount = 1 is the deliberate "派完只剩 1 不會無限補滿" carve-out so the
+// player's dispatch decisions actually drain the source.
 export const PRODUCTION_CAP = 100;
 
 export function produce(state: GameState): GameState {
@@ -14,22 +12,22 @@ export function produce(state: GameState): GameState {
 
   let provincesNext: Map<TileId, Province> | null = null;
   for (const [id, province] of state.provinces) {
-    if (!province.isCastle) continue;
-    const owner = province.castleOwner;
-    if (owner === null || owner === "NEUTRAL") continue;
-    if (state.defeated.has(owner)) continue;
+    if (isContested(province)) continue;
+    if (province.occupants.length === 0) continue;
 
-    const ownerOccupant = findOccupant(province, owner);
-    if (ownerOccupant === undefined) continue;
-    if (ownerOccupant.amount >= PRODUCTION_CAP) continue;
+    let changed = false;
+    const updated: Occupant[] = province.occupants.map((o) => {
+      if (o.faction === "NEUTRAL") return o;
+      if (state.defeated.has(o.faction)) return o;
+      if (o.amount <= 1) return o;
+      if (o.amount >= PRODUCTION_CAP) return o;
+      changed = true;
+      return { ...o, amount: Math.min(o.amount + 1, PRODUCTION_CAP) };
+    });
 
-    const newAmount = Math.min(ownerOccupant.amount + 1, PRODUCTION_CAP);
-    const updatedOccupants: Occupant[] = province.occupants.map((o) =>
-      o.faction === owner ? { ...o, amount: newAmount } : o,
-    );
-
+    if (!changed) continue;
     if (provincesNext === null) provincesNext = new Map(state.provinces);
-    provincesNext.set(id, { ...province, occupants: updatedOccupants });
+    provincesNext.set(id, { ...province, occupants: updated });
   }
 
   if (provincesNext === null) return state;

@@ -31,74 +31,98 @@ function makeState(
   };
 }
 
-function castle(
+function tile(
   id: string,
-  castleOwner: FactionId | null,
   occupants: readonly Occupant[],
+  opts: {
+    isCastle?: boolean;
+    castleOwner?: FactionId | null;
+    combatStartTick?: number | null;
+  } = {},
 ): Province {
   return {
     id,
     x: 0,
     y: 0,
-    isCastle: true,
-    castleOwner,
+    isCastle: opts.isCastle ?? false,
+    castleOwner: opts.castleOwner ?? null,
     occupants,
-    combatStartTick: null,
+    combatStartTick: opts.combatStartTick ?? null,
+    lastClaimedFaction: null,
   };
 }
 
-describe("produce", () => {
-  it("[AC-V2-03] castle owner's occupant gains +1", () => {
+describe("produce (v1.3 self-replicate)", () => {
+  it("[AC-V2-29] non-contested tile + amount > 1 grows by 1", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
+        tile(id, [
           { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
         ]),
       ],
     ]);
     const out = produce(makeState(provinces));
-    const tile = out.provinces.get(id);
-    expect(tile?.occupants[0]?.amount).toBe(4);
+    expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(4);
   });
 
-  it("skips when castleOwner has no occupant", () => {
+  it("[AC-V2-29] amount = 1 does not grow", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
-          { faction: "TAKEDA", amount: 3, arrivalTick: 0, isDefender: true },
+        tile(id, [
+          { faction: "TOKUGAWA", amount: 1, arrivalTick: 0, isDefender: true },
         ]),
       ],
     ]);
     const state = makeState(provinces);
     const out = produce(state);
-    expect(out).toBe(state); // unchanged reference
+    expect(out).toBe(state);
   });
 
-  it("skips at tick 0", () => {
+  it("[AC-V2-29] contested tile does not grow for any side", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
-          { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
-        ]),
+        tile(
+          id,
+          [
+            { faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true },
+            { faction: "TAKEDA", amount: 5, arrivalTick: 1, isDefender: false },
+          ],
+          { combatStartTick: 0 },
+        ),
       ],
     ]);
-    const state = makeState(provinces, 0);
+    const state = makeState(provinces);
     const out = produce(state);
     expect(out).toBe(state);
   });
 
-  it("skips when castleOwner is defeated", () => {
+  it("NEUTRAL bandit does not grow", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
+        tile(id, [
+          { faction: "NEUTRAL", amount: 3, arrivalTick: 0, isDefender: true },
+        ]),
+      ],
+    ]);
+    const state = makeState(provinces);
+    const out = produce(state);
+    expect(out).toBe(state);
+  });
+
+  it("defeated faction does not grow", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map([
+      [
+        id,
+        tile(id, [
           { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
         ]),
       ],
@@ -111,55 +135,91 @@ describe("produce", () => {
     expect(out).toBe(state);
   });
 
-  it("caps at PRODUCTION_CAP", () => {
+  it("amount caps at 100", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
-          { faction: "TOKUGAWA", amount: 100, arrivalTick: 0, isDefender: true },
+        tile(id, [
+          {
+            faction: "TOKUGAWA",
+            amount: 100,
+            arrivalTick: 0,
+            isDefender: true,
+          },
         ]),
       ],
     ]);
     const state = makeState(provinces);
     const out = produce(state);
-    expect(out).toBe(state); // at cap → no change
-  });
-
-  it("non-castle tiles don't produce", () => {
-    const id = tileId(0, 0);
-    const prov: Province = {
-      id,
-      x: 0,
-      y: 0,
-      isCastle: false,
-      castleOwner: null,
-      occupants: [
-        { faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true },
-      ],
-      combatStartTick: null,
-    };
-    const state = makeState(new Map([[id, prov]]));
-    const out = produce(state);
     expect(out).toBe(state);
   });
 
-  it("produces alongside hostile co-occupant (castleOwner still has occupant)", () => {
+  it("amount=99 grows to 100 (boundary)", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
         id,
-        castle(id, "TOKUGAWA", [
-          { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
-          { faction: "TAKEDA", amount: 5, arrivalTick: 1, isDefender: false },
+        tile(id, [
+          {
+            faction: "TOKUGAWA",
+            amount: 99,
+            arrivalTick: 0,
+            isDefender: true,
+          },
         ]),
       ],
     ]);
-    const out = produce(makeState(provinces, 2));
-    const tile = out.provinces.get(id);
-    const tok = tile?.occupants.find((o) => o.faction === "TOKUGAWA");
-    const tak = tile?.occupants.find((o) => o.faction === "TAKEDA");
-    expect(tok?.amount).toBe(4);
-    expect(tak?.amount).toBe(5); // unaffected
+    const out = produce(makeState(provinces));
+    expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(100);
+  });
+
+  it("castle and non-castle tiles grow identically", () => {
+    const castleId = tileId(0, 0);
+    const fieldId = tileId(1, 0);
+    const provinces = new Map([
+      [
+        castleId,
+        tile(
+          castleId,
+          [
+            { faction: "TOKUGAWA", amount: 4, arrivalTick: 0, isDefender: true },
+          ],
+          { isCastle: true, castleOwner: "TOKUGAWA" },
+        ),
+      ],
+      [
+        fieldId,
+        tile(fieldId, [
+          { faction: "TOKUGAWA", amount: 4, arrivalTick: 0, isDefender: true },
+        ]),
+      ],
+    ]);
+    const out = produce(makeState(provinces));
+    expect(out.provinces.get(castleId)?.occupants[0]?.amount).toBe(5);
+    expect(out.provinces.get(fieldId)?.occupants[0]?.amount).toBe(5);
+  });
+
+  it("skips at tick 0", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map([
+      [
+        id,
+        tile(id, [
+          { faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true },
+        ]),
+      ],
+    ]);
+    const state = makeState(provinces, 0);
+    const out = produce(state);
+    expect(out).toBe(state);
+  });
+
+  it("empty tile is left alone (no occupant to grow)", () => {
+    const id = tileId(0, 0);
+    const provinces = new Map([[id, tile(id, [])]]);
+    const state = makeState(provinces);
+    const out = produce(state);
+    expect(out).toBe(state);
   });
 });

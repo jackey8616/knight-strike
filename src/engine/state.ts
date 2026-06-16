@@ -14,14 +14,34 @@ export function parseTileId(id: TileId): { readonly x: number; readonly y: numbe
   return { x: Number(m[1]), y: Number(m[2]) };
 }
 
-// PRD §3.4 (v1.2): a tile is "owned" by a single faction only when exactly one
-// non-empty occupant sits on it. Empty / contested tiles have no derived owner
-// — callers handling those cases must branch on the null themselves.
+// PRD §3.4 / §3.5.4 (v1.3): tile ownership precedence —
+//   1 occupant     → that occupant's faction
+//   0 occupants    → lastClaimedFaction (walk-through trail; may be null)
+//   2+ occupants   → null (contested)
+// Render layer uses this for tile colour; dispatch source check uses this
+// but also requires an actual occupant of the same faction (lastClaimedFaction
+// alone never grants dispatch).
 export function derivedOwner(province: Province): FactionId | null {
   if (province.occupants.length === 1) {
     return (province.occupants[0] as Occupant).faction;
   }
+  if (province.occupants.length === 0) {
+    return province.lastClaimedFaction;
+  }
   return null;
+}
+
+// Has any hostile (= different faction) occupant with amount > 0. Used by
+// BFS passable check (v1.3 relaxed: walkable as long as no hostile troops
+// stand in the way; own-faction occupants and lastClaimedFaction don't block).
+export function hasHostileOccupant(
+  province: Province,
+  faction: FactionId,
+): boolean {
+  for (const o of province.occupants) {
+    if (o.faction !== faction && o.amount > 0) return true;
+  }
+  return false;
 }
 
 // Sum of all occupant amounts. For BFS + UI it's the natural "tile strength";

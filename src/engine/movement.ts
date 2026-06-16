@@ -1,6 +1,7 @@
 import {
   derivedOwner,
   findOccupant,
+  hasHostileOccupant,
   isContested,
   parseTileId,
   tileId,
@@ -22,21 +23,18 @@ const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
   [0, -1],
 ];
 
-// PRD §3.5.2 (v1.2): intermediate tiles in a BFS path must be either empty
-// (no occupants) or single-faction self-owned. Any hostile occupant — even
-// alongside friendly ones — blocks transit, since arriving at a contested
-// tile triggers force-join (§3.5.4 #2(e)) and the stack can't reach further
-// down the original path.
+// PRD §3.5.2 (v1.3 relaxed): a tile is passable as an intermediate as long as
+// no hostile occupant with amount > 0 stands in the way. Empty tiles, own
+// occupants (any amount), and tiles marked by lastClaimedFaction (occupants
+// empty) all walk through. Hostile amount > 0 forces force-join (§3.5.4 #2(e))
+// so the stack would not reach further along the original path — those tiles
+// are walls for BFS intermediate purposes (but still allowed as targets).
 function isPassableIntermediate(
   province: Province | undefined,
   faction: FactionId,
 ): boolean {
   if (province === undefined) return false;
-  if (province.occupants.length === 0) return true;
-  for (const o of province.occupants) {
-    if (o.faction !== faction) return false;
-  }
-  return true;
+  return !hasHostileOccupant(province, faction);
 }
 
 export function findPath(
@@ -212,7 +210,11 @@ export function cancelMarchingStack(
   if (province === undefined) return { ok: false, state, reason: "not-found" };
 
   const newProvinces = new Map(state.provinces);
-  newProvinces.set(tileAt, mergeArrivalIntoTile(province, stack.faction, stack.count, state.tick));
+  // Drop count onto the current tile; same lastClaimedFaction-set rule as
+  // advanceMarching (§3.5.4 v1.3 walk-through claim) — the stack's faction
+  // physically occupies this tile now.
+  const merged = mergeArrivalIntoTile(province, stack.faction, stack.count, state.tick);
+  newProvinces.set(tileAt, { ...merged, lastClaimedFaction: stack.faction });
 
   const newStacks = state.marchingStacks.filter((s) => s.id !== stackId);
   return {
@@ -451,6 +453,21 @@ export function advanceMarching(state: GameState): GameState {
           dispatchedAtTick: arrival.chosenDispatchedAtTick,
         });
       }
+    }
+
+    // §3.5.4 v1.3 walk-through claim: when this tick's arrivals leave the
+    // tile single-faction or empty (only happens when forceJoin=false), set
+    // lastClaimedFaction to the arriving faction. The arrival physically
+    // touches the tile this tick, either by landing (becomes the new
+    // occupant) or by passing through (stays empty but trail-marked).
+    // forceJoin=true paths land into contested state; lastClaimedFaction
+    // stays whatever it was (combat.ts updates it once a winner emerges).
+    if (!forceJoin && arrivals.length === 1) {
+      const arrival = arrivals[0] as FactionArrival;
+      workingProvince = {
+        ...workingProvince,
+        lastClaimedFaction: arrival.faction,
+      };
     }
 
     // §3.5.4 #3: when 2+ factions co-arrived on a previously-empty tile this

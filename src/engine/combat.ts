@@ -155,10 +155,21 @@ export function resolveSameTileCombat(state: GameState): CombatResult {
     const stillContested = factions.size >= 2;
 
     if (provincesNext === null) provincesNext = new Map(state.provinces);
+    // §3.5.4 v1.3 walk-through claim continuation: when combat ends with a
+    // single survivor, that faction "owns" the tile going forward (visual +
+    // BFS). Mutual annihilation (0 occupants) leaves lastClaimedFaction
+    // alone so the previous claimant's colour still shows on the empty tile
+    // — feels right since neither attacker "won" the contested patch.
+    let nextLastClaimed = p.lastClaimedFaction;
+    if (!stillContested && newOccupants.length === 1) {
+      nextLastClaimed = (newOccupants[0] as Occupant).faction;
+    }
+
     provincesNext.set(id, {
       ...p,
       occupants: newOccupants,
       combatStartTick: stillContested ? combatStartTick : null,
+      lastClaimedFaction: nextLastClaimed,
     });
 
     events.push({ tile: id, combatTick: t, baseDamage: base, attacks });

@@ -59,6 +59,7 @@ function makeTile(
     castleOwner,
     occupants,
     combatStartTick,
+    lastClaimedFaction: null,
   };
 }
 

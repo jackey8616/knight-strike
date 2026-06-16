@@ -64,7 +64,13 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
       lines.push(`<div>Castle of: ${FACTION_LABEL[p.castleOwner] ?? p.castleOwner}</div>`);
     }
     if (p.occupants.length === 0) {
-      lines.push(`<div style='opacity:0.6'>Empty</div>`);
+      if (p.lastClaimedFaction !== null) {
+        const claimed =
+          FACTION_LABEL[p.lastClaimedFaction] ?? p.lastClaimedFaction;
+        lines.push(`<div style='opacity:0.6'>Empty · claimed by ${claimed}</div>`);
+      } else {
+        lines.push(`<div style='opacity:0.6'>Empty</div>`);
+      }
     } else if (p.occupants.length === 1) {
       const o = p.occupants[0];
       if (o !== undefined) {

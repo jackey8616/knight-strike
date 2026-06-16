@@ -19,6 +19,11 @@ export type Province = {
   readonly castleOwner: FactionId | null;
   readonly occupants: readonly Occupant[];
   readonly combatStartTick: number | null;
+  // PRD §3.5.4 v1.3 walk-through claim. Updated when a marching stack
+  // arrives (terminus or transit) at a tile with no hostile amount > 0.
+  // Drives derivedOwner for empty tiles (visual coloring) but never grants
+  // dispatch rights — dispatch still needs an occupant with amount > 0.
+  readonly lastClaimedFaction: FactionId | null;
 };
 
 export type MarchingStack = {
