@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.11
+**Version**: v0.12
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -14,6 +14,7 @@
 - v0.9 — §3.4 Tier 閾值降為 5/12/25；§4.1 ATTACK_POWER_RATIO 1.5→1.0；§4.1 Rule #3 castle source 保留 5 兵；§4.1 Rule #2 castle 分階閾值同步更新；新增 AC-31/32。M1 收斂導向，戰場累積機制議題保留至 M2 再議
 - v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（M1.11 最終嘗試）；最終 ship 版本 revert engine 回 v0.8 baseline；新增 §11.1/§11.2 標記 M1 收斂限制與 M1.11 acceptance band 調整；引擎不再對 11x11 corner-castle scenario 保證終結率（見 [`M2-BACKLOG.md`](./M2-BACKLOG.md)）
 - v0.11 — §3.5.5 新增 Castle 自動溢出規則（`CASTLE_OVERFLOW_THRESHOLD = 30`）；§3.5.6 新增 Castle vs castle BFS hops 例外；§4.1 新增 Rule #2.5 集結（順序：威脅 → 擴張 → 集結 → 進攻 → 囤兵）；§3.2 step order 加 `castle overflow` phase（produce 之後、upgrade 之前）；新增 AC-33/34/35；§11.1 補 v0.11 解法；§11.2 把「平均場長 100–400 ticks + 結束率 ≥ 50% + 任一勢力勝率 ≤ 50%」重啟為 M2 退出條件。M2 P0 收斂導向（[`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0、[`docs/MILESTONES.md`](./MILESTONES.md) M2.2.6–M2.2.8）
+- v0.12 — 移除 §3.6.1 相鄰勢力空格佔領（含 hysteresis）。理由：v0.6 引入的「相鄰自動翻 owner」與玩家對「走過 / 打贏的格才屬於我」的直覺相違，視覺上像是領土莫名其妙就染色到鄰格、且削弱主動派遣的戰略意義。撤掉後駐紮空格 owner 翻轉**只剩** §3.5.4 的行軍 stack 抵達 claim；§3.2 step order 移除 3b claim phase；AC-23/24/25/26 刪除。`Province.lastClaimedAtTick` 欄位於 PRD 失去語意，engine schema 可同步清掉（細節不在本文件範圍）。**收斂風險**：§3.6.1 v0.6/v0.7 的補強作用消失，M2.2.8 acceptance 若失守需回頭調 v0.11 P0 機制（§3.5.5 / §4.1 rule #2.5 / §3.5.6 參數）而非復活 §3.6.1。
 
 ## 1. 願景與背景
 
@@ -63,17 +64,14 @@
 - **Tick 編號約定**：Tick 0 為初始狀態（僅渲染、無結算）。Tick 1 起執行下述六步結算順序。產兵於 tick 2 首次觸發（「每 2 ticks +1」= tick 2, 4, 6, ...）。AI 起始評估偏移（§4.3）以 tick 1 為基準：Tokugawa 從 tick 1 評估、Takeda tick 2、Oda tick 3、Uesugi tick 4，之後每 5 ticks 一次。
 - 暫停 / 繼續 / 變速 (1x / 2x) 支援；變速影響 tick 實際間隔。
 - 每個 tick 結算順序固定：
-  1. 移動推進（每 tick 沿路徑前進 1 格，包含 marching stack 入格與 stack-collision 判定）
+  1. 移動推進（每 tick 沿路徑前進 1 格，包含 marching stack 入格、stack-collision 判定、與行軍抵達 claim — 由 §3.5.4 規則處理）
   2. 戰鬥傷害結算（同步，含駐紮 vs 駐紮、駐紮 vs 行軍、行軍 vs 行軍）+ §3.7 stalemate / drain 結算
-  3. 佔領判定（claim phase）：
-     - **3a. 行軍 stack 抵達 claim**：行軍 stack 抵達空格 / NEUTRAL 空格 → 該格 owner = 行軍方、count = stack count（已由 §3.5.4 規則處理，列在這裡只是為了和 3b 同步顯示順序）
-     - **3b. 駐紮空格 claim**：對每個 count = 0 的非己方格（含敵方 count = 0、NEUTRAL 空格、defeated faction 殘留空格），依 §3.6.1 規則由相鄰勢力 claim 所有權
-     - **3c. 主城被佔判定**：遭佔領主城觸發該勢力敗北（§6.3）
+  3. 主城被佔判定：遭佔領主城觸發該勢力敗北（§6.3）
   4. 產兵（主城）
   5. 升級判定（count 跨過閾值即時推導 tier）
   6. 勝負判定
 
-> 完整 step order（v0.11）：`movement → combat → drain (§3.7) → claim (3a 行軍抵達 + 3b §3.6.1) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`。claim phase 在 drain 之後：drain 剛清空的格在同 tick 內就能被相鄰勢力 claim，避免下一 tick 才反應的延遲感。Castle overflow 在 produce 之後、upgrade 之前：剛產的兵若讓主城超過 `CASTLE_OVERFLOW_THRESHOLD`，同 tick 內就能溢出；tier 由 count 即時推導，overflow 後 count 是即時的，upgrade phase 仍能正確反映。
+> 完整 step order（v0.12）：`movement (含 §3.5.4 行軍抵達 claim) → combat → drain (§3.7) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`。駐紮空格不再有「相鄰自動 claim」phase（§3.6.1 已於 v0.12 移除），owner 翻轉**只**在行軍 stack 真正進駐該格時發生。Castle overflow 在 produce 之後、upgrade 之前：剛產的兵若讓主城超過 `CASTLE_OVERFLOW_THRESHOLD`，同 tick 內就能溢出；tier 由 count 即時推導，overflow 後 count 是即時的，upgrade phase 仍能正確反映。
 
 ### 3.3 城堡與產兵
 
@@ -236,61 +234,7 @@ new_count = max(0, count - loss)
 
 **設計意圖**：高 tier 不只抗打更是輸出乘法 —— King 戰力倍率 30，可在小數量下單方面屠殺低 tier 大軍。閾值 5 / 12 / 25 拉開後，玩家需累積較久才能享受質變，但一旦升級威力顯著。
 
-### 3.6.1 相鄰勢力空格佔領（adjacent claim）
-
-每 tick 戰鬥（含 §3.7 drain）結算完之後，對每個 `count = 0` 的格 `T`（不論 `T.owner` 為敵方 / NEUTRAL / defeated faction 殘留），執行下列判定：
-
-```
-adjClaimants = { n.owner | n ∈ T.neighbours,
-                 n.count > 0,
-                 n.owner ∉ { NEUTRAL, defeated_factions },
-                 n.owner != T.owner }
-
-if |adjClaimants| == 0:
-    no change
-
-elif |adjClaimants| == 1:
-    T.owner = 該勢力
-    T.count 保持 0
-
-else:  # 多勢力同時臨接 — 戰力決勝
-    powerByFaction[f] = sum(
-        n.count * tierMultiplier(deriveTier(n.count))
-        for n in T.neighbours
-        if n.owner == f and n.count > 0
-    )
-    winner = argmax(powerByFaction)
-    # tiebreak: 用 §4.2 同套 RNG（seed + tick + T.id 派生）shuffle 後取第一個
-    T.owner = winner
-    T.count 保持 0
-```
-
-#### 設計意圖
-
-- **Claim 只變更 owner、不變更 count**：claim 過來的格仍是空格（count = 0），需另派兵駐軍才能繼續推進或防守。
-- **只在「無行軍 stack 抵達」場景觸發**：行軍 stack 抵達已由 §3.5.4 規則處理（3a），優先於 §3.6.1（3b）。同 tick 抵達 + 駐紮 claim 不會雙重結算 — 抵達後該格 count > 0，§3.6.1 跳過。
-- **保留「打贏不自動雪球」的戰術深度**：戰勝相鄰敵格不會讓駐紮兵自動推進到對面，玩家仍需主動派遣鞏固佔領。
-- **三角戰場以戰力總和決勝**：多勢力同時臨接同一空格時，避免規則矛盾或卡死；tiebreak 走 §4.2 RNG 保確定性。
-- **NEUTRAL 與 defeated faction 不參與 claim**：NEUTRAL 沒有意圖，defeated 勢力的殘留 stack 已視同野怪不再行動（§6.3）。
-
-#### Hysteresis（防震盪）
-
-§3.6.1 v0.6 觀察到 late-game 邊界格在相鄰雙方戰力此消彼長時反覆翻轉 owner（claim → 反 claim → claim），形成肉眼閃爍。改為記錄 claim 時間戳防止反覆翻轉：
-
-- 每個格 `T` 維護 `T.lastClaimedAtTick: number | null`，預設 `null`。
-- 當 §3.6.1 觸發 owner 變更時，set `T.lastClaimedAtTick = currentTick`。
-- 判定 claim 是否觸發前，先檢查保護期：
-
-  ```
-  if T.lastClaimedAtTick != null
-     and currentTick - T.lastClaimedAtTick < 3:
-      跳過本次 claim（保留現 owner、count 仍 0）
-  ```
-
-- 保護期內，§3.6.1 不對 T 重新計算 claimants — `T.owner` 凍結直到保護期解除。`T.count` 由其他規則（戰鬥、抵達）正常變動，不受 hysteresis 限制。
-- 保護期解除時機：`currentTick - lastClaimedAtTick >= 3`。即 claim 發生於 tick K，tick K, K+1, K+2 受保護；tick K+3 起可再次被 claim。
-
-設計意圖：3 ticks = 6 秒，跟 §3.7 stalemate counter 的 5 ticks 同數量級。玩家肉眼能感受到「邊界穩定」而非「閃爍」；公式 + AI 規則的微小擾動不會把 owner 翻來翻去。
+> **§3.6.1（已移除，v0.12）**：原「相鄰勢力空格佔領（adjacent claim）」規則於 v0.12 撤回。駐紮空格的 owner 翻轉**只**由 §3.5.4 的行軍 stack 抵達觸發。設計理由與收斂風險見 changelog v0.12 與 §11.1。
 
 ### 3.7 弱勢平衡（stalemate 防護）
 
@@ -495,10 +439,10 @@ function updateStalemates(
 | AC-20 | 同勢力雙 marching stack 同 tick 入同格 → 合併、path 取剩餘步數最少者，tiebreak 取早派遣者                                       | Headless：派遣 stack A（剩 3 步）與 stack B（剩 1 步）同時抵達；斷言合併後 count 加總且 path 用 B 的剩餘 path     |
 | AC-21 | 敵方 marching stack 頭對頭（雙方非終點）→ 倖存方繼續原路徑、不入駐碰撞格                                                       | Headless：擺好兩條路徑交叉的 stack，斷言碰撞 tick 後倖存方 idx 仍前進、碰撞格無新主                               |
 | AC-22 | AI 評估順序 RNG shuffle：同 seed 重跑 100 場結果完全相同；不同 seed 結果分佈不同                                                | Headless：`pnpm playtest scenario.json --runs 100 --seed 42` 兩次跑結果 hash 一致；換 seed → hash 不同            |
-| AC-23 | 單一相鄰勢力佔領空敵格：A(TOKUGAWA, count=3) 與 B(TAKEDA, count=0) 相鄰，B 其餘鄰格皆無 claimant → 1 tick 後 B.owner = TOKUGAWA, B.count = 0 | Headless：advance(1) 後斷言 B 所有權翻轉、count 不變                                                              |
-| AC-24 | 多勢力爭奪空格戰力決勝：X(NEUTRAL, count=0) 四鄰 N(TOKUGAWA count=5, Knight, power=20) / E(TAKEDA count=3, Soldier, power=3) / S / W 空地 → X.owner = TOKUGAWA | Headless：advance(1) 後斷言 X.owner = TOKUGAWA（高 power 勝）                                                     |
-| AC-25 | Claim 不變更 count：A(TOKUGAWA count=5) 與 B(TAKEDA count=0) 相鄰 → advance(1) 後 B.owner = TOKUGAWA、B.count = 0、A.count = 5         | Headless：advance(1) 後斷言三個欄位精確                                                                          |
-| AC-26 | Claim hysteresis：T(owner=TOKUGAWA, count=0, lastClaimedAtTick=null) 與相鄰 TAKEDA 戰力 > TOKUGAWA → tick 1 claim 給 TAKEDA、lastClaimedAtTick=1；tick 2/3 即使 TOKUGAWA 戰力反超 T 不變；tick 4 (`4-1=3`，不 `<3`) 保護期解除可再 claim | Headless：multi-step advance，斷言 tick 1→3 owner 凍結為 TAKEDA、tick 4 可再翻回 TOKUGAWA                          |
+| ~~AC-23~~ | _§3.6.1 於 v0.12 移除，原 adjacent claim 單一勢力翻 owner 場景作廢_ | — |
+| ~~AC-24~~ | _§3.6.1 於 v0.12 移除，原多勢力戰力決勝場景作廢_ | — |
+| ~~AC-25~~ | _§3.6.1 於 v0.12 移除，原 claim 不變更 count 場景作廢_ | — |
+| ~~AC-26~~ | _§3.6.1 hysteresis 隨 §3.6.1 於 v0.12 一併移除_ | — |
 | AC-27 | Castle 分階累積保護（Knight 階）：TOKUGAWA 主城 count=8 (Knight) 相鄰空格 → rule #2 派出 `min(floor(8*0.25), 8-5) = 2` 兵，source 變 6 | Headless：stepAi 後斷言 marching stack count=2、source count=6                                                    |
 | AC-28 | Castle 分階累積保護（Soldier 階禁止派兵）：TOKUGAWA 主城 count=4 (Soldier) 相鄰空格、無其他合格 source、無敵方威脅、無進攻目標 → rule #2 不對主城 fire；fallthrough 走規則 #4（不動） | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 | AC-29 | Rule #3 距離放寬：TOKUGAWA 非主城格 (3,0) count=10 (Knight, power=40)、TAKEDA 主城 (10,0) count=3 (Soldier, power=3)、distance=7 (≤ 8) → rule #3 fire，派 `count-1 = 9` 兵；source.count → 1 | Headless：stepAi 後斷言 marching stack count=9、source count=1、path 終點 = TAKEDA 主城                          |
@@ -664,10 +608,10 @@ P95:             312 ticks
 
 ### 11.1 M1 收斂限制（v0.10 起 ship-as-is）
 
-**M1 已知限制**：在當前 default scenario (11x11、4-corner castle、AI rule 短路 + RNG shuffle) + §3.6 戰鬥公式 + §3.6.1 claim 規則的組合下，default playtest 多數對局會跑滿 `max-ticks` 平局。M1.11 嘗試過下列調整皆無法改善終結率：
+**M1 已知限制**：在當前 default scenario (11x11、4-corner castle、AI rule 短路 + RNG shuffle) + §3.6 戰鬥公式（**§3.6.1 於 v0.12 移除**，M1 期間曾啟用）的組合下，default playtest 多數對局會跑滿 `max-ticks` 平局。M1.11 嘗試過下列調整皆無法改善終結率：
 
-- v0.6 §3.6.1 相鄰勢力空格佔領
-- v0.7 §3.6.1 hysteresis 防震盪
+- ~~v0.6 §3.6.1 相鄰勢力空格佔領~~（v0.12 已移除規則本身，不再作為收斂手段）
+- ~~v0.7 §3.6.1 hysteresis 防震盪~~（隨 §3.6.1 一併移除）
 - v0.8 §4.1 castle 分階累積保護 + rule #3 ATTACK_RANGE_HOPS 4→8
 - v0.9 §3.4 tier 5/15/30→5/12/25 + ATTACK_POWER_RATIO 1.5→1.0 + rule #3 castle reserve 1→5
 - v0.10 §4.1 ATTACK_RANGE_HOPS 8→12
@@ -692,7 +636,7 @@ v0.11 acceptance：spectator 100-run 結束率 ≥ 50%、任一勢力勝率 ≤ 
 
 原 MILESTONES.md M1.11 要求「平均場長 100–400 ticks」。基於 §11.1 收斂限制，調整為：
 
-- **引擎邏輯**：所有 AC 全綠（M1 規格 162+ tests + claim/hysteresis 追加 14 tests + AC-15 整合 = 170 tests）。
+- **引擎邏輯**：所有 AC 全綠（M1 規格 162+ tests + AC-15 整合；§3.6.1 claim/hysteresis 對應的 14 條 test 隨 v0.12 移除而下線，總數同步下修）。
 - **Playtest**：`pnpm playtest src/scenarios/default.json --runs 10 --log events --max-ticks 500` 無 crash / NaN / 負 count / 主城自殺 / tier-count 不一致即過。
 - **`max-ticks` 平局視為合法結局**：在 stalemate 統計中正常計入，不算 engine bug。終結率不再列為強制門檻。
 

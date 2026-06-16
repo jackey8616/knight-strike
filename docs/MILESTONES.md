@@ -2,7 +2,7 @@
 
 本文件把 [`PRD.md`](PRD.md) v0.10 切成 4 個交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
 
-> PRD 同步基準：v0.10（AC-01 ~ AC-32；§3.6.1 claim + hysteresis；§4.1 castle 分階保護 + rule #3 距離/reserve；§11.1/§11.2 M1.11 收斂限制與門檻調整）。
+> PRD 同步基準：v0.12（AC-01 ~ AC-35；§3.6.1 已於 v0.12 移除，M1.6.5 留作歷史；§3.5.5 castle overflow + §4.1 rule #2.5 集結 + §3.5.6 castle vs castle 例外為當前 P0 收斂手段；§4.1 castle 分階保護 + rule #3 距離/reserve；§11.1/§11.2 收斂限制與門檻調整）。
 
 工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
@@ -22,8 +22,8 @@
 
 **目標**：一行 `pnpm playtest` 能跑完整局，engine 層所有 AC 自動驗。
 
-**涵蓋 PRD**：§2、§3.1–§3.7、§3.6.1、§4、§6、§10、§11.1、§11.2
-**涵蓋 AC**：AC-02、AC-03、AC-04、AC-05、AC-08、AC-15、AC-16、AC-17、AC-18、AC-19、AC-20、AC-21、AC-22、AC-23、AC-24、AC-25、AC-26、AC-27、AC-28、AC-29、AC-30、AC-31、AC-32
+**涵蓋 PRD**：§2、§3.1–§3.7、§4、§6、§10、§11.1、§11.2（§3.6.1 於 v0.12 移除，M1 範圍變更見下方 M1.6.5 歷史註記）
+**涵蓋 AC**：AC-02、AC-03、AC-04、AC-05、AC-08、AC-15、AC-16、AC-17、AC-18、AC-19、AC-20、AC-21、AC-22、AC-27、AC-28、AC-29、AC-30、AC-31、AC-32（AC-23/24/25/26 隨 PRD v0.12 §3.6.1 移除而下線）
 **退出條件**：
 
 ```bash
@@ -49,7 +49,7 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 - 檔案：`src/engine/types.ts`、`src/engine/state.ts`、`src/engine/util/rng.ts`、`src/engine/util/rng.test.ts`
 - 對應 PRD：§2、§3.1、§3.1.1、§3.5.3、§10.2
 - 依賴：M1.0
-- 完成定義：`FactionId` / `Tier` / `TileId` / `Province`（含 `lastClaimedAtTick: number | null` 欄位給 §3.6.1 hysteresis 用）/ `MarchingStack`（含 `id` / `dispatchedAtTick`）/ `GameState` / `StalemateMap` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。
+- 完成定義：`FactionId` / `Tier` / `TileId` / `Province` / `MarchingStack`（含 `id` / `dispatchedAtTick`）/ `GameState` / `StalemateMap` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。`Province.lastClaimedAtTick` 欄位於 PRD v0.12 §3.6.1 移除後一併下線（歷史 M1.6.5 曾要求加入）。
 
 ### M1.2 — Upgrade（deriveTier）
 
@@ -93,19 +93,9 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 - 完成定義：BFS passable 規則正確、目標可為敵方、無路徑回 null；marching stack `dispatchedAtTick` / `id` 填齊；同勢力合併（最少剩餘步 + tiebreak）AC-20、頭對頭 AC-17/21、路徑被切 AC-18、主城留 1 AC-16 全綠。
 - 因公式 + 6 種 collision 子場景一檔太重，實作時可拆成「BFS + dispatch」與「collision 解析」兩個 sub-task（仍同檔）。
 
-### M1.6.5 — Adjacent claim + Hysteresis
+### ~~M1.6.5 — Adjacent claim + Hysteresis~~（PRD v0.12 廢除）
 
-- 檔案：`src/engine/claim.ts`、`src/engine/claim.test.ts`（claim 結算夠重，獨立檔；若實作上合入 `combat.ts` 也可，但 test 仍獨立檔保留語意）
-- 對應 PRD：§3.2 步驟 3b、§3.6.1（含 hysteresis）
-- 對應 AC：AC-23、AC-24、AC-25、AC-26
-- 依賴：M1.4（戰鬥已結算）、M1.6（marching 抵達已先寫回，避免雙重 claim）
-- 完成定義：
-  - 對每個 `count = 0` 非己方格依 §3.6.1 規則由相鄰勢力 claim（單一 claimant → 直接翻；多 claimant → 戰力決勝；tie → §4.2 RNG tiebreak）。
-  - NEUTRAL 與 defeated faction 不參與 claim（不列入 claimants）。
-  - Claim **只改 owner、不改 count**；AC-25 精確驗。
-  - `Province.lastClaimedAtTick` 欄位寫入 `state.ts`（與 M1.1 一起 ship 或本 sub-milestone 補 patch）。
-  - Hysteresis 3-tick 保護期：claim 發生 tick K → tick K, K+1, K+2 owner 凍結、tick K+3 起可再 claim；AC-26 精確驗 tick 邊界。
-  - 整合進 tick orchestrator（M1.9）的 claim phase 3b。
+> **歷史註記**：本 sub-milestone 於 M1 期間 ship 並通過 AC-23/24/25/26。PRD v0.12 移除 §3.6.1 後，相關 engine 模組（`src/engine/claim.ts` + `claim.test.ts`）、`Province.lastClaimedAtTick` 欄位、tick orchestrator 的 claim phase 3b 一併下線；下游 milestone（M1.9 tick orchestrator）的 step order 同步更新為 v0.12 版本。設計理由見 PRD changelog v0.12。
 
 ### M1.7 — Victory 判定
 
@@ -141,8 +131,8 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 - 檔案：`src/engine/tick.ts`、`src/engine/tick.test.ts`
 - 對應 PRD：§3.2（六步結算順序 + 注腳完整 step order）
 - 對應 AC：AC-02
-- 依賴：M1.3、M1.4、M1.5、M1.6、M1.6.5、M1.7、M1.8
-- 完成定義：`step(state)` 嚴格依 PRD §3.2 注腳順序：`movement → combat → drain (§3.7) → claim 3a (行軍抵達) → claim 3b (§3.6.1 相鄰勢力) → defeats → produce → upgrade → victory`；純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊（tick 0 僅渲染、無結算；產兵於 tick 2 首次觸發；AI 評估偏移 1/2/3/4 + 每 5 ticks）。
+- 依賴：M1.3、M1.4、M1.5、M1.6、M1.7、M1.8（原 M1.6.5 已隨 PRD v0.12 §3.6.1 移除而廢除）
+- 完成定義：`step(state)` 嚴格依 PRD §3.2 注腳順序（v0.12）：`movement (含 §3.5.4 行軍抵達 claim) → combat → drain (§3.7) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`；純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊（tick 0 僅渲染、無結算；產兵於 tick 2 首次觸發；AI 評估偏移 1/2/3/4 + 每 5 ticks）。
 
 ### M1.10 — Headless playtest CLI + scenario loader
 
@@ -240,7 +230,7 @@ pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed
 2. AI rule #2 派兵的「來源 → 目標」視覺上是不是一直主城 → 相鄰空格？
 3. 戰場 tile 是不是大量 1-2 count 的小 stack 散佈？
 4. 兩相鄰敵格戰鬥時，是否如 stalemate counter 預期觸發 drain？
-5. claim phase 觸發時，視覺上有沒有「格子瞬間易主但無單位移動」的奇怪感？
+5. ~~claim phase 觸發時，視覺上有沒有「格子瞬間易主但無單位移動」的奇怪感？~~（PRD v0.12 §3.6.1 移除後不再會發生此情境）
 
 觀察結果不在這個 task 處理，但會影響後續 M2 task 順序與 BACKLOG 優先級。
 
@@ -481,10 +471,10 @@ pnpm build
 | AC-20  | ✅  |     |     |     |
 | AC-21  | ✅  |     |     |     |
 | AC-22  | ✅  |     |     |     |
-| AC-23  | ✅  |     |     |     |
-| AC-24  | ✅  |     |     |     |
-| AC-25  | ✅  |     |     |     |
-| AC-26  | ✅  |     |     |     |
+| ~~AC-23~~ | — | — | — | — |
+| ~~AC-24~~ | — | — | — | — |
+| ~~AC-25~~ | — | — | — | — |
+| ~~AC-26~~ | — | — | — | — |
 | AC-27  | ✅  |     |     |     |
 | AC-28  | ✅  |     |     |     |
 | AC-29  | ✅  |     |     |     |
