@@ -281,11 +281,10 @@ describe("rule priority", () => {
     expect([tileId(1, 0), tileId(0, 1)]).toContain(dest);
   });
 
-  it("rule #3 (attack) fires when reachable enemy castle within ATTACK_RANGE_HOPS and power ≥ ratio", () => {
-    // Own (3,0) count=20 (Queen under v0.9 12-threshold). PRD v0.9 §3.5.1 AI
-    // rule #3 non-castle reserve = 1; sendCount = 19 (still Queen, power
-    // 228). Target castle count=3 (Soldier, power 3). ATTACK_POWER_RATIO
-    // = 1.0 → 228 ≥ 3 satisfies. Distance 1 hop.
+  it("rule #3 (attack) fires when reachable enemy castle within ATTACK_RANGE_HOPS and power ≥ 1.5×", () => {
+    // Own (3,0) count=20 (Queen). PRD v0.8 §3.5.1 AI rule #3 keeps 1 troop on
+    // source, so effectiveCount = 19 (still Queen, power 228). Target castle
+    // count=3 (Soldier, power 3). Distance 1 hop. Send count=19.
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
@@ -306,15 +305,14 @@ describe("rule priority", () => {
   });
 
   it("rule #3 skipped when power ratio is unfavorable", () => {
-    // Source non-castle count=2 (Soldier, power 2) vs enemy Knight castle
-    // count=5 (power 20). 2 < 20 fails ≥ 1.0× under v0.9.
+    // Source has only 3 vs enemy castle count=3 → power tie, fails ≥ 1.5×.
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
         makeProvince(1, 0, "TOKUGAWA", 0),
         makeProvince(2, 0, "TOKUGAWA", 0),
-        makeProvince(3, 0, "TOKUGAWA", 2),
-        makeProvince(4, 0, "TAKEDA", 5, true),
+        makeProvince(3, 0, "TOKUGAWA", 3),
+        makeProvince(4, 0, "TAKEDA", 3, true),
       ],
       tick: 1,
     });
@@ -401,44 +399,6 @@ describe("rule priority", () => {
     provinces.push(makeProvince(10, 0, "TAKEDA", 3, true));
     const state = buildState({ provinces, tick: 1 });
     const out = stepAi(state);
-    expect(out.marchingStacks.length).toBe(0);
-  });
-
-  it("[AC-31] rule #3 castle source keeps reserve = 5", () => {
-    // PRD v0.9 §3.5.1: castle source rule #3 reserve = 5 (Knight tier
-    // defensive garrison). TOKUGAWA castle (0,0) count=14 (Queen, power 168).
-    // TAKEDA castle (10,0) count=12 (Queen, power 144). Power ratio 1.0× so
-    // 168 ≥ 144 satisfies. Path 10 hops along (1,0)..(9,0) corridor —
-    // exceeds ATTACK_RANGE_HOPS=8, so we'd never fire. Shrink corridor to
-    // fit by placing the target castle at (8,0) instead; path = 8 hops.
-    const provinces: Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 14, true),
-    ];
-    for (let x = 1; x <= 7; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
-    provinces.push(makeProvince(8, 0, "TAKEDA", 12, true));
-    const state = buildState({ provinces, tick: 1 });
-    const out = stepAi(state);
-    expect(out.marchingStacks.length).toBe(1);
-    const stack = out.marchingStacks[0] as MarchingStack;
-    expect(stack.faction).toBe("TOKUGAWA");
-    expect(stack.count).toBe(9); // 14 - 5 reserve
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(5);
-    expect(stack.path[stack.path.length - 1]).toBe(tileId(8, 0));
-  });
-
-  it("[AC-32] rule #3 skipped when sendCount ≤ 0 (castle count = reserve)", () => {
-    // TOKUGAWA castle count=5 (Knight); reserve also 5 → sendCount = 0,
-    // rule #3 must not fire. Set up TAKEDA castle within range so power
-    // ratio alone wouldn't gate it.
-    const provinces: Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 5, true),
-    ];
-    for (let x = 1; x <= 3; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
-    provinces.push(makeProvince(4, 0, "TAKEDA", 5, true));
-    const state = buildState({ provinces, tick: 1 });
-    const out = stepAi(state);
-    // Castle is at Knight reserve so rule #2 also can't fire; verify no
-    // marching stack appears (proves rule #3 was the gated rule).
     expect(out.marchingStacks.length).toBe(0);
   });
 });
