@@ -167,13 +167,13 @@ describe("integration: aiConfig modes (PRD §4)", () => {
       }
     }
 
-    // PRD §3.3 v1.1: castles don't produce. The idle-target scenario seeds
-    // each faction with only a castle at count 3 — with no field garrison
-    // there's nothing to produce from, so totalCount stays at 3 forever.
+    // PRD §3.3 v1.1 r3: garrisoned troops self-replicate regardless of tile
+    // type. Castles start at 3 troops and gain +1 every tick until the cap
+    // (PRODUCTION_CAP = 100). At tick 100 each idle faction has reached 100.
     const last = events[events.length - 1];
     expect(last).toBeDefined();
     for (const f of last!.factions) {
-      expect(f.totalCount).toBe(3);
+      expect(f.totalCount).toBe(100);
     }
   });
 

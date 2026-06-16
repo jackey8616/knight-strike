@@ -84,15 +84,6 @@ function buildDefaultBoard(opts: {
   set(0, size - 1, makeProvince(0, size - 1, "ODA", 3, true));
   set(size - 1, size - 1, makeProvince(size - 1, size - 1, "UESUGI", 3, true));
   set(5, 5, makeProvince(5, 5, "NEUTRAL", 3, false));
-  // PRD §3.3 v1.1 amendment: castles don't produce, so each faction needs at
-  // least one field garrison ≥ EXPAND_MIN_STACK (= 5) for rule #2 to fire.
-  // Seed each corner with one adjacent non-castle count=5 tile — this stands
-  // in for the opening hands the player would have spent dispatching out of
-  // their castle before production kicks in.
-  set(1, 0, makeProvince(1, 0, "TOKUGAWA", 5, false));
-  set(size - 2, 0, makeProvince(size - 2, 0, "TAKEDA", 5, false));
-  set(0, size - 2, makeProvince(0, size - 2, "ODA", 5, false));
-  set(size - 1, size - 2, makeProvince(size - 1, size - 2, "UESUGI", 5, false));
   return buildState({
     provinces,
     boardSize: size,

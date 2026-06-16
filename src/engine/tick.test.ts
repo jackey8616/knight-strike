@@ -133,7 +133,7 @@ describe("production fires on PRD §3.3 v1.1 cadence (every tick)", () => {
     expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
   });
 
-  it("tick 1 → 2: field garrison +1 (every tick produces under v1.1)", () => {
+  it("tick 1 → 2: garrisoned castle + field tile each +1 (every-tick cadence)", () => {
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
@@ -143,21 +143,21 @@ describe("production fires on PRD §3.3 v1.1 cadence (every tick)", () => {
     });
     const out = step(state);
     expect(out.tick).toBe(2);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(1);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(2);
     expect((out.provinces.get(tileId(1, 0)) as Province).count).toBe(5);
   });
 
-  it("tick 2 → 3: castle stays static even on even tick", () => {
+  it("tick 2 → 3: castle with garrison also self-replicates", () => {
     const state = buildState({
       provinces: [makeProvince(0, 0, "TOKUGAWA", 3, true)],
       tick: 2,
     });
     const out = step(state);
     expect(out.tick).toBe(3);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(4);
   });
 
-  it("tick 2 → 3: field garrison +1 again (consecutive ticks both fire)", () => {
+  it("tick 2 → 3: consecutive ticks both fire production", () => {
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
@@ -167,6 +167,7 @@ describe("production fires on PRD §3.3 v1.1 cadence (every tick)", () => {
     });
     const out = step(state);
     expect(out.tick).toBe(3);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(2);
     expect((out.provinces.get(tileId(1, 0)) as Province).count).toBe(5);
   });
 });
@@ -260,14 +261,13 @@ describe("step composes defeats before production (PRD §3.2 step 3 then 4)", ()
 });
 
 describe("step runs castle overflow after produce (PRD §3.2 v0.11 step order)", () => {
-  it("castle at count=31 immediately overflows the surplus to frontline", () => {
-    // PRD §3.3 v1.1 amendment: castles don't produce, so the overflow trigger
-    // can only arise from a marching stack dropping units into the castle.
-    // Seed the castle directly above the threshold to exercise the §3.5.5
-    // overflow phase in isolation.
+  it("castle at count=30 + this-tick produce push to 31 immediately overflows", () => {
+    // PRD §3.3 v1.1 r3: castles also produce when garrisoned. A castle at 30
+    // grows to 31 inside this step, the §3.5.5 overflow phase then strips the
+    // single surplus unit out as a marching stack.
     const state = buildState({
       provinces: [
-        makeProvince(0, 0, "TOKUGAWA", 31, true),
+        makeProvince(0, 0, "TOKUGAWA", 30, true),
         makeProvince(1, 0, "TOKUGAWA", 1, false),
         makeProvince(2, 0, "NEUTRAL", 0, false),
       ],
@@ -285,10 +285,14 @@ describe("step runs castle overflow after produce (PRD §3.2 v0.11 step order)",
     expect(stack.dispatchedAtTick).toBe(2);
   });
 
-  it("castle at 30 on a non-production tick does not overflow", () => {
+  it("castle below threshold + no marching target also blocks overflow", () => {
+    // PRD §3.3 v1.1 r3: every tick produces, so the "non-production tick"
+    // path that used to gate overflow doesn't exist anymore. Cover the other
+    // suppression path instead: castle below threshold (≤ 30) → §3.5.5 sees
+    // nothing to send out, no marching stack emitted even after produce.
     const state = buildState({
       provinces: [
-        makeProvince(0, 0, "TOKUGAWA", 30, true),
+        makeProvince(0, 0, "TOKUGAWA", 5, true),
         makeProvince(1, 0, "TOKUGAWA", 1, false),
         makeProvince(2, 0, "NEUTRAL", 0, false),
       ],
@@ -296,7 +300,7 @@ describe("step runs castle overflow after produce (PRD §3.2 v0.11 step order)",
     });
     const out = step(state);
     expect(out.tick).toBe(2);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(30);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(6);
     expect(out.marchingStacks.length).toBe(0);
   });
 });

@@ -64,30 +64,41 @@ describe("produce (PRD §3.3 v1.1 amendment)", () => {
     }
   });
 
-  it("[AC-03 v1.1] castles never produce, even on emission ticks", () => {
+  it("[AC-03 v1.1] castles with garrisons also self-replicate (+1/tick)", () => {
+    // PRD §3.3 v1.1 r3: garrisoned troops grow regardless of tile type. The
+    // castle building doesn't auto-mint, but the soldiers stationed there do.
     const after = produce(buildState(1, fourCastles));
     for (const province of after.provinces.values()) {
       expect(province.isCastle).toBe(true);
-      expect(province.count).toBe(3);
+      expect(province.count).toBe(4);
     }
   });
 
-  it("[AC-03 v1.1] non-castle garrisoned tiles +1 every tick (no 2-tick skip)", () => {
+  it("[AC-03 v1.1] both castle + field garrison grow +1 every tick", () => {
     const provinces: readonly Province[] = [
       makeProvince(0, 0, "TOKUGAWA", 3, true),
       makeProvince(1, 0, "TOKUGAWA", 4, false),
       makeProvince(2, 0, "TAKEDA", 7, false),
     ];
-    // tick 1 (odd): still produces under v1.1 — cadence is every tick.
+    // tick 1: every garrisoned non-NEUTRAL tile +1.
     const afterTick1 = produce(buildState(1, provinces));
-    expect(afterTick1.provinces.get(tileId(0, 0))?.count).toBe(3);
+    expect(afterTick1.provinces.get(tileId(0, 0))?.count).toBe(4);
     expect(afterTick1.provinces.get(tileId(1, 0))?.count).toBe(5);
     expect(afterTick1.provinces.get(tileId(2, 0))?.count).toBe(8);
 
-    // tick 2 (even) likewise produces.
+    // tick 2 likewise.
     const afterTick2 = produce(buildState(2, provinces));
+    expect(afterTick2.provinces.get(tileId(0, 0))?.count).toBe(4);
     expect(afterTick2.provinces.get(tileId(1, 0))?.count).toBe(5);
     expect(afterTick2.provinces.get(tileId(2, 0))?.count).toBe(8);
+  });
+
+  it("[AC-03 v1.1] empty castle still does not produce (no troops to replicate)", () => {
+    const provinces: readonly Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 0, true),
+    ];
+    const before = buildState(1, provinces);
+    expect(produce(before)).toBe(before);
   });
 
   it("[AC-03 v1.1] empty (count=0) tiles don't produce — no seed from nothing", () => {
@@ -111,7 +122,7 @@ describe("produce (PRD §3.3 v1.1 amendment)", () => {
     expect(after.provinces.get(tileId(0, 0))?.count).toBe(5);
   });
 
-  it("[AC-03 v1.1] field garrison +1 every tick: 10 ticks ⇒ +10", () => {
+  it("[AC-03 v1.1] garrisoned tiles +1 every tick: 10 ticks ⇒ +10 each", () => {
     const provinces: readonly Province[] = [
       makeProvince(0, 0, "TOKUGAWA", 3, true),
       makeProvince(1, 0, "TOKUGAWA", 4, false),
@@ -121,8 +132,9 @@ describe("produce (PRD §3.3 v1.1 amendment)", () => {
       state = { ...state, tick: t };
       state = produce(state);
     }
+    // Both castle (garrisoned) and field tile grow.
+    expect(state.provinces.get(tileId(0, 0))?.count).toBe(3 + 10);
     expect(state.provinces.get(tileId(1, 0))?.count).toBe(4 + 10);
-    expect(state.provinces.get(tileId(0, 0))?.count).toBe(3);
   });
 
   it("[AC-03 v1.1] tiles owned by a defeated faction don't produce", () => {
@@ -138,16 +150,11 @@ describe("produce (PRD §3.3 v1.1 amendment)", () => {
     expect(after.provinces.get(tileId(10, 0))?.count).toBe(4);
   });
 
-  it("[AC-03 v1.1] production cap: tile at PRODUCTION_CAP-1 grows to cap exactly once", () => {
+  it("[AC-03 v1.1] production cap: a tile at PRODUCTION_CAP-1 grows to cap exactly once", () => {
+    // Use a lone field tile so we don't have to think about a castle growing
+    // in parallel.
     const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(
-        1,
-        0,
-        "TOKUGAWA",
-        PRODUCTION_CAP - 1,
-        false,
-      ),
+      makeProvince(1, 0, "TOKUGAWA", PRODUCTION_CAP - 1, false),
     ];
     let state = buildState(0, provinces);
     state = { ...state, tick: 1 };
@@ -164,9 +171,9 @@ describe("produce (PRD §3.3 v1.1 amendment)", () => {
 
   it("[AC-03 v1.1] cap does not retroactively clip tiles that exceed it via combat / dispatch", () => {
     // Dispatch arrival can push a tile above PRODUCTION_CAP. produce() leaves
-    // it alone; only its own growth is gated by the cap.
+    // it alone; only its own growth is gated by the cap. Lone tile to avoid
+    // an unrelated castle producer below the cap.
     const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 3, true),
       makeProvince(1, 0, "TOKUGAWA", PRODUCTION_CAP + 10, false),
     ];
     const before = buildState(1, provinces);

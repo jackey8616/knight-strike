@@ -26,36 +26,37 @@ So the new rule is *not* "castle + universal" — it's "no castle, only field ga
 
 ## §3.3 amendments
 
-### #1 — production source (rewritten)
+### #1 — production source (rewritten, r3)
 
 **Was**: every main castle owned by a non-NEUTRAL, undefeated faction produces +1 every 2 ticks.
 
-**Now**: every **non-castle, non-NEUTRAL, garrisoned** tile owned by an undefeated faction produces +1 **every tick** (no 2-tick skip). Castles never produce. Tiles cap out at `PRODUCTION_CAP = 100` to keep field garrisons from running into 4-digit territory over a long game.
+**Now**: garrisoned troops self-replicate. **Every tile** (castle or field) owned by an undefeated non-NEUTRAL faction with `count > 0` produces +1 **every tick**, capped at `PRODUCTION_CAP = 100`. The castle building doesn't auto-mint from nothing — an empty castle (count = 0) stays at 0 forever until someone garrisons it.
+
+Mental model: the troops themselves reproduce while stationed; the tile (castle or field) just hosts them. Castles are **still** the win-condition objective (lose castle → §6.3 defeat) — they just no longer get a special production rule.
 
 Exact eligibility per tile per production tick:
 
 | Tile condition | Produces? |
 | --- | --- |
-| `isCastle === true` | **No** (regardless of owner / count) |
-| `owner === "NEUTRAL"` | No |
-| `count <= 0` | No (no seed from an empty tile) |
+| `owner === "NEUTRAL"` | No (NEUTRAL bandits stay static) |
+| `count <= 0` | No (no seed from an empty tile, including empty castle) |
 | `count >= PRODUCTION_CAP` | No (already capped) |
 | `state.defeated.has(owner)` | No |
-| All five above false | **+1** (clamped to `PRODUCTION_CAP`) |
+| All four above false | **+1** (clamped to `PRODUCTION_CAP`) |
 
 Cadence: **every tick where `tick > 0`**. PRD §3.2 step order is unchanged — production runs after `defeats`, before `castle overflow` (orphan §3.5.5) and `upgrade`.
 
 The cap applies only to production-induced growth. A tile pushed above 100 by a dispatch arrival or combat survivor stays above 100; subsequent production simply won't add more until the count drops below the cap (via combat or dispatch). This avoids the engine retroactively clipping legitimate troop reserves.
 
-### #2 — castle's role (rewritten)
+### #2 — castle's role (rewritten, r3)
 
-The castle is **purely the win-condition objective**:
+The castle is the **win-condition objective** but is otherwise a normal producer:
 
 - Holds the faction's defeat flag (lose castle → §6.3 defeat).
-- Receives no production bonus.
-- Can still hold a garrison count > 0 (initial seed, dispatched arrivals, walk-through stops); that count is static unless combat or dispatch changes it.
+- Garrisoned soldiers grow exactly like any other tile (+1 per tick, capped at 100).
+- An empty castle (count = 0) doesn't seed itself — it has to receive a dispatch before production can kick in.
 - Still gates AI rule #2's castle-tier reserve math (`KNIGHT_RESERVE` / `QUEEN_RESERVE` / `KING_THRESHOLD`) — those are about dispatch behavior, not production.
-- Castle overflow (§3.5.5 orphan code, currently never fires) is structurally impossible under this rule without manual seeding; the code stays in repo as orphan.
+- Castle overflow (§3.5.5 orphan code) can now fire again: castle grows past 30 via normal production → overflow strips a unit out.
 
 ### #3 — strategic implications (informative)
 
@@ -67,20 +68,9 @@ Three intentional consequences worth documenting in the PRD body:
 
 ---
 
-## §3.1.1 amendment — opening seed (must follow §3.3)
+## §3.1.1 — opening seed (no change required)
 
-**Was**: each main castle starts at count = 3.
-
-**Now**: each main castle still starts at count = 3 by default, **but the AI cannot fire from this state**.
-
-The v0.8 design rationale (3 Soldiers giving the castle 8 ticks to reach Knight 5) relied on castle production. Under v1.1 the castle never grows, so a castle-only opener leaves the AI permanently below `EXPAND_MIN_STACK = 5` and the rule #2 expand never fires. The AI sits at 3 troops forever.
-
-Two acceptable resolutions — pick one before merging this PRD:
-
-- **(A) Seed each faction with an adjacent field garrison.** Each scenario adds 1 non-castle tile beside the castle, count = 5 (or higher), owned by the faction. This is what `ai.test.ts` `buildDefaultBoard` does post-v1.1 to keep AC-15 valid. Recommended for `default.json` and `spectator-4ai.json`. Author opinion: minimal disruption, lets the new production rule actually run.
-- **(B) Bump initial castle count.** Set castle initial count to 6+ so the castle can dispatch (rule #2 castle Knight band: send = min(floor(c·0.25), c−5), needs c ≥ 6). Cheaper edit but it makes castle counts a static reservoir of dispatched units rather than the symbolic objective the rest of the PRD now treats them as.
-
-The implementation in this branch goes with **(A)** for the AI test fixture; the player-facing default scenario JSON file is *not* edited yet — the reviewer decides whether to apply (A) to `src/scenarios/default.json` / `idle-target.json` or accept the static-game UX.
+Each main castle still starts at count = 3. Under v1.1 r3 castles produce too, so the castle goes 3 → 4 → 5 → 6 over the first few ticks and the AI's rule #2 castle Knight-band branch can fire by tick 4 (count = 6 ≥ `KNIGHT_RESERVE + 1` enough to send 1 unit). No scenario-seed surgery needed; `default.json` / `idle-target.json` / `spectator-4ai.json` keep their current opening.
 
 ---
 
@@ -90,15 +80,15 @@ The implementation in this branch goes with **(A)** for the AI test fixture; the
 
 - **AC-03 (v1.1)** — production rule per the table above. Existing wording about "each main castle's count +1 every 2 ticks" replaced. Verification: `production.test.ts` cases pass — castles static, non-castle garrisons +1, NEUTRAL static, empty tiles static, defeated owners skip.
 
-### Retired
+### Updated again
 
-- **AC-37 (v1.1)** — old wording "TOKUGAWA 主城 count 仍每 2 ticks +1（§3.3 產兵照常）" is no longer true. The integration test now asserts the *opposite*: idle factions stay at their initial count forever because castles can't seed production. Rephrase AC-37 to "idle mode + no field garrison ⇒ no growth at all".
+- **AC-37 (v1.1 r3)** — idle mode + initial castle at count 3 + cap 100. After 100 ticks each idle faction reaches the cap exactly: `count(t=100) = min(3 + 100, 100) = 100`.
 
 ### New
 
-- **AC-Z1** — Field garrison +1 on every emission tick (e.g. a count=4 TOKUGAWA non-castle tile at tick 2 → count 5 at tick 3). Verification: production.test.ts.
-- **AC-Z2** — Castle stays at its current count across emission ticks. Verification: production.test.ts.
-- **AC-Z3** — Empty tile (count=0) does not seed itself into production. Verification: production.test.ts.
+- **AC-Z1** — Garrisoned tile (castle or field) +1 on every tick (e.g. a TOKUGAWA castle at count=3 at tick 0 → count 4 at tick 1). Verification: production.test.ts.
+- **AC-Z2** — Production cap clamps at 100: tile at 99 grows to 100 then stops; tile pushed above 100 by dispatch / combat stays above 100. Verification: production.test.ts (two cases).
+- **AC-Z3** — Empty tile (count=0) does not seed itself into production, including empty castle. Verification: production.test.ts.
 - **AC-Z4** — NEUTRAL bandit tile (e.g. (5,5) count=3) never produces. Verification: production.test.ts.
 
 ---
