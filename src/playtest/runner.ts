@@ -16,6 +16,7 @@ import type {
   MarchingStack,
   PairKey,
   Province,
+  RuleTier,
   Tier,
   TileId,
 } from "@/engine/types";
@@ -57,8 +58,30 @@ const FACTION_IDS: readonly FactionId[] = [
   "NEUTRAL",
 ];
 const VALID_FACTIONS = new Set<string>(FACTION_IDS);
-const VALID_AI_MODES = new Set<string>(["default", "scripted", "idle"]);
+// PRD §4.4 (v1.1) shorthand string forms accepted by scenario JSON. `"default"`
+// stays accepted as a back-compat alias for the v0.12 single-tier AI and is
+// normalized to {kind: "rule", tier: "normal"}; a console.warn fires the first
+// time it appears in any session so legacy fixtures keep loading while
+// signalling the deprecation.
+const VALID_RULE_TIERS = new Set<RuleTier>(["easy", "normal", "hard"]);
+const VALID_SHORTHAND_AI_MODES = new Set<string>([
+  "easy",
+  "normal",
+  "hard",
+  "scripted",
+  "idle",
+  "default",
+]);
 const VALID_RATIOS: readonly DispatchRatio[] = [0.25, 0.5, 0.75, 1.0];
+
+let warnedDefaultAlias = false;
+function warnDefaultAlias(path: string): void {
+  if (warnedDefaultAlias) return;
+  warnedDefaultAlias = true;
+  console.warn(
+    `[knight-strike] ${path}: aiConfig "default" is deprecated; use "normal" (or {kind: "rule", tier: "normal"}). Continuing as Normal-tier.`,
+  );
+}
 
 function asObject(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -80,10 +103,33 @@ function asFaction(value: unknown, path: string): FactionId {
 }
 
 function asAiMode(value: unknown, path: string): AiMode {
-  if (typeof value !== "string" || !VALID_AI_MODES.has(value)) {
-    throw new Error(`${path}: invalid ai mode "${String(value)}"`);
+  if (typeof value === "string") {
+    if (!VALID_SHORTHAND_AI_MODES.has(value)) {
+      throw new Error(`${path}: invalid ai mode "${value}"`);
+    }
+    if (value === "idle") return { kind: "idle" };
+    if (value === "scripted") return { kind: "scripted" };
+    if (value === "default") {
+      warnDefaultAlias(path);
+      return { kind: "rule", tier: "normal" };
+    }
+    // Remaining strings are rule tiers per VALID_RULE_TIERS gate above.
+    return { kind: "rule", tier: value as RuleTier };
   }
-  return value as AiMode;
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (obj.kind === "idle") return { kind: "idle" };
+    if (obj.kind === "scripted") return { kind: "scripted" };
+    if (obj.kind === "rule") {
+      const tier = obj.tier;
+      if (typeof tier !== "string" || !VALID_RULE_TIERS.has(tier as RuleTier)) {
+        throw new Error(`${path}.tier: invalid rule tier "${String(tier)}"`);
+      }
+      return { kind: "rule", tier: tier as RuleTier };
+    }
+    throw new Error(`${path}.kind: invalid ai mode kind "${String(obj.kind)}"`);
+  }
+  throw new Error(`${path}: invalid ai mode "${String(value)}"`);
 }
 
 function asInteger(value: unknown, path: string): number {
@@ -214,7 +260,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
     TAKEDA: scenario.aiConfig.TAKEDA,
     ODA: scenario.aiConfig.ODA,
     UESUGI: scenario.aiConfig.UESUGI,
-    NEUTRAL: "idle",
+    NEUTRAL: { kind: "idle" },
   };
   return {
     boardSize: scenario.boardSize,

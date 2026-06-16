@@ -1,5 +1,5 @@
 {
-  "name": "spectator-4ai",
+  "name": "diff-tier-11x11",
   "boardSize": 11,
   "initialState": [
     { "x": 0, "y": 0, "owner": "TOKUGAWA", "count": 3, "isCastle": true },
@@ -9,10 +9,10 @@
     { "x": 5, "y": 5, "owner": "NEUTRAL", "count": 3, "isCastle": false }
   ],
   "aiConfig": {
-    "TOKUGAWA": "normal",
-    "TAKEDA": "normal",
-    "ODA": "normal",
-    "UESUGI": "normal"
+    "TOKUGAWA": "hard",
+    "TAKEDA": "easy",
+    "ODA": "easy",
+    "UESUGI": "easy"
   },
   "rngSeed": 42
 }

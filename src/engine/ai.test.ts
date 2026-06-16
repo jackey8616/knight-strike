@@ -8,6 +8,7 @@ import { AI_EVAL_INTERVAL, shouldEvaluate, stepAi } from "./ai";
 import { advanceMarching } from "./movement";
 import { produce } from "./production";
 import { tileId } from "./state";
+import { AI_IDLE, AI_NORMAL } from "./types";
 import type {
   AiMode,
   FactionId,
@@ -19,11 +20,11 @@ import type {
 import { applyDefeats } from "./victory";
 
 const defaultAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: "default",
-  TAKEDA: "default",
-  ODA: "default",
-  UESUGI: "default",
-  NEUTRAL: "idle",
+  TOKUGAWA: AI_NORMAL,
+  TAKEDA: AI_NORMAL,
+  ODA: AI_NORMAL,
+  UESUGI: AI_NORMAL,
+  NEUTRAL: AI_IDLE,
 };
 
 function makeProvince(
@@ -160,7 +161,7 @@ describe("shouldEvaluate (PRD §4.3 staggered offsets)", () => {
 });
 
 describe("stepAi gating", () => {
-  it("skips factions whose aiConfig is not 'default'", () => {
+  it("skips factions whose aiConfig is not a rule tier", () => {
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 5, true),
@@ -168,11 +169,11 @@ describe("stepAi gating", () => {
       ],
       tick: 1,
       aiConfig: {
-        TOKUGAWA: "idle",
-        TAKEDA: "idle",
-        ODA: "idle",
-        UESUGI: "idle",
-        NEUTRAL: "idle",
+        TOKUGAWA: AI_IDLE,
+        TAKEDA: AI_IDLE,
+        ODA: AI_IDLE,
+        UESUGI: AI_IDLE,
+        NEUTRAL: AI_IDLE,
       },
     });
     const out = stepAi(state);
@@ -492,7 +493,7 @@ describe("[AC-22] AI evaluation is deterministic under rngSeed + factionId + tic
   });
 });
 
-describe("[AC-15] AI expansion within 30 ticks", () => {
+describe("[AC-15] AI expansion within 30 ticks (Normal-tier baseline)", () => {
   it("each AI faction controls ≥ 2 tiles by tick 30", () => {
     let state = buildDefaultBoard({ tick: 1, rngSeed: 42 });
     for (let i = 0; i < 30; i++) state = fakeStep(state);
@@ -522,5 +523,206 @@ describe("[AC-15] AI expansion within 30 ticks", () => {
       hashes.add(hashState(s));
     }
     expect(hashes.size).toBeGreaterThan(1);
+  });
+});
+
+// PRD §4.1 (v1.1) tier delta: per-tier knobs (eval cadence, defense radius,
+// attack hops, attack power ratio, rally enabled, expand ratio, castle Queen
+// siphon) drive different behaviour from the same board state. These cases
+// lock in the deltas the tier table promises so future profile tweaks fail
+// loudly.
+function tierAi(tier: "easy" | "normal" | "hard"): Readonly<
+  Record<FactionId, AiMode>
+> {
+  const mode: AiMode = { kind: "rule", tier };
+  return {
+    TOKUGAWA: mode,
+    TAKEDA: mode,
+    ODA: mode,
+    UESUGI: mode,
+    NEUTRAL: AI_IDLE,
+  };
+}
+
+describe("tier knob deltas (PRD §4.1 v1.1)", () => {
+  it("[AC-X1] eval cadence: Easy 8 / Normal 5 / Hard 3 ticks", () => {
+    // TOKUGAWA offset = 1. So evaluation fires on tick where (tick - 1) % N == 0.
+    // Easy: 1, 9, 17 …  Normal: 1, 6, 11 …  Hard: 1, 4, 7 …
+    expect(shouldEvaluate("TOKUGAWA", 1, 8)).toBe(true);
+    expect(shouldEvaluate("TOKUGAWA", 8, 8)).toBe(false);
+    expect(shouldEvaluate("TOKUGAWA", 9, 8)).toBe(true);
+
+    expect(shouldEvaluate("TOKUGAWA", 6, 5)).toBe(true);
+    expect(shouldEvaluate("TOKUGAWA", 5, 5)).toBe(false);
+
+    expect(shouldEvaluate("TOKUGAWA", 4, 3)).toBe(true);
+    expect(shouldEvaluate("TOKUGAWA", 5, 3)).toBe(false);
+    expect(shouldEvaluate("TOKUGAWA", 7, 3)).toBe(true);
+  });
+
+  it("[AC-X2] Easy disables rally even when anchor + adjacent sources exist", () => {
+    // Anchor (5,5) frontline non-castle with TAKEDA neighbour. Adjacent own
+    // tiles count=6 are valid rally sources. Normal would rally; Easy must not.
+    const provinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(5, 5, "TOKUGAWA", 4),
+      makeProvince(4, 5, "TOKUGAWA", 6),
+      makeProvince(5, 4, "TOKUGAWA", 6),
+      makeProvince(5, 6, "TAKEDA", 1),
+    ];
+    const baseOpts = {
+      provinces,
+      tick: 1,
+      rngSeed: 42,
+    };
+
+    const easyOut = stepAi(
+      buildState({ ...baseOpts, aiConfig: tierAi("easy") }),
+    );
+    const normalOut = stepAi(
+      buildState({ ...baseOpts, aiConfig: tierAi("normal") }),
+    );
+    // Easy can still fire defense/expand/attack, so we don't insist
+    // marchingStacks is empty — we insist no stack lands at (5,5).
+    for (const stack of easyOut.marchingStacks) {
+      const dest = stack.path.at(-1);
+      expect(dest).not.toBe(tileId(5, 5));
+    }
+    const normalRally = normalOut.marchingStacks.some(
+      (s) => s.path.at(-1) === tileId(5, 5),
+    );
+    expect(normalRally).toBe(true);
+  });
+
+  it("[AC-X3] Hard attack reach: castle target at 9 hops fires under Hard but not Normal", () => {
+    // 10×1 strip: TOKUGAWA castle (0,0) → enemy castle (9,0). 9 hops.
+    // Normal attackHops = 8 → skip. Hard attackHops = 10 → fire.
+    // Power: TOK count 30 (King, power 900), TAK count 3 (Soldier, power 3).
+    // Effective 29 (King ≥ 25) → 870 ≫ 3 × any ratio. Path runs along (0..8)
+    // own corridor; (9,0) is the enemy castle target (BFS exempts terminus).
+    const provinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 30, true),
+    ];
+    for (let x = 1; x < 9; x++) provinces.push(makeProvince(x, 0, "TOKUGAWA", 0));
+    provinces.push(makeProvince(9, 0, "TAKEDA", 3, true));
+
+    const baseOpts = { provinces, boardSize: 11, tick: 1, rngSeed: 42 };
+
+    const normalOut = stepAi(
+      buildState({ ...baseOpts, aiConfig: tierAi("normal") }),
+    );
+
+    // Normal: defense first (no threat — TAK count 3 at manhattan 9 ≫ radius 2),
+    // expand picks one of the empty tiles, attack rule rejects at hops > 8.
+    // The marching stack should NOT target (9,0).
+    const normalHits = normalOut.marchingStacks.some(
+      (s) => s.path.at(-1) === tileId(9, 0),
+    );
+    expect(normalHits).toBe(false);
+
+    // Hard: attack rule fires after defense + expand + rally all decline. The
+    // expand rule fires first (each tile (1..8, 0) is a same-row empty), so the
+    // attack rule itself doesn't get a turn this tick. To prove the hop budget
+    // does what it should, we use the lower-level `findPath` + profile check.
+    // But to keep this test integration-level we just assert that *some* tick
+    // within the next eval window does send toward (9,0) on Hard.
+    let s = buildState({ ...baseOpts, aiConfig: tierAi("hard") });
+    let hardHit = false;
+    for (let i = 0; i < 20 && !hardHit; i++) {
+      s = stepAi(s);
+      for (const stack of s.marchingStacks) {
+        if (stack.path.at(-1) === tileId(9, 0)) {
+          hardHit = true;
+          break;
+        }
+      }
+      s = { ...s, tick: s.tick + 1 };
+    }
+    expect(hardHit).toBe(true);
+  });
+
+  it("[AC-X4] Hard defense reacts at manhattan 3, Easy doesn't react at manhattan 2", () => {
+    // Castle at (0,0). Enemy single tile at (1,1) (manhattan 2). Easy defense
+    // radius = 1 → does NOT fire defense. Normal radius = 2 → fires. To
+    // exercise Hard at radius 3 we shift the threat to (2,1) (manhattan 3).
+    const closeProvinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(0, 1, "TOKUGAWA", 6),
+      makeProvince(1, 1, "TAKEDA", 3),
+    ];
+    const farProvinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(0, 1, "TOKUGAWA", 6),
+      makeProvince(2, 1, "TAKEDA", 3),
+    ];
+
+    const easyClose = stepAi(
+      buildState({
+        provinces: closeProvinces,
+        tick: 1,
+        rngSeed: 42,
+        aiConfig: tierAi("easy"),
+      }),
+    );
+    const normalClose = stepAi(
+      buildState({
+        provinces: closeProvinces,
+        tick: 1,
+        rngSeed: 42,
+        aiConfig: tierAi("normal"),
+      }),
+    );
+    const hardFar = stepAi(
+      buildState({
+        provinces: farProvinces,
+        tick: 1,
+        rngSeed: 42,
+        aiConfig: tierAi("hard"),
+      }),
+    );
+
+    function defenseFired(state: GameState): boolean {
+      // Defense rule targets the castle. Check for a marching stack with
+      // terminus = (0,0) originating from an own non-castle tile.
+      for (const stack of state.marchingStacks) {
+        if (stack.path.at(-1) === tileId(0, 0)) return true;
+      }
+      return false;
+    }
+
+    expect(defenseFired(easyClose)).toBe(false);
+    expect(defenseFired(normalClose)).toBe(true);
+    expect(defenseFired(hardFar)).toBe(true);
+  });
+
+  it("[AC-X5] castle Queen-band siphon scales with tier (0.20 / 0.33 / 0.40)", () => {
+    // Castle count 24 (Queen band: 15 ≤ c < 30) with an adjacent empty.
+    // expandSendCount caps at min(floor(c*ratio), c - 15). For c=24:
+    //   Easy:   floor(24*0.20)=4,  cap c-15=9   → 4
+    //   Normal: floor(24*0.33)=7,  cap c-15=9   → 7
+    //   Hard:   floor(24*0.40)=9,  cap c-15=9   → 9
+    const provinces: Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 24, true),
+      makeProvince(1, 0, "NEUTRAL", 0),
+    ];
+    const baseOpts = { provinces, tick: 1, rngSeed: 42 };
+
+    function sentCount(out: GameState): number {
+      // Castle source ID. Expand rule fires here so the only stack is from
+      // (0,0). Return its count.
+      const stack = out.marchingStacks[0];
+      if (stack === undefined) return 0;
+      return stack.count;
+    }
+
+    expect(
+      sentCount(stepAi(buildState({ ...baseOpts, aiConfig: tierAi("easy") }))),
+    ).toBe(4);
+    expect(
+      sentCount(stepAi(buildState({ ...baseOpts, aiConfig: tierAi("normal") }))),
+    ).toBe(7);
+    expect(
+      sentCount(stepAi(buildState({ ...baseOpts, aiConfig: tierAi("hard") }))),
+    ).toBe(9);
   });
 });

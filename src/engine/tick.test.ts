@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tileId } from "./state";
 import { step } from "./tick";
+import { AI_IDLE, AI_NORMAL } from "./types";
 import type {
   AiMode,
   FactionId,
@@ -11,19 +12,19 @@ import type {
 } from "./types";
 
 const idleAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: "idle",
-  TAKEDA: "idle",
-  ODA: "idle",
-  UESUGI: "idle",
-  NEUTRAL: "idle",
+  TOKUGAWA: AI_IDLE,
+  TAKEDA: AI_IDLE,
+  ODA: AI_IDLE,
+  UESUGI: AI_IDLE,
+  NEUTRAL: AI_IDLE,
 };
 
 const defaultAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: "default",
-  TAKEDA: "default",
-  ODA: "default",
-  UESUGI: "default",
-  NEUTRAL: "idle",
+  TOKUGAWA: AI_NORMAL,
+  TAKEDA: AI_NORMAL,
+  ODA: AI_NORMAL,
+  UESUGI: AI_NORMAL,
+  NEUTRAL: AI_IDLE,
 };
 
 function makeProvince(

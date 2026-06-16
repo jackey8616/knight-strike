@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { produce } from "./production";
 import { tileId } from "./state";
+import { AI_IDLE } from "./types";
 import type {
   AiMode,
   FactionId,
@@ -10,11 +11,11 @@ import type {
 } from "./types";
 
 const idleAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: "idle",
-  TAKEDA: "idle",
-  ODA: "idle",
-  UESUGI: "idle",
-  NEUTRAL: "idle",
+  TOKUGAWA: AI_IDLE,
+  TAKEDA: AI_IDLE,
+  ODA: AI_IDLE,
+  UESUGI: AI_IDLE,
+  NEUTRAL: AI_IDLE,
 };
 
 function makeProvince(

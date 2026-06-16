@@ -11,6 +11,7 @@ import {
 import type { CombatPair } from "./combat";
 import { pairKey, tileId } from "./state";
 import { deriveTier } from "./upgrade";
+import { AI_IDLE } from "./types";
 import type {
   AiMode,
   FactionId,
@@ -22,11 +23,11 @@ import type {
 } from "./types";
 
 const idleAi: Readonly<Record<FactionId, AiMode>> = {
-  TOKUGAWA: "idle",
-  TAKEDA: "idle",
-  ODA: "idle",
-  UESUGI: "idle",
-  NEUTRAL: "idle",
+  TOKUGAWA: AI_IDLE,
+  TAKEDA: AI_IDLE,
+  ODA: AI_IDLE,
+  UESUGI: AI_IDLE,
+  NEUTRAL: AI_IDLE,
 };
 
 function makeProvince(

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { tileId } from "@/engine/state";
+import { AI_IDLE, AI_NORMAL, AI_SCRIPTED } from "@/engine/types";
 import { defaultScenario } from "@/scenarios/default";
 import { idleTargetScenario } from "@/scenarios/idle-target";
 import {
@@ -62,10 +63,10 @@ describe("integration: runScenario invariants", () => {
     const idleScenario: ScenarioInput = {
       ...defaultScenario,
       aiConfig: {
-        TOKUGAWA: "idle",
-        TAKEDA: "idle",
-        ODA: "idle",
-        UESUGI: "idle",
+        TOKUGAWA: AI_IDLE,
+        TAKEDA: AI_IDLE,
+        ODA: AI_IDLE,
+        UESUGI: AI_IDLE,
       },
     };
     const result = runScenario(idleScenario, { maxTicks: 25 });
@@ -99,10 +100,10 @@ describe("integration: scripted commands + win path", () => {
       { x: 2, y: 2, owner: "TAKEDA", count: 3, isCastle: true },
     ],
     aiConfig: {
-      TOKUGAWA: "default",
-      TAKEDA: "idle",
-      ODA: "idle",
-      UESUGI: "idle",
+      TOKUGAWA: AI_NORMAL,
+      TAKEDA: AI_IDLE,
+      ODA: AI_IDLE,
+      UESUGI: AI_IDLE,
     },
     rngSeed: 42,
   };
@@ -124,10 +125,10 @@ describe("integration: scripted commands + win path", () => {
         { x: 4, y: 4, owner: "UESUGI", count: 5, isCastle: true },
       ],
       aiConfig: {
-        TOKUGAWA: "scripted",
-        TAKEDA: "idle",
-        ODA: "idle",
-        UESUGI: "idle",
+        TOKUGAWA: AI_SCRIPTED,
+        TAKEDA: AI_IDLE,
+        ODA: AI_IDLE,
+        UESUGI: AI_IDLE,
       },
       scriptedCommands: [
         { atTick: 2, from: [0, 0], to: [1, 0], ratio: 0.5 },
@@ -189,10 +190,10 @@ describe("integration: aiConfig modes (PRD §4)", () => {
         { x: 10, y: 10, owner: "UESUGI", count: 3, isCastle: true },
       ],
       aiConfig: {
-        TOKUGAWA: "idle",
-        TAKEDA: "scripted",
-        ODA: "idle",
-        UESUGI: "idle",
+        TOKUGAWA: AI_IDLE,
+        TAKEDA: AI_SCRIPTED,
+        ODA: AI_IDLE,
+        UESUGI: AI_IDLE,
       },
       scriptedCommands: [
         { atTick: 5, from: [10, 0], to: [9, 0], ratio: 1.0 },
@@ -266,5 +267,79 @@ describe("integration: parseScenario validation", () => {
         rngSeed: 1,
       }),
     ).toThrow(/ai mode/);
+  });
+
+  it("normalizes shorthand strings into the AiMode discriminated union", () => {
+    const parsed = parseScenario({
+      boardSize: 5,
+      initialState: [
+        { x: 0, y: 0, owner: "TOKUGAWA", count: 3, isCastle: true },
+      ],
+      aiConfig: {
+        TOKUGAWA: "hard",
+        TAKEDA: "normal",
+        ODA: "easy",
+        UESUGI: "idle",
+      },
+      rngSeed: 1,
+    });
+    expect(parsed.aiConfig.TOKUGAWA).toEqual({ kind: "rule", tier: "hard" });
+    expect(parsed.aiConfig.TAKEDA).toEqual({ kind: "rule", tier: "normal" });
+    expect(parsed.aiConfig.ODA).toEqual({ kind: "rule", tier: "easy" });
+    expect(parsed.aiConfig.UESUGI).toEqual({ kind: "idle" });
+  });
+
+  it("accepts the explicit object form alongside shorthand", () => {
+    const parsed = parseScenario({
+      boardSize: 5,
+      initialState: [],
+      aiConfig: {
+        TOKUGAWA: { kind: "rule", tier: "hard" },
+        TAKEDA: { kind: "idle" },
+        ODA: { kind: "scripted" },
+        UESUGI: "normal",
+      },
+      rngSeed: 1,
+    });
+    expect(parsed.aiConfig.TOKUGAWA).toEqual({ kind: "rule", tier: "hard" });
+    expect(parsed.aiConfig.TAKEDA).toEqual({ kind: "idle" });
+    expect(parsed.aiConfig.ODA).toEqual({ kind: "scripted" });
+    expect(parsed.aiConfig.UESUGI).toEqual({ kind: "rule", tier: "normal" });
+  });
+
+  it("aliases legacy 'default' to Normal tier with a deprecation warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const parsed = parseScenario({
+        boardSize: 5,
+        initialState: [],
+        aiConfig: {
+          TOKUGAWA: "default",
+          TAKEDA: "idle",
+          ODA: "idle",
+          UESUGI: "idle",
+        },
+        rngSeed: 1,
+      });
+      expect(parsed.aiConfig.TOKUGAWA).toEqual({ kind: "rule", tier: "normal" });
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("rejects object form with invalid rule tier", () => {
+    expect(() =>
+      parseScenario({
+        boardSize: 5,
+        initialState: [],
+        aiConfig: {
+          TOKUGAWA: { kind: "rule", tier: "legendary" },
+          TAKEDA: "idle",
+          ODA: "idle",
+          UESUGI: "idle",
+        },
+        rngSeed: 1,
+      }),
+    ).toThrow(/rule tier/);
   });
 });
