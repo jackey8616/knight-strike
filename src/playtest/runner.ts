@@ -5,6 +5,7 @@ import {
   updateStalemates,
 } from "@/engine/combat";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
+import { applyCastleOverflow } from "@/engine/overflow";
 import { produce } from "@/engine/production";
 import { tileId } from "@/engine/state";
 import { deriveTier } from "@/engine/upgrade";
@@ -251,7 +252,7 @@ export type SubEvent =
   | {
       readonly type: "ai_rule_fire";
       readonly faction: FactionId;
-      readonly rule: 1 | 2 | 3;
+      readonly rule: 1 | 2 | 2.5 | 3;
       readonly source: TileId;
       readonly target: TileId;
       readonly count: number;
@@ -263,7 +264,7 @@ export type SubEvent =
       readonly source: TileId;
       readonly target: TileId;
       readonly count: number;
-      readonly origin: "ai" | "scripted";
+      readonly origin: "ai" | "scripted" | "overflow";
     }
   | {
       readonly type: "march_arrival";
@@ -353,17 +354,26 @@ function snapshotFactions(state: GameState): FactionSnapshot[] {
 }
 
 // Classify a freshly-introduced marching stack by inspecting its source and
-// terminus characteristics. AI rule order is defense (#1) → expand (#2) →
-// attack (#3); since each evaluation fires at most one rule per faction per
-// tick, target tile type uniquely identifies it.
+// terminus characteristics. AI rule order (v0.11): defense (#1) → expand (#2)
+// → rally (#2.5) → attack (#3). Defense / expand / attack each fire at most
+// one stack per evaluation, so target-tile shape is a unique fingerprint;
+// rally fires one stack per qualifying adjacent source so multiple stacks per
+// faction per tick can share the rule: 2.5 tag.
 function classifyAiFire(
   before: GameState,
   stack: MarchingStack,
-): { readonly rule: 1 | 2 | 3 } | null {
+): { readonly rule: 1 | 2 | 2.5 | 3 } | null {
   const target = before.provinces.get(stack.path[stack.path.length - 1] as TileId);
   if (target === undefined) return null;
   if (target.isCastle && target.owner === stack.faction) return { rule: 1 };
   if (target.isCastle) return { rule: 3 };
+  if (
+    target.owner === stack.faction &&
+    !target.isCastle &&
+    target.count > 0
+  ) {
+    return { rule: 2.5 };
+  }
   if (target.count === 0 && target.owner !== stack.faction) return { rule: 2 };
   return null;
 }
@@ -490,6 +500,25 @@ function stepWithEvents(state: GameState): {
         count: after.count,
       });
     }
+  }
+
+  // PRD §3.2 v0.11: castle overflow. New marching stacks emitted as
+  // march_dispatch with origin "overflow" so the event log distinguishes them
+  // from AI / scripted dispatches.
+  const beforeOverflow = s;
+  s = applyCastleOverflow(s);
+  for (const stk of diffNewStacks(beforeOverflow, s)) {
+    const source = stk.path[0] as TileId;
+    const target = stk.path[stk.path.length - 1] as TileId;
+    events.push({
+      type: "march_dispatch",
+      stack: stk.id,
+      faction: stk.faction,
+      source,
+      target,
+      count: stk.count,
+      origin: "overflow",
+    });
   }
 
   // §3.2 step 5: tier upgrade — derived from any province whose tier flipped
