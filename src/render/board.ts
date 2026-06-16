@@ -13,13 +13,21 @@ export const TILE_HEIGHT = 32;
 
 // PRD §5.1: 4 faction colours + neutral grey. Tokugawa is the player faction
 // (PRD §3.1) — assigning it red keeps "the red corner is yours" obvious.
-const FACTION_COLORS: Readonly<Record<FactionId, number>> = {
+export const FACTION_COLORS: Readonly<Record<FactionId, number>> = {
   TOKUGAWA: 0xc94545,
   TAKEDA: 0x4575c9,
   ODA: 0x4fb55f,
   UESUGI: 0xd9c145,
   NEUTRAL: 0x6a6a6a,
 };
+
+export function isoX(x: number, y: number): number {
+  return (x - y) * (TILE_WIDTH / 2);
+}
+
+export function isoY(x: number, y: number): number {
+  return (x + y) * (TILE_HEIGHT / 2);
+}
 
 const EMPTY_TILE_COLOR = 0x2e2e2e;
 const TILE_OUTLINE_COLOR = 0x111111;
@@ -53,14 +61,6 @@ export type BoardRenderer = {
   resize(width: number, height: number): void;
   destroy(): void;
 };
-
-function isoX(x: number, y: number): number {
-  return (x - y) * (TILE_WIDTH / 2);
-}
-
-function isoY(x: number, y: number): number {
-  return (x + y) * (TILE_HEIGHT / 2);
-}
 
 function diamondPath(g: Graphics): void {
   g.moveTo(0, -TILE_HEIGHT / 2);
