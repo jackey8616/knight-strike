@@ -156,6 +156,28 @@ describe("findPath", () => {
     const path = findPath(state, tileId(0, 0), tileId(1, 0), "TOKUGAWA");
     expect(path).toEqual([tileId(0, 0), tileId(1, 0)]);
   });
+
+  it("[AC-36] BFS finds non-diagonal path from (5,5) to (6,6) — exactly 2 hops via a cardinal", () => {
+    // §3.8 formalisation regression: 4-conn adjacency means there is no 1-hop
+    // diagonal move; the path from (5,5) to (6,6) must transit one of the
+    // cardinal neighbours (6,5) or (5,6), giving a length of 3 (start + 1 step
+    // + terminus). Board left fully neutral-empty so BFS is unconstrained.
+    const provinces: Province[] = [makeProvince(5, 5, "TOKUGAWA", 3)];
+    for (let y = 0; y < 11; y++) {
+      for (let x = 0; x < 11; x++) {
+        if (x === 5 && y === 5) continue;
+        provinces.push(makeProvince(x, y, "NEUTRAL", 0));
+      }
+    }
+    const state = buildState({ provinces });
+    const path = findPath(state, tileId(5, 5), tileId(6, 6), "TOKUGAWA");
+    expect(path).not.toBeNull();
+    expect(path).toHaveLength(3);
+    expect(path?.[0]).toBe(tileId(5, 5));
+    expect(path?.[2]).toBe(tileId(6, 6));
+    const mid = path?.[1];
+    expect(mid === tileId(6, 5) || mid === tileId(5, 6)).toBe(true);
+  });
 });
 
 describe("dispatch", () => {

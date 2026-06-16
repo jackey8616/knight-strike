@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tileId } from "@/engine/state";
 import { defaultScenario } from "@/scenarios/default";
+import { idleTargetScenario } from "@/scenarios/idle-target";
 import {
   buildInitialState,
   parseScenario,
@@ -143,6 +144,75 @@ describe("integration: scripted commands + win path", () => {
     // After the scripted dispatch lands on (1,0), Tokugawa owns its castle
     // plus the freshly captured tile → 2+ tiles.
     expect(tokugawa?.tiles).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("integration: aiConfig modes (PRD §4)", () => {
+  it("[AC-37] aiConfig all idle: no non-player marching stacks over 100 ticks, castle counts climb", () => {
+    const result = runScenario(idleTargetScenario, {
+      maxTicks: 100,
+      emitEvents: true,
+    });
+    const events = result.events ?? [];
+    expect(result.outcome).toBe("stalemate");
+    expect(events.length).toBe(100);
+
+    // §4 idle mode: every faction is idle → marching stacks must stay empty
+    // every tick (no AI / scripted / overflow dispatches).
+    for (const ev of events) {
+      for (const f of ev.factions) {
+        expect(f.marchingStacks).toBe(0);
+        expect(f.marchingCount).toBe(0);
+      }
+    }
+
+    // §3.3 production still applies under idle: each non-player castle gets
+    // +1 every other tick → at tick 100 each owner snapshot should be around
+    // 3 (start) + 50 (50 productions) = 53. Allow ≥ 50 to give a margin if
+    // production timing shifts in future tweaks (the assertion is "climbs",
+    // not "exact count").
+    const last = events[events.length - 1];
+    expect(last).toBeDefined();
+    for (const f of last!.factions) {
+      expect(f.totalCount).toBeGreaterThanOrEqual(50);
+    }
+  });
+
+  it("[AC-38] aiConfig scripted: TAKEDA dispatches exactly once at the scripted tick", () => {
+    const scenario: ScenarioInput = {
+      name: "scripted-takeda",
+      boardSize: 11,
+      initialState: [
+        { x: 0, y: 0, owner: "TOKUGAWA", count: 3, isCastle: true },
+        { x: 10, y: 0, owner: "TAKEDA", count: 5, isCastle: true },
+        { x: 0, y: 10, owner: "ODA", count: 3, isCastle: true },
+        { x: 10, y: 10, owner: "UESUGI", count: 3, isCastle: true },
+      ],
+      aiConfig: {
+        TOKUGAWA: "idle",
+        TAKEDA: "scripted",
+        ODA: "idle",
+        UESUGI: "idle",
+      },
+      scriptedCommands: [
+        { atTick: 5, from: [10, 0], to: [9, 0], ratio: 1.0 },
+      ],
+      rngSeed: 42,
+    };
+    const result = runScenario(scenario, { maxTicks: 10, emitEvents: true });
+    const events = result.events ?? [];
+    let dispatched = 0;
+    let dispatchAtTick: number | null = null;
+    for (const ev of events) {
+      for (const sub of ev.events) {
+        if (sub.type === "march_dispatch" && sub.faction === "TAKEDA") {
+          dispatched += 1;
+          dispatchAtTick = ev.tick;
+        }
+      }
+    }
+    expect(dispatched).toBe(1);
+    expect(dispatchAtTick).toBe(5);
   });
 });
 

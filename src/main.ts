@@ -1,18 +1,28 @@
-import { Assets, type Texture } from "pixi.js";
-
 import { step } from "@/engine/tick";
-import type { GameState, TileId } from "@/engine/types";
+import type { FactionId, GameState, TileId } from "@/engine/types";
+import {
+  createDispatchController,
+  createRatioPanel,
+} from "@/input/dispatch";
+import { createKeyboardController } from "@/input/keyboard";
+import { createPointerController } from "@/input/pointer";
 import { buildInitialState } from "@/playtest/runner";
 import { createRenderApp } from "@/render/app";
 import { createBoardRenderer } from "@/render/board";
+import { createMarchingRenderer } from "@/render/marching";
+import { createPathRenderer } from "@/render/paths";
+import { createTierTextures } from "@/render/sprites";
 import { createUnitsRenderer } from "@/render/units";
-import { spectator4aiScenario } from "@/scenarios/spectator-4ai";
-import { createMinimalHud } from "@/ui/minimal-hud";
-
-const KNIGHT_TEXTURE_URL = "knight.png";
+import { idleTargetScenario } from "@/scenarios/idle-target";
+import { evaluateOutcome } from "@/engine/victory";
+import { createFactionPanel } from "@/ui/faction-panel";
+import { createHud } from "@/ui/hud";
+import { createTileInfoPanel } from "@/ui/tile-info";
+import { createEndScreen } from "@/ui/end-screen";
 
 const TICK_INTERVAL_MS = 2000;
 const MOUNT_ID = "app";
+const PLAYER_FACTION: FactionId = "TOKUGAWA";
 
 type Speed = 1 | 2;
 
@@ -23,26 +33,106 @@ async function bootstrap(): Promise<void> {
   }
 
   const render = await createRenderApp(container);
-  const knightTexture = (await Assets.load(KNIGHT_TEXTURE_URL)) as Texture;
-  let state: GameState = buildInitialState(spectator4aiScenario);
+  const tierTextures = createTierTextures(render.app);
+  const initialState = buildInitialState(idleTargetScenario);
+  let state: GameState = initialState;
+  let ended = false;
+
+  let paused = false;
+  let speed: Speed = 1;
+
+  function intervalForSpeed(s: Speed): number {
+    return TICK_INTERVAL_MS / s;
+  }
 
   const board = createBoardRenderer(state, {
     onPointerOver: (id: TileId) => {
-      board.setHover(id);
+      pointer.onTileOver(id);
     },
-    onPointerOut: () => {
-      board.setHover(null);
-    },
-    onPointerDown: (id: TileId) => {
-      board.setSelection(id);
+    onPointerOut: (id: TileId) => {
+      pointer.onTileOut(id);
     },
   });
   render.app.stage.addChild(board.container);
 
-  const units = createUnitsRenderer(state, knightTexture);
+  const units = createUnitsRenderer(state, tierTextures);
   board.container.addChild(units.container);
 
-  const hud = createMinimalHud(document.body);
+  const marching = createMarchingRenderer(tierTextures);
+  board.container.addChild(marching.container);
+
+  const paths = createPathRenderer();
+  board.container.addChild(paths.container);
+
+  const hud = createHud(document.body, {
+    onTogglePause: () => setPaused(!paused),
+    onSpeed: (s) => setSpeed(s),
+  });
+  const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
+  const tileInfo = createTileInfoPanel(document.body);
+
+  function pushHudStatus(): void {
+    hud.setStatus({
+      tick: state.tick,
+      paused,
+      speed,
+      intervalMs: intervalForSpeed(speed),
+    });
+  }
+
+  function renderAll(): void {
+    board.update(state);
+    units.update(state);
+    marching.update(state, intervalForSpeed(speed));
+    factionPanel.update(state);
+    pushHudStatus();
+  }
+
+  const dispatchCtrl = createDispatchController({
+    getState: () => state,
+    playerFaction: PLAYER_FACTION,
+    onShowValidPath: (path, faction) => paths.setValidPath(path, faction),
+    onShowInvalidPath: (from, to) => paths.setInvalidPath(from, to),
+    onClearPath: () => paths.clear(),
+    onCommit: (_cmd, result) => {
+      if (!result.ok) return;
+      state = result.state;
+      board.setSelection(null);
+      renderAll();
+    },
+  });
+
+  const pointer = createPointerController(render.app.canvas, {
+    onTileHover: (id) => {
+      board.setHover(id);
+      tileInfo.setHover(state, id);
+    },
+    onTileClick: (id, button) => {
+      if (button !== "left") return;
+      board.setSelection(id);
+    },
+    onDragStart: (id, button) => dispatchCtrl.handleDragStart(id, button),
+    onDragMove: (id, button) => dispatchCtrl.handleDragMove(id, button),
+    onDragEnd: (id, button) => dispatchCtrl.handleDragEnd(id, button),
+    onDragCancel: (button) => dispatchCtrl.handleDragCancel(button),
+  });
+
+  const ratioPanel = createRatioPanel(
+    document.body,
+    dispatchCtrl.getRatio(),
+    (r) => {
+      dispatchCtrl.setRatio(r);
+      ratioPanel.setRatio(r);
+    },
+  );
+
+  const endScreen = createEndScreen(document.body, () => {
+    state = initialState;
+    ended = false;
+    endScreen.hide();
+    renderAll();
+    if (!paused) startTicker();
+  });
 
   board.resize(render.app.screen.width, render.app.screen.height);
 
@@ -51,20 +141,7 @@ async function bootstrap(): Promise<void> {
   };
   window.addEventListener("resize", onResize);
 
-  let paused = false;
-  let speed: Speed = 1;
   let tickHandle: number | null = null;
-
-  function intervalForSpeed(s: Speed): number {
-    return TICK_INTERVAL_MS / s;
-  }
-
-  function tickOnce(): void {
-    state = step(state);
-    board.update(state);
-    units.update(state);
-    hud.update(state, { paused, speed });
-  }
 
   function stopTicker(): void {
     if (tickHandle !== null) {
@@ -75,49 +152,73 @@ async function bootstrap(): Promise<void> {
 
   function startTicker(): void {
     stopTicker();
+    if (ended) return;
     tickHandle = window.setInterval(tickOnce, intervalForSpeed(speed));
   }
 
-  hud.update(state, { paused, speed });
+  function tickOnce(): void {
+    state = step(state);
+    hud.markTick();
+    renderAll();
+    const outcome = evaluateOutcome(state);
+    if (outcome.status === "ended") {
+      ended = true;
+      stopTicker();
+      let playerTiles = 0;
+      for (const p of state.provinces.values()) {
+        if (p.owner === PLAYER_FACTION) playerTiles += 1;
+      }
+      const playerWon = outcome.winner === PLAYER_FACTION;
+      endScreen.show({
+        playerWon,
+        playerTiles,
+        ticks: state.tick,
+      });
+    }
+  }
+
+  function setPaused(v: boolean): void {
+    if (v === paused) return;
+    paused = v;
+    if (paused) stopTicker();
+    else startTicker();
+    pushHudStatus();
+  }
+
+  function setSpeed(s: Speed): void {
+    if (s === speed) return;
+    speed = s;
+    if (!paused) startTicker();
+    pushHudStatus();
+  }
+
+  renderAll();
   startTicker();
 
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.repeat) return;
-    switch (e.key) {
-      case " ":
-      case "Spacebar": {
-        e.preventDefault();
-        paused = !paused;
-        if (paused) stopTicker();
-        else startTicker();
-        hud.update(state, { paused, speed });
-        break;
-      }
-      case "1": {
-        speed = 1;
-        if (!paused) startTicker();
-        hud.update(state, { paused, speed });
-        break;
-      }
-      case "2": {
-        speed = 2;
-        if (!paused) startTicker();
-        hud.update(state, { paused, speed });
-        break;
-      }
-      default:
-        break;
-    }
-  };
-  window.addEventListener("keydown", onKeyDown);
+  const keyboard = createKeyboardController({
+    isPaused: () => paused,
+    setPaused,
+    getSpeed: () => speed,
+    setSpeed,
+    cancelDrag: () => pointer.cancelActiveDrag(),
+    panBy: (dx, dy) => board.panBy(dx, dy),
+    resetCamera: () => board.resetCamera(),
+  });
 
   window.addEventListener(
     "beforeunload",
     () => {
       stopTicker();
       window.removeEventListener("resize", onResize);
-      window.removeEventListener("keydown", onKeyDown);
+      keyboard.destroy();
+      pointer.destroy();
+      ratioPanel.destroy();
+      tileInfo.destroy();
+      factionPanel.destroy();
       hud.destroy();
+      endScreen.destroy();
+      paths.destroy();
+      marching.destroy();
       units.destroy();
       board.destroy();
       render.destroy();

@@ -165,6 +165,40 @@ describe("resolveAdjacentCombat", () => {
     expect(after).toBe(before);
   });
 
+  it("[AC-36] 4-conn adjacency: combat pairs include cardinals, exclude diagonals", () => {
+    // §3.8 formalisation regression: surround (5,5) with TAKEDA in all 8
+    // surrounding tiles. The engine must pair only the 4 cardinal neighbours
+    // and skip the 4 diagonals.
+    const provinces = [
+      makeProvince(5, 5, "TOKUGAWA", 10),
+      makeProvince(6, 5, "TAKEDA", 10),
+      makeProvince(4, 5, "TAKEDA", 10),
+      makeProvince(5, 6, "TAKEDA", 10),
+      makeProvince(5, 4, "TAKEDA", 10),
+      makeProvince(6, 6, "TAKEDA", 10),
+      makeProvince(4, 4, "TAKEDA", 10),
+      makeProvince(6, 4, "TAKEDA", 10),
+      makeProvince(4, 6, "TAKEDA", 10),
+    ];
+    const before = buildState(provinces);
+    const { pairs } = resolveAdjacentCombat(before);
+    const center = tileId(5, 5);
+    const partnersOfCenter = new Set<TileId>();
+    for (const p of pairs) {
+      if (p.a === center) partnersOfCenter.add(p.b);
+      else if (p.b === center) partnersOfCenter.add(p.a);
+    }
+    expect(partnersOfCenter.size).toBe(4);
+    expect(partnersOfCenter.has(tileId(6, 5))).toBe(true);
+    expect(partnersOfCenter.has(tileId(4, 5))).toBe(true);
+    expect(partnersOfCenter.has(tileId(5, 6))).toBe(true);
+    expect(partnersOfCenter.has(tileId(5, 4))).toBe(true);
+    expect(partnersOfCenter.has(tileId(6, 6))).toBe(false);
+    expect(partnersOfCenter.has(tileId(4, 4))).toBe(false);
+    expect(partnersOfCenter.has(tileId(6, 4))).toBe(false);
+    expect(partnersOfCenter.has(tileId(4, 6))).toBe(false);
+  });
+
   it("same-faction adjacent: no combat", () => {
     const provinces = [
       makeProvince(0, 0, "TOKUGAWA", 10),

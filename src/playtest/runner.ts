@@ -557,7 +557,11 @@ export function runScenario(
     let scriptedDispatched = 0;
     let scriptedRejected = 0;
     const scriptedEvents: SubEvent[] = [];
-    const cmds = scriptedByTick.get(state.tick);
+    // PRD §4 AC-38 convention: scripted `atTick: N` is observed in the event
+    // tick N — i.e., it fires during the step that produces tick N. Since
+    // state.tick here is the pre-step value (N−1), look up commands keyed by
+    // the resulting tick number.
+    const cmds = scriptedByTick.get(state.tick + 1);
     if (cmds !== undefined) {
       for (const cmd of cmds) {
         const result = dispatch(state, {

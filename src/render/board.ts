@@ -59,6 +59,8 @@ export type BoardRenderer = {
   setHover(id: TileId | null): void;
   setSelection(id: TileId | null): void;
   resize(width: number, height: number): void;
+  panBy(dx: number, dy: number): void;
+  resetCamera(): void;
   destroy(): void;
 };
 
@@ -232,14 +234,37 @@ export function createBoardRenderer(
     }
   }
 
+  let centerX = 0;
+  let centerY = 0;
+  let camOffsetX = 0;
+  let camOffsetY = 0;
+
+  function applyTransform(): void {
+    container.position.set(
+      Math.round(centerX + camOffsetX),
+      Math.round(centerY + camOffsetY),
+    );
+  }
+
   function resize(width: number, height: number): void {
     // Centre the iso block within the canvas. iso x spans
     // [-(n-1)*TW/2, (n-1)*TW/2] (already symmetric around 0) and iso y spans
     // [0, (n-1)*TH], so vertical centring needs the upper-half offset.
-    container.position.set(
-      Math.round(width / 2),
-      Math.round(height / 2 - ((boardSize - 1) * TILE_HEIGHT) / 2),
-    );
+    centerX = width / 2;
+    centerY = height / 2 - ((boardSize - 1) * TILE_HEIGHT) / 2;
+    applyTransform();
+  }
+
+  function panBy(dx: number, dy: number): void {
+    camOffsetX += dx;
+    camOffsetY += dy;
+    applyTransform();
+  }
+
+  function resetCamera(): void {
+    camOffsetX = 0;
+    camOffsetY = 0;
+    applyTransform();
   }
 
   function destroy(): void {
@@ -248,5 +273,14 @@ export function createBoardRenderer(
 
   update(initial);
 
-  return { container, update, setHover, setSelection, resize, destroy };
+  return {
+    container,
+    update,
+    setHover,
+    setSelection,
+    resize,
+    panBy,
+    resetCamera,
+    destroy,
+  };
 }

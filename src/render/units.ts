@@ -12,6 +12,7 @@ import { deriveTier } from "@/engine/upgrade";
 
 import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
 import { playCombatBump } from "./combat";
+import type { TierTextures } from "./sprites";
 
 const TIER_RANK: Readonly<Record<Tier, number>> = {
   SOLDIER: 0,
@@ -20,15 +21,14 @@ const TIER_RANK: Readonly<Record<Tier, number>> = {
   KING: 3,
 };
 
-// PRD §5.1 M2 placeholder: single sprite + scale-per-tier (full per-tier
-// sprite art lands in M4). Values are fractions of TILE_WIDTH so they stay
-// readable regardless of the source texture's pixel size (knight.png is
-// 1024² — a raw 0.45 multiplier overflows the 64 px tile by ~7x).
+// PRD §5.1: per-tier silhouettes now ship via `sprites.ts`; we keep a modest
+// scale ramp so higher tiers also visually loom larger than lower ones inside
+// the same tile diamond.
 const TIER_TILE_FRACTION: Readonly<Record<Tier, number>> = {
-  SOLDIER: 0.5,
-  KNIGHT: 0.65,
-  QUEEN: 0.8,
-  KING: 0.95,
+  SOLDIER: 0.55,
+  KNIGHT: 0.7,
+  QUEEN: 0.85,
+  KING: 1.0,
 };
 
 const UPGRADE_FLASH_COLOR = 0xffe480;
@@ -71,8 +71,10 @@ function createUnitGfx(
   y: number,
   owner: FactionId,
   count: number,
-  texture: Texture,
+  textures: TierTextures,
 ): UnitGfx {
+  const tier = deriveTier(count);
+  const texture = textures[tier];
   const node = new Container();
   node.position.set(isoX(x, y), isoY(x, y));
   // §3.1 iso back-to-front order: deeper rows (larger x+y) draw later. Adding
@@ -92,7 +94,6 @@ function createUnitGfx(
   text.position.set(0, TILE_HEIGHT / 2);
   node.addChild(text);
 
-  const tier = deriveTier(count);
   const s = tierScale(tier, texture);
   sprite.scale.set(s);
 
@@ -134,7 +135,7 @@ function playUpgradeFx(sprite: Sprite, baseScale: number): void {
 
 export function createUnitsRenderer(
   initial: GameState,
-  knightTexture: Texture,
+  textures: TierTextures,
 ): UnitsRenderer {
   const container = new Container();
   container.sortableChildren = true;
@@ -167,13 +168,17 @@ export function createUnitsRenderer(
           province.y,
           province.owner,
           province.count,
-          knightTexture,
+          textures,
         );
         container.addChild(gfx.node);
         units.set(province.id, gfx);
       }
 
-      const targetScale = tierScale(tier, knightTexture);
+      const tierTexture = textures[tier];
+      if (gfx.sprite.texture !== tierTexture) {
+        gfx.sprite.texture = tierTexture;
+      }
+      const targetScale = tierScale(tier, tierTexture);
       gfx.sprite.tint = FACTION_COLORS[province.owner];
       gfx.sprite.scale.set(targetScale);
       gfx.count.text = province.count > 0 ? String(province.count) : "";
