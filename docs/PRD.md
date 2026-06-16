@@ -256,11 +256,32 @@ function updateStalemates(
 
 見 AC-19。
 
-## 4. AI 行為（**整段移出 v1.0**）
+### 3.8 幾何 / 距離 / 邊界（v1.0 形式化）
 
-> 原 v0.11 §4.1（rule #1/#2/#2.5/#3/#4 短路狀態機）、§4.2（評估順序 RNG shuffle）、§4.3（評估間隔錯開）整段於 v1.0 移出 PRD，等 UI + 基礎機制（§5、§3.5.x 玩家視角）穩定後再回頭重新設計。**當下沒有正式 AI 規格**；engine `src/engine/ai.ts` 程式碼仍在 repo 內、`stepAi` 仍會被 `tick.ts` 與 `playtest/runner.ts` 呼叫，但屬 spec orphan 狀態 —— 任何 AI 行為觀察都不能拿來當 v1 acceptance 的依據。
->
-> 完整 v0.12 AI 規格見 git tag `archive/prd-v0.12`。重啟 AI 設計時建議從 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0 議題 + v0.12 §11.1 根因分析回看。
+v0.12 以前 §3.5 / §3.6 / §3.7 多處用「相鄰」、「鄰格」、「距離」等詞，沒在單一節點集中定義；v1.0 把這些基礎約定明文化，避免將來新規則（AI 重啟、地形效果、子城等）出現定義分歧。
+
+- **鄰格（Adjacency）= 4-connected**：tile `(x, y)` 的鄰格是 `(x±1, y)` 與 `(x, y±1)` 共 4 格。**不含對角**（`(x±1, y±1)` 不算鄰格）。這條 §3.5.2 路徑 BFS、§3.6 戰鬥配對、§3.7 stalemate pair 全部沿用，視覺上的 45° iso 投影**只影響渲染、不改變邏輯距離**。
+- **距離（Distance）= Manhattan**：`d((ax, ay), (bx, by)) = |ax−bx| + |ay−by|`。配合 4-conn 鄰格，BFS 跳數 = Manhattan 距離（在無障礙時），實際 BFS 跳數 ≥ Manhattan（有 passable 限制時）。
+- **棋盤邊界**：`0 ≤ x < boardSize`、`0 ≤ y < boardSize`。鄰格落在邊界外 = 不存在（既不參與 BFS 也不參與戰鬥配對）。
+- **派遣路徑（Player）**：玩家拖曳派遣**沒有 hop 上限**，只要 BFS 找得到一條 §3.5.2 passable 路徑就可派遣，無論距離多遠。v0.12 期間 AI rule #3 `ATTACK_RANGE_HOPS = 8` 是 AI 戰術上的自限，與玩家無關，v1.0 隨 AI 一併下線；engine `findPath` API 本身就不檢查 hops。
+- **同格定義**：同一 tile id 的兩 stack（駐紮 + 行軍抵達 / 兩條行軍同時抵達）視為「在同格」，走 §3.5.4 規則。**不存在「同格但不同 sub-cell」**：每 tile 一個 owner、一個 count、一個 tier，整格為單位。
+
+> 設計理由：先把這些寫成 PRD 條目，未來改棋盤大小、改派遣 UI、改路徑視覺化、引入地形效果，都有單一 source of truth 可指。
+
+## 4. 非玩家勢力控制（v1.0 暫定，AI 規格 deferred）
+
+v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI 設計 deferred 後，**非玩家勢力的控制模式**由 scenario JSON 的 `aiConfig` 欄位指定，採以下兩種模式之一：
+
+| 模式         | 行為                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------- |
+| `"idle"`     | 該勢力**完全靜默**：不評估、不派兵、不主動移動。主城仍依 §3.3 自動產兵（count 自動 +1），但派遣需 scripted 或人類操作（v1.0 沒有 UI 給非玩家勢力，所以實際上 idle 勢力的 count 會在主城無限累積，直到被別人攻入）。 |
+| `"scripted"` | 該勢力**只聽 scenario JSON 的 `scriptedCommands`**：在指定 tick 觸發指定派遣，其餘時間 idle。產兵照常。 |
+
+- v0.12 期間第三種模式 `"default"` (跑 §4.1 AI 規則狀態機) 在 v1.0 **technically 仍可用**（engine `stepAi` 程式碼還在），但**不在 v1 acceptance 範圍**；任何用 `"default"` 跑出來的行為觀察都不能當作 v1 對 PRD 的符合性證明。
+- 玩家固定操作 **TOKUGAWA**；其餘三家在 v1.0 預設場景 (`src/scenarios/default.json`) 一律 `"idle"`，等次輪 PRD 重新設計 AI 後再切回 `"default"`。
+- Scripted 模式給未來想做「教學關卡」、「指定挑戰」用；v1.0 的 manual smoke 場景可以用 scripted 餵假對手測試 dispatch UI。
+
+完整 v0.12 AI 規格見 git tag `archive/prd-v0.12`。重啟 AI 設計時建議從 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0 議題回看。
 
 ## 5. 視覺與 UI
 
@@ -360,6 +381,10 @@ function updateStalemates(
 | ~~AC-33~~ | _Castle 自動溢出 (§3.5.5)，於 v1.0 移出 PRD，AC 一併下線_ | — |
 | ~~AC-34~~ | _AI rule #2.5 集結，§4.1 於 v1.0 移出，AC 一併下線_ | — |
 | ~~AC-35~~ | _Castle vs castle BFS 例外 (§3.5.6)，於 v1.0 移出 PRD，AC 一併下線_ | — |
+| AC-36 | §3.8 4-conn 鄰格：tile `(5,5)` 對 `(6,5)` / `(4,5)` / `(5,6)` / `(5,4)` 皆是鄰格；對 `(6,6)` / `(4,4)` / `(6,4)` / `(4,6)` 皆**不是**鄰格（戰鬥不配對、BFS 不視為一跳） | Headless：擺 6 個敵我格驗 §3.6 `resolveAdjacentCombat` 只配 4 對；BFS `findPath((5,5)→(6,6))` 必須繞行非對角路徑 |
+| AC-37 | §4 idle 模式：scenario `aiConfig` 全填 `"idle"` 跑 100 ticks，非玩家勢力 marching stacks count 始終 = 0；TOKUGAWA 主城 count 仍每 2 ticks +1（§3.3 產兵照常） | Headless：建 idle scenario 跑 100 ticks，斷言 `state.marchingStacks` 全程 ≤ 玩家 scripted 派遣數；非玩家 castle count 持平爬升 |
+| AC-38 | §4 scripted 模式：scenario `scriptedCommands` 指定 `{atTick: 5, from: [10,0], to: [9,0], ratio: 1.0}`，TAKEDA 的 aiConfig = `"scripted"` → tick 5 真的派一條 marching stack；其餘 tick 不動 | Headless：advance(10) 後斷言只有 tick 5 出現 TAKEDA marching stack 一筆，其餘 tick 為 0 |
+| AC-39 | §3.8 玩家派遣無 hop 上限：玩家 hold-drag 從主城 (0,0) 到 BFS 路徑長 = 18 hops 的目標格（全程己方 passable），dispatch 應該成功；同樣路徑長但中間切一格非 passable → dispatch 顯示紅色拒絕 | UI 操作 + Headless `findPath` 雙端驗：路徑全 passable → 回傳路徑陣列；中斷 passable → 回傳 null |
 
 ## 8. 範圍外（Future Scope）
 

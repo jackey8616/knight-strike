@@ -325,8 +325,45 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
   2. 派遣一輪驗 AC-06 / 07 / 09
   3. Space + `2` 驗 AC-13 / 14
   4. 主城 100% 派遣驗 AC-16 UI 端
-  5. 速殺三家 AI 驗 AC-12（或反向被殺驗 AC-11）
-- 完成定義：以上五步全通；通過後人類在 PR 標 `M2 manual smoke ✅`。
+  5. 慢慢拓圖、派遠程派遣（路徑長 ≥ 12 hops）驗 AC-39 玩家無 hop 上限
+  6. 對 idle 對手主城派一條決勝，看勝負畫面驗 AC-12（或故意送敵入主城驗 AC-11）
+- 完成定義：以上六步全通；通過後人類在 PR 標 `v1.0 M2 manual smoke ✅`。
+
+---
+
+## v1.0 新增 milestone（次輪 PRD 規劃，UI + 基礎機制）
+
+> 以下是 PRD v1.0 把 AI deferred 後新加的「次輪」工作。M1 / M2.0–M2.8 已 shipped 或屬 v1.0 active 範圍；下方 M2.9.5 / M2.9.7 是 v1.0 特有的補充。Turn 上限統一估 20 turn。
+
+### M2.9.5 — §3.8 基礎幾何形式化（regression）
+
+- **檔案**：`src/engine/combat.test.ts`（新增 4-conn 鄰格驗證 case）、`src/engine/movement.test.ts`（新增 BFS 非對角路徑驗證 case）
+- **對應 PRD**：§3.8、AC-36
+- **依賴**：無（純測試補強，engine 行為 v0.12 就是 4-conn）
+- **完成定義**：
+  - `it("[AC-36] 4-conn adjacency: combat pairs exclude diagonals")` 綠
+  - `it("[AC-36] BFS finds non-diagonal path to (5,5)→(6,6)")` 綠
+  - PR description 註明：v1.0 形式化 §3.8 後補的 regression test，engine 行為未改動
+
+### M2.9.7 — Scenario aiConfig 模式驗收
+
+- **檔案**：`src/scenarios/idle-target.json`（新；TOKUGAWA 玩家 + 三家 idle 主城作為 dispatch 目標）、`src/playtest/integration.test.ts`（新增 idle / scripted 兩條 case）
+- **對應 PRD**：§4、AC-37、AC-38
+- **依賴**：M1.10（playtest CLI）
+- **完成定義**：
+  - `it("[AC-37] aiConfig all idle: non-player marchingStacks stays 0 over 100 ticks")` 綠
+  - `it("[AC-38] aiConfig scripted: TAKEDA dispatches exactly once at scripted tick")` 綠
+  - `src/scenarios/idle-target.json` 是 v1.0 manual smoke 的預設場景（取代 v0.12 期間的 `default.json`，後者保留作 AI 重啟參考；MAIN 入口 default 改載 `idle-target.json`）
+
+### v1.0 退出條件（合併 M2 + M2.9.5/.7）
+
+```bash
+pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
+```
+
+加上 `pnpm dev` 後人類在瀏覽器跑 M2.9 manual smoke 全綠。
+
+> v1.0 release 後 `archive/prd-v1.0` git tag、PRD 進入 v1.1 規劃週期。下一輪重點交給次輪 PRD 工作流：可能是 AI 規格回到 PRD、或 sprite 資產與 build 部署（M4）。
 
 ---
 
