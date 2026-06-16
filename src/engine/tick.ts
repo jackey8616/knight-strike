@@ -6,6 +6,7 @@ import {
   updateStalemates,
 } from "./combat";
 import { advanceMarching } from "./movement";
+import { applyCastleOverflow } from "./overflow";
 import { produce } from "./production";
 import type { GameState } from "./types";
 import { applyDefeats } from "./victory";
@@ -30,6 +31,11 @@ export function step(state: GameState): GameState {
   // before produce so a dying faction can't push out an extra count.
   s = applyDefeats(s);
   s = produce(s);
+  // PRD §3.2 v0.11 step order: castle overflow runs after produce so any freshly
+  // produced unit that pushes the castle above CASTLE_OVERFLOW_THRESHOLD can
+  // ship out the same tick. Stays before upgrade because tier is derived on
+  // read — deriveTier on next access reflects the post-overflow count.
+  s = applyCastleOverflow(s);
   // §3.2 step 5 (tier upgrade) is implicit — deriveTier is recomputed on read.
   // §3.2 step 6 (victory) is caller-side: evaluateOutcome reads state.
   return { ...s, tick: s.tick + 1 };

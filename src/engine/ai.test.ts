@@ -389,6 +389,47 @@ describe("rule priority", () => {
     expect(stack.path.length).toBe(8);
   });
 
+  it("[AC-34] rule #2.5 rally: anchor = highest-count frontline non-castle; sources send min(floor(c*0.5), c-1)", () => {
+    // PRD §4.1 rule #2.5: A (2,2) count=8 and B (5,5) count=5 are both
+    // frontline non-castle tiles (TAK garrisons at (3,2)/(6,5) make them so
+    // without enabling rule #2 expansion targets — targets need count=0).
+    // A wins on count, anchoring the rally.
+    // S1 (1,2) count=4 → min(floor(4*0.5), 4-1) = 2; S2 (2,1) count=6 →
+    // min(floor(6*0.5), 6-1) = 3.
+    // Castle (0,0) count=4 keeps rule #2 silent (Soldier tier reserve floor),
+    // and the limited province map ensures expand has no count=0 targets to
+    // chase, so rule #2.5 wins the short-circuit chain.
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 4, true),
+        makeProvince(2, 2, "TOKUGAWA", 8),
+        makeProvince(5, 5, "TOKUGAWA", 5),
+        makeProvince(1, 2, "TOKUGAWA", 4),
+        makeProvince(2, 1, "TOKUGAWA", 6),
+        makeProvince(3, 2, "TAKEDA", 1),
+        makeProvince(6, 5, "TAKEDA", 1),
+      ],
+      tick: 1,
+    });
+    const out = stepAi(state);
+    expect(out.marchingStacks.length).toBe(2);
+    const byFrom = new Map<TileId, MarchingStack>();
+    for (const ms of out.marchingStacks) {
+      byFrom.set(ms.path[0] as TileId, ms);
+    }
+    const fromS1 = byFrom.get(tileId(1, 2)) as MarchingStack;
+    const fromS2 = byFrom.get(tileId(2, 1)) as MarchingStack;
+    expect(fromS1).toBeDefined();
+    expect(fromS2).toBeDefined();
+    expect(fromS1.count).toBe(2);
+    expect(fromS1.path[fromS1.path.length - 1]).toBe(tileId(2, 2));
+    expect(fromS2.count).toBe(3);
+    expect(fromS2.path[fromS2.path.length - 1]).toBe(tileId(2, 2));
+    expect((out.provinces.get(tileId(1, 2)) as Province).count).toBe(2);
+    expect((out.provinces.get(tileId(2, 1)) as Province).count).toBe(3);
+    expect((out.provinces.get(tileId(2, 2)) as Province).count).toBe(8);
+  });
+
   it("[AC-30] rule #3 skipped at distance = 9 hops (> 8)", () => {
     // Same shape as AC-29 but source pushed one tile back so distance = 9.
     const provinces: Province[] = [

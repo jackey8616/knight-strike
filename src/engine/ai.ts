@@ -242,6 +242,72 @@ function tryExpand(
   return null;
 }
 
+// PRD §4.1 rule #2.5 (rally, v0.11): pick the highest-count non-castle own
+// frontline tile, then ship 50% (capped at count-1) from every adjacent own
+// non-castle tile toward it. Castle is intentionally excluded from sources to
+// preserve rule #2 castle-tier reserve purity (and to avoid fighting the
+// §3.5.5 overflow which already pushes from castle outward).
+function tryRally(
+  state: GameState,
+  faction: FactionId,
+  rng: Rng,
+): GameState | null {
+  const anchorCandidates: Province[] = [];
+  for (const p of state.provinces.values()) {
+    if (p.owner !== faction) continue;
+    if (p.isCastle) continue;
+    let hasNonOwnNeighbour = false;
+    for (const nb of neighborsOf(state, p.id)) {
+      if (nb.owner !== faction) {
+        hasNonOwnNeighbour = true;
+        break;
+      }
+    }
+    if (!hasNonOwnNeighbour) continue;
+    anchorCandidates.push(p);
+  }
+  if (anchorCandidates.length === 0) return null;
+
+  let maxCount = -1;
+  for (const c of anchorCandidates) if (c.count > maxCount) maxCount = c.count;
+  const topAnchors = anchorCandidates
+    .filter((c) => c.count === maxCount)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  shuffleInPlace(rng, topAnchors);
+  const anchor = topAnchors[0] as Province;
+
+  type Source = { readonly tile: Province; readonly sendCount: number };
+  const sources: Source[] = [];
+  for (const nb of neighborsOf(state, anchor.id)) {
+    if (nb.owner !== faction) continue;
+    if (nb.isCastle) continue;
+    const sendCount = Math.min(Math.floor(nb.count * 0.5), nb.count - 1);
+    if (sendCount <= 0) continue;
+    sources.push({ tile: nb, sendCount });
+  }
+  if (sources.length === 0) return null;
+
+  // Deterministic source ordering for mstack id assignment regardless of
+  // neighborsOf iteration order.
+  sources.sort((a, b) => (a.tile.id < b.tile.id ? -1 : 1));
+
+  let s = state;
+  let dispatchedAny = false;
+  for (const src of sources) {
+    const res = dispatch(s, {
+      from: src.tile.id,
+      to: anchor.id,
+      ratio: 0.5 as DispatchRatio,
+      forceCount: src.sendCount,
+    });
+    if (res.ok) {
+      s = res.state;
+      dispatchedAny = true;
+    }
+  }
+  return dispatchedAny ? s : null;
+}
+
 // PRD v0.8 §4.1 rule #3: hops 4 → 8 so 11x11 mid-board frontier can reach
 // enemy castle range. Power ratio threshold (1.5×) unchanged.
 export const ATTACK_RANGE_HOPS = 8;
@@ -292,6 +358,8 @@ function evaluateFaction(state: GameState, faction: FactionId): GameState {
   if (r1 !== null) return r1;
   const r2 = tryExpand(state, faction, rng);
   if (r2 !== null) return r2;
+  const r25 = tryRally(state, faction, rng);
+  if (r25 !== null) return r25;
   const r3 = tryAttack(state, faction, rng);
   if (r3 !== null) return r3;
   return state;
