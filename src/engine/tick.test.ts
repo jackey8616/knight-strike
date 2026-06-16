@@ -133,14 +133,28 @@ describe("production fires on PRD §3.2 cadence", () => {
     expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
   });
 
-  it("tick 2 → 3: castle +1 (2 is the first production tick)", () => {
+  it("tick 2 → 3: castle stays static (PRD §3.3 v1.1: castles don't produce)", () => {
     const state = buildState({
       provinces: [makeProvince(0, 0, "TOKUGAWA", 3, true)],
       tick: 2,
     });
     const out = step(state);
     expect(out.tick).toBe(3);
-    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(4);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(3);
+  });
+
+  it("tick 2 → 3: field garrison +1 (PRD §3.3 v1.1 amendment)", () => {
+    const state = buildState({
+      provinces: [
+        makeProvince(0, 0, "TOKUGAWA", 1, true),
+        makeProvince(1, 0, "TOKUGAWA", 4, false),
+      ],
+      tick: 2,
+    });
+    const out = step(state);
+    expect(out.tick).toBe(3);
+    expect((out.provinces.get(tileId(0, 0)) as Province).count).toBe(1);
+    expect((out.provinces.get(tileId(1, 0)) as Province).count).toBe(5);
   });
 
   it("tick 0 → 1: no production (tick 0 is the initial-state guard)", () => {
@@ -241,13 +255,14 @@ describe("step composes defeats before production (PRD §3.2 step 3 then 4)", ()
 });
 
 describe("step runs castle overflow after produce (PRD §3.2 v0.11 step order)", () => {
-  it("produce push from count=30 to 31 immediately overflows the +1 to frontline", () => {
-    // Castle starts at 30 (not over the threshold). On a production tick the
-    // castle goes to 31, then overflow phase emits a marching stack count=1
-    // and the castle drops back to 30 — all within the same tick.
+  it("castle at count=31 immediately overflows the surplus to frontline", () => {
+    // PRD §3.3 v1.1 amendment: castles don't produce, so the overflow trigger
+    // can only arise from a marching stack dropping units into the castle.
+    // Seed the castle directly above the threshold to exercise the §3.5.5
+    // overflow phase in isolation.
     const state = buildState({
       provinces: [
-        makeProvince(0, 0, "TOKUGAWA", 30, true),
+        makeProvince(0, 0, "TOKUGAWA", 31, true),
         makeProvince(1, 0, "TOKUGAWA", 1, false),
         makeProvince(2, 0, "NEUTRAL", 0, false),
       ],

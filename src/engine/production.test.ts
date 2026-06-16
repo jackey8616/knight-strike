@@ -55,7 +55,7 @@ const fourCastles: readonly Province[] = [
   makeProvince(10, 10, "UESUGI", 3, true),
 ];
 
-describe("produce", () => {
+describe("produce (PRD §3.3 v1.1 amendment)", () => {
   it("[AC-03] tick 0 produces nothing (initial state)", () => {
     const before = buildState(0, fourCastles);
     const after = produce(before);
@@ -72,67 +72,77 @@ describe("produce", () => {
     }
   });
 
-  it("[AC-03] tick 2 is the first emission: every castle +1", () => {
-    const before = buildState(2, fourCastles);
-    const after = produce(before);
-    for (const province of after.provinces.values()) {
-      expect(province.isCastle).toBe(true);
-      expect(province.count).toBe(4);
-    }
+  it("[AC-03 v1.1] tick 3 produces nothing (odd ticks never emit)", () => {
+    const provinces: readonly Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(1, 0, "TOKUGAWA", 4, false),
+    ];
+    const after = produce(buildState(3, provinces));
+    expect(after.provinces.get(tileId(1, 0))?.count).toBe(4);
   });
 
-  it("[AC-03] tick 3 produces nothing (odd tick between emissions)", () => {
-    const before = buildState(3, fourCastles);
-    const after = produce(before);
+  it("[AC-03 v1.1] castles never produce, even on emission ticks", () => {
+    const after = produce(buildState(2, fourCastles));
     for (const province of after.provinces.values()) {
+      expect(province.isCastle).toBe(true);
       expect(province.count).toBe(3);
     }
   });
 
-  it("[AC-03] tick 4 keeps emitting on every even tick", () => {
-    const before = buildState(4, fourCastles);
-    const after = produce(before);
-    for (const province of after.provinces.values()) {
-      expect(province.count).toBe(4);
-    }
-  });
-
-  it("[AC-03] 20s = 10 ticks (tick 2..10 inclusive) ⇒ castle +5", () => {
-    let state = buildState(1, fourCastles);
-    for (let t = 2; t <= 10; t++) {
-      state = { ...state, tick: t };
-      state = produce(state);
-    }
-    const castle = state.provinces.get(tileId(0, 0));
-    expect(castle?.count).toBe(3 + 5);
-  });
-
-  it("non-castle tiles never produce, even on emission ticks", () => {
+  it("[AC-03 v1.1] non-castle garrisoned tiles +1 on every even tick", () => {
     const provinces: readonly Province[] = [
       makeProvince(0, 0, "TOKUGAWA", 3, true),
-      makeProvince(1, 0, "TOKUGAWA", 7, false),
-      makeProvince(2, 0, "NEUTRAL", 0, false),
+      makeProvince(1, 0, "TOKUGAWA", 4, false),
+      makeProvince(2, 0, "TAKEDA", 7, false),
     ];
     const after = produce(buildState(2, provinces));
-    expect(after.provinces.get(tileId(0, 0))?.count).toBe(4);
-    expect(after.provinces.get(tileId(1, 0))?.count).toBe(7);
+    // Castle untouched.
+    expect(after.provinces.get(tileId(0, 0))?.count).toBe(3);
+    // Field garrisons +1.
+    expect(after.provinces.get(tileId(1, 0))?.count).toBe(5);
+    expect(after.provinces.get(tileId(2, 0))?.count).toBe(8);
+  });
+
+  it("[AC-03 v1.1] empty (count=0) tiles don't produce — no seed from nothing", () => {
+    const provinces: readonly Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(1, 0, "TOKUGAWA", 0, false), // empty own
+      makeProvince(2, 0, "NEUTRAL", 0, false), // empty neutral
+    ];
+    const after = produce(buildState(2, provinces));
+    expect(after.provinces.get(tileId(1, 0))?.count).toBe(0);
     expect(after.provinces.get(tileId(2, 0))?.count).toBe(0);
   });
 
-  it("NEUTRAL-owned castles do not produce", () => {
+  it("[AC-03 v1.1] NEUTRAL bandit tiles never produce", () => {
     const provinces: readonly Province[] = [
-      makeProvince(0, 0, "NEUTRAL", 5, true),
-      makeProvince(10, 0, "TAKEDA", 2, true),
+      makeProvince(5, 5, "NEUTRAL", 3, false),
+      makeProvince(0, 0, "TOKUGAWA", 4, false),
     ];
     const after = produce(buildState(2, provinces));
+    expect(after.provinces.get(tileId(5, 5))?.count).toBe(3);
     expect(after.provinces.get(tileId(0, 0))?.count).toBe(5);
-    expect(after.provinces.get(tileId(10, 0))?.count).toBe(3);
   });
 
-  it("castles owned by a defeated faction do not produce", () => {
+  it("[AC-03 v1.1] 10 emission ticks ⇒ non-castle garrison +10", () => {
     const provinces: readonly Province[] = [
-      makeProvince(0, 0, "TOKUGAWA", 4, true),
-      makeProvince(10, 0, "TAKEDA", 4, true),
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(1, 0, "TOKUGAWA", 4, false),
+    ];
+    let state = buildState(1, provinces);
+    for (let t = 2; t <= 20; t += 2) {
+      state = { ...state, tick: t };
+      state = produce(state);
+    }
+    expect(state.provinces.get(tileId(1, 0))?.count).toBe(4 + 10);
+    // Castle stays static.
+    expect(state.provinces.get(tileId(0, 0))?.count).toBe(3);
+  });
+
+  it("[AC-03 v1.1] tiles owned by a defeated faction don't produce", () => {
+    const provinces: readonly Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 4, false),
+      makeProvince(10, 0, "TAKEDA", 4, false),
     ];
     const before = buildState(2, provinces, {
       defeated: new Set<FactionId>(["TAKEDA"]),
@@ -143,7 +153,11 @@ describe("produce", () => {
   });
 
   it("returns a new state on emission tick (does not mutate input)", () => {
-    const before = buildState(2, fourCastles);
+    const provinces: readonly Province[] = [
+      makeProvince(0, 0, "TOKUGAWA", 3, true),
+      makeProvince(1, 0, "TOKUGAWA", 2, false),
+    ];
+    const before = buildState(2, provinces);
     const beforeCounts = Array.from(before.provinces.values()).map(
       (p) => p.count,
     );
@@ -161,10 +175,11 @@ describe("produce", () => {
     expect(produce(before)).toBe(before);
   });
 
-  it("returns the same state reference when no castle is eligible", () => {
+  it("returns the same state reference when no producer is eligible", () => {
+    // Only castles + NEUTRAL — nothing to grow.
     const provinces: readonly Province[] = [
       makeProvince(0, 0, "NEUTRAL", 5, true),
-      makeProvince(1, 0, "TOKUGAWA", 2, false),
+      makeProvince(1, 0, "TOKUGAWA", 0, true),
     ];
     const before = buildState(2, provinces);
     expect(produce(before)).toBe(before);

@@ -149,7 +149,7 @@ describe("integration: scripted commands + win path", () => {
 });
 
 describe("integration: aiConfig modes (PRD §4)", () => {
-  it("[AC-37] aiConfig all idle: no non-player marching stacks over 100 ticks, castle counts climb", () => {
+  it("[AC-37 v1.1] aiConfig all idle: no marching stacks and no growth over 100 ticks", () => {
     const result = runScenario(idleTargetScenario, {
       maxTicks: 100,
       emitEvents: true,
@@ -167,15 +167,13 @@ describe("integration: aiConfig modes (PRD §4)", () => {
       }
     }
 
-    // §3.3 production still applies under idle: each non-player castle gets
-    // +1 every other tick → at tick 100 each owner snapshot should be around
-    // 3 (start) + 50 (50 productions) = 53. Allow ≥ 50 to give a margin if
-    // production timing shifts in future tweaks (the assertion is "climbs",
-    // not "exact count").
+    // PRD §3.3 v1.1: castles don't produce. The idle-target scenario seeds
+    // each faction with only a castle at count 3 — with no field garrison
+    // there's nothing to produce from, so totalCount stays at 3 forever.
     const last = events[events.length - 1];
     expect(last).toBeDefined();
     for (const f of last!.factions) {
-      expect(f.totalCount).toBeGreaterThanOrEqual(50);
+      expect(f.totalCount).toBe(3);
     }
   });
 
