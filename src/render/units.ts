@@ -10,7 +10,7 @@ import { gsap } from "gsap";
 import type { FactionId, GameState, Tier, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
-import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT } from "./board";
+import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
 import { playCombatBump } from "./combat";
 
 const TIER_RANK: Readonly<Record<Tier, number>> = {
@@ -21,12 +21,13 @@ const TIER_RANK: Readonly<Record<Tier, number>> = {
 };
 
 // PRD §5.1 M2 placeholder: single sprite + scale-per-tier (full per-tier
-// sprite art lands in M4). Scales chosen so SOLDIER fits inside a single
-// diamond tile and KING reads as a clear visual rank-up.
-const TIER_SCALE: Readonly<Record<Tier, number>> = {
-  SOLDIER: 0.45,
-  KNIGHT: 0.6,
-  QUEEN: 0.78,
+// sprite art lands in M4). Values are fractions of TILE_WIDTH so they stay
+// readable regardless of the source texture's pixel size (knight.png is
+// 1024² — a raw 0.45 multiplier overflows the 64 px tile by ~7x).
+const TIER_TILE_FRACTION: Readonly<Record<Tier, number>> = {
+  SOLDIER: 0.5,
+  KNIGHT: 0.65,
+  QUEEN: 0.8,
   KING: 0.95,
 };
 
@@ -60,6 +61,10 @@ export type UnitsRenderer = {
   destroy(): void;
 };
 
+function tierScale(tier: Tier, texture: Texture): number {
+  return (TILE_WIDTH * TIER_TILE_FRACTION[tier]) / texture.width;
+}
+
 function createUnitGfx(
   id: TileId,
   x: number,
@@ -85,7 +90,7 @@ function createUnitGfx(
   node.addChild(text);
 
   const tier = deriveTier(count);
-  const s = TIER_SCALE[tier];
+  const s = tierScale(tier, texture);
   sprite.scale.set(s);
 
   return {
@@ -165,7 +170,7 @@ export function createUnitsRenderer(
         units.set(province.id, gfx);
       }
 
-      const targetScale = TIER_SCALE[tier];
+      const targetScale = tierScale(tier, knightTexture);
       gfx.sprite.tint = FACTION_COLORS[province.owner];
       gfx.sprite.scale.set(targetScale);
       gfx.count.text = province.count > 0 ? String(province.count) : "";
