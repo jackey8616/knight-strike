@@ -1,6 +1,8 @@
 # MILESTONES — Knight Strike
 
-本文件把 [`PRD.md`](PRD.md) v0.4 切成 4 個交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
+本文件把 [`PRD.md`](PRD.md) v0.10 切成 4 個交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**，所有玩法/數值/規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收」。
+
+> PRD 同步基準：v0.10（AC-01 ~ AC-32；§3.6.1 claim + hysteresis；§4.1 castle 分階保護 + rule #3 距離/reserve；§11.1/§11.2 M1.11 收斂限制與門檻調整）。
 
 工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
@@ -20,16 +22,16 @@
 
 **目標**：一行 `pnpm playtest` 能跑完整局，engine 層所有 AC 自動驗。
 
-**涵蓋 PRD**：§2、§3.1–§3.7、§4、§6、§10
-**涵蓋 AC**：AC-02、AC-03、AC-04、AC-05、AC-08、AC-15、AC-16、AC-17、AC-18、AC-19、AC-20、AC-21、AC-22
+**涵蓋 PRD**：§2、§3.1–§3.7、§3.6.1、§4、§6、§10、§11.1、§11.2
+**涵蓋 AC**：AC-02、AC-03、AC-04、AC-05、AC-08、AC-15、AC-16、AC-17、AC-18、AC-19、AC-20、AC-21、AC-22、AC-23、AC-24、AC-25、AC-26、AC-27、AC-28、AC-29、AC-30、AC-31、AC-32
 **退出條件**：
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test:run && \
-pnpm playtest src/scenarios/default.json --runs 10
+pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 ```
 
-全綠且無例外、engine line coverage ≥ 90%、所有列出的 AC vitest 案例綠燈。
+全綠且無例外、engine line coverage ≥ 90%、所有列出的 AC vitest 案例綠燈。`--max-ticks` 平局視為合法結局（見 PRD §11.2）。
 
 **Turn 上限**：60
 
@@ -47,7 +49,7 @@ pnpm playtest src/scenarios/default.json --runs 10
 - 檔案：`src/engine/types.ts`、`src/engine/state.ts`、`src/engine/util/rng.ts`、`src/engine/util/rng.test.ts`
 - 對應 PRD：§2、§3.1、§3.1.1、§3.5.3、§10.2
 - 依賴：M1.0
-- 完成定義：`FactionId` / `Tier` / `TileId` / `Province` / `MarchingStack` / `GameState` / `StalemateMap` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。
+- 完成定義：`FactionId` / `Tier` / `TileId` / `Province`（含 `lastClaimedAtTick: number | null` 欄位給 §3.6.1 hysteresis 用）/ `MarchingStack`（含 `id` / `dispatchedAtTick`）/ `GameState` / `StalemateMap` 型別齊全、皆 `readonly`；seedable PRNG（mulberry32 或同等）有 test 驗確定性。
 
 ### M1.2 — Upgrade（deriveTier）
 
@@ -55,7 +57,8 @@ pnpm playtest src/scenarios/default.json --runs 10
 - 對應 PRD：§3.4
 - 對應 AC：AC-04、AC-05
 - 依賴：M1.1
-- 完成定義：閾值 5/15/30 四 tier 表驗、降級（15→14、5→4）驗、邊界 0 / 負數防呆。
+- 完成定義：閾值 **5/12/25**（v0.9）四 tier 表驗、降級（12→11、5→4）驗、邊界 0 / 負數防呆。
+- 註：PRD §11.1 保留「實作可 revert 為 v0.8 baseline 5/15/30」的歷史脫鉤條款；測試以 §3.4 主文 + AC-04/05 標註的 5/12/25 為準，若實作 revert 需同步調整測試常數並在 PR 註明。
 
 ### M1.3 — Production（主城產兵）
 
@@ -90,6 +93,20 @@ pnpm playtest src/scenarios/default.json --runs 10
 - 完成定義：BFS passable 規則正確、目標可為敵方、無路徑回 null；marching stack `dispatchedAtTick` / `id` 填齊；同勢力合併（最少剩餘步 + tiebreak）AC-20、頭對頭 AC-17/21、路徑被切 AC-18、主城留 1 AC-16 全綠。
 - 因公式 + 6 種 collision 子場景一檔太重，實作時可拆成「BFS + dispatch」與「collision 解析」兩個 sub-task（仍同檔）。
 
+### M1.6.5 — Adjacent claim + Hysteresis
+
+- 檔案：`src/engine/claim.ts`、`src/engine/claim.test.ts`（claim 結算夠重，獨立檔；若實作上合入 `combat.ts` 也可，但 test 仍獨立檔保留語意）
+- 對應 PRD：§3.2 步驟 3b、§3.6.1（含 hysteresis）
+- 對應 AC：AC-23、AC-24、AC-25、AC-26
+- 依賴：M1.4（戰鬥已結算）、M1.6（marching 抵達已先寫回，避免雙重 claim）
+- 完成定義：
+  - 對每個 `count = 0` 非己方格依 §3.6.1 規則由相鄰勢力 claim（單一 claimant → 直接翻；多 claimant → 戰力決勝；tie → §4.2 RNG tiebreak）。
+  - NEUTRAL 與 defeated faction 不參與 claim（不列入 claimants）。
+  - Claim **只改 owner、不改 count**；AC-25 精確驗。
+  - `Province.lastClaimedAtTick` 欄位寫入 `state.ts`（與 M1.1 一起 ship 或本 sub-milestone 補 patch）。
+  - Hysteresis 3-tick 保護期：claim 發生 tick K → tick K, K+1, K+2 owner 凍結、tick K+3 起可再 claim；AC-26 精確驗 tick 邊界。
+  - 整合進 tick orchestrator（M1.9）的 claim phase 3b。
+
 ### M1.7 — Victory 判定
 
 - 檔案：`src/engine/victory.ts`、`src/engine/victory.test.ts`
@@ -101,18 +118,31 @@ pnpm playtest src/scenarios/default.json --runs 10
 ### M1.8 — AI 狀態機 + RNG shuffle + 評估錯開
 
 - 檔案：`src/engine/ai.ts`、`src/engine/ai.test.ts`
-- 對應 PRD：§4
-- 對應 AC：AC-15、AC-22
+- 對應 PRD：§4.1、§4.2、§4.3、§3.5.1（AI 派遣下限）、§10.2、§11.1（v0.8 baseline 註記）
+- 對應 AC：AC-15、AC-22、AC-27、AC-28、AC-29、AC-30、AC-31、AC-32
 - 依賴：M1.1、M1.6
-- 完成定義：三條短路規則順序正確、候選 shuffle 用 §10.2 `rngSeed + factionId + tick`、評估錯開 (1/2/3/4 + 每 5 ticks)；AC-15 與 AC-22 過。
+- 完成定義：
+  - 四條短路規則順序正確（威脅 → 擴張 → 進攻 → 囤兵），第一條觸發即退出本次評估。
+  - 候選 shuffle 用 §10.2 `rngSeed + factionId + tick` 推導；評估錯開（Tokugawa tick 1 / Takeda 2 / Oda 3 / Uesugi 4，後續每 5 ticks）。
+  - **Rule #2 castle 分階累積保護**（§4.1 v0.8 baseline）：
+    - `count < KNIGHT_RESERVE` (= 5) → 禁止派兵
+    - `5 ≤ count < QUEEN_RESERVE` (= 15) → 派 25%、source 至少留 5
+    - `15 ≤ count < KING_THRESHOLD` (= 30) → 派 33%、source 至少留 15
+    - `count ≥ 30` → 派 50%（無 tier 保護）
+    - 非主城格：`count ≥ EXPAND_MIN_STACK` (= 5) 才派、固定 50%
+    - AC-27 / AC-28 精確驗。
+  - **Rule #3 進攻**：`ATTACK_RANGE_HOPS = 8`（v0.8 baseline；PRD §3.4/§4.1 主文 v0.10 寫 12 但 §11.1 已 revert）、`ATTACK_POWER_RATIO = 1.5`（v0.8 baseline）、派遣量 = `source.count - reserve`（非主城 reserve=1、主城 reserve=5）；派遣量 ≤ 0 不 fire。
+    - AC-29（非主城 source 距離放寬內 fire）、AC-30（hops 超過不 fire）、AC-31（castle source 保留 5）、AC-32（派遣量 ≤ 0 不 fire）精確驗。
+  - **AC 邊界對齊 v0.8 baseline**：AC-29/30 描述用 v0.10 `hops = 12`，本 milestone 實作 `hops = 8`；test 常數以 `ATTACK_RANGE_HOPS` 引用、AC 註解標 PRD §11.1 revert，避免硬編 12 與實作打架。若日後 revert 改回 v0.10 主文值，常數一處改即可。
+  - AC-15（30 ticks 內每家 AI 至少佔 1 鄰格）、AC-22（同 seed 結果 hash 一致；異 seed 分歧）過。
 
 ### M1.9 — Tick orchestrator（step）
 
 - 檔案：`src/engine/tick.ts`、`src/engine/tick.test.ts`
-- 對應 PRD：§3.2（六步結算順序）
+- 對應 PRD：§3.2（六步結算順序 + 注腳完整 step order）
 - 對應 AC：AC-02
-- 依賴：M1.3、M1.4、M1.5、M1.6、M1.7、M1.8
-- 完成定義：`step(state)` 嚴格依「移動 → 戰鬥 → 佔領 → 產兵 → 升級 → 勝負」次序、純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊。
+- 依賴：M1.3、M1.4、M1.5、M1.6、M1.6.5、M1.7、M1.8
+- 完成定義：`step(state)` 嚴格依 PRD §3.2 注腳順序：`movement → combat → drain (§3.7) → claim 3a (行軍抵達) → claim 3b (§3.6.1 相鄰勢力) → defeats → produce → upgrade → victory`；純函數、不 mutate 輸入；tick 編號從 1 起算與 PRD §3.2 對齊（tick 0 僅渲染、無結算；產兵於 tick 2 首次觸發；AI 評估偏移 1/2/3/4 + 每 5 ticks）。
 
 ### M1.10 — Headless playtest CLI + scenario loader
 
@@ -123,11 +153,12 @@ pnpm playtest src/scenarios/default.json --runs 10
 
 ### M1.11 — Manual Smoke（人類執行）
 
-- 動作：人類執行 `pnpm playtest src/scenarios/default.json --runs 10 --log events`
-- 完成定義：
-  - 10 場全部終局（無無限迴圈、無 crash）
+- 動作：人類執行 `pnpm playtest src/scenarios/default.json --runs 10 --log events --max-ticks 500`
+- 完成定義（依 PRD §11.2 調整）：
+  - 10 場無 crash、無無限迴圈
   - event log 無 NaN / 負 count / 主城自殺 / tier 與 count 不一致
-  - 平均場長 100–400 ticks（離譜的話 PRD 或公式有 bug）
+  - `max-ticks` 平局視為合法結局，正常計入 stalemate 統計
+  - **「平均場長 100–400 ticks」不再是 M1 acceptance**；轉為 M2 的回歸目標（戰場累積機制 / AI 設計改善後再達標，見 [`M2-BACKLOG.md`](./M2-BACKLOG.md)）
 - 通過後人類在 PR 標 `M1 manual smoke ✅`。
 
 ---
@@ -365,3 +396,13 @@ pnpm build
 | AC-20  | ✅  |     |     |     |
 | AC-21  | ✅  |     |     |     |
 | AC-22  | ✅  |     |     |     |
+| AC-23  | ✅  |     |     |     |
+| AC-24  | ✅  |     |     |     |
+| AC-25  | ✅  |     |     |     |
+| AC-26  | ✅  |     |     |     |
+| AC-27  | ✅  |     |     |     |
+| AC-28  | ✅  |     |     |     |
+| AC-29  | ✅  |     |     |     |
+| AC-30  | ✅  |     |     |     |
+| AC-31  | ✅  |     |     |     |
+| AC-32  | ✅  |     |     |     |
