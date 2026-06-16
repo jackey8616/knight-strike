@@ -53,7 +53,7 @@ function tile(
 }
 
 describe("produce (v1.3 self-replicate)", () => {
-  it("[AC-V2-29] non-contested tile + amount > 1 grows by 1", () => {
+  it("[AC-V2-29] non-contested tile with amount ≥ 1 grows by 1", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
@@ -67,7 +67,7 @@ describe("produce (v1.3 self-replicate)", () => {
     expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(4);
   });
 
-  it("[AC-V2-29] amount = 1 does not grow", () => {
+  it("[AC-V2-29] amount = 1 also grows to 2 (lone survivor regenerates)", () => {
     const id = tileId(0, 0);
     const provinces = new Map([
       [
@@ -77,9 +77,8 @@ describe("produce (v1.3 self-replicate)", () => {
         ]),
       ],
     ]);
-    const state = makeState(provinces);
-    const out = produce(state);
-    expect(out).toBe(state);
+    const out = produce(makeState(provinces));
+    expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(2);
   });
 
   it("[AC-V2-29] contested tile does not grow for any side", () => {

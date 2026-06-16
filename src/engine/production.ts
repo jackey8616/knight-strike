@@ -1,10 +1,10 @@
 import { isContested } from "./state";
 import type { GameState, Occupant, Province, TileId } from "./types";
 
-// PRD §3.3 v1.3 self-replicate: any tile not in combat with a non-NEUTRAL
-// non-defeated occupant whose amount is > 1 and < cap grows +1 per tick.
-// amount = 1 is the deliberate "派完只剩 1 不會無限補滿" carve-out so the
-// player's dispatch decisions actually drain the source.
+// PRD §3.3 v1.3 self-replicate: any tile not in combat with a non-NEUTRAL,
+// non-defeated occupant grows that occupant +1 per tick (capped at 100).
+// Any amount ≥ 1 qualifies — even a lone 1-troop survivor regenerates,
+// matching the v1.1 "garrison breeds" feel the player relies on.
 export const PRODUCTION_CAP = 100;
 
 export function produce(state: GameState): GameState {
@@ -19,7 +19,7 @@ export function produce(state: GameState): GameState {
     const updated: Occupant[] = province.occupants.map((o) => {
       if (o.faction === "NEUTRAL") return o;
       if (state.defeated.has(o.faction)) return o;
-      if (o.amount <= 1) return o;
+      if (o.amount <= 0) return o;
       if (o.amount >= PRODUCTION_CAP) return o;
       changed = true;
       return { ...o, amount: Math.min(o.amount + 1, PRODUCTION_CAP) };
