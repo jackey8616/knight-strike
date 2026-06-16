@@ -85,8 +85,11 @@ function createUnitGfx(
   node.addChild(sprite);
 
   const text = new Text({ text: "", style: COUNT_TEXT_STYLE });
-  text.anchor.set(0.5, 0);
-  text.position.set(0, TILE_HEIGHT / 4);
+  // Pin the count's baseline to the tile's bottom edge so the glyph height +
+  // stroke can never spill into the row below — the old top-anchored
+  // (0, TILE_HEIGHT/4) placement let the descender pass y=16.
+  text.anchor.set(0.5, 1);
+  text.position.set(0, TILE_HEIGHT / 2);
   node.addChild(text);
 
   const tier = deriveTier(count);
