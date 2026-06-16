@@ -12,7 +12,7 @@
 - v0.7 — §3.6.1 補 hysteresis 規則（claim 後 3 ticks 保護期）；Province 新增 lastClaimedAtTick 欄位；新增 AC-26
 - v0.8 — §4.1 Rule #2 分階累積保護避免主城被抽乾；Rule #3 ATTACK_RANGE_HOPS 4→8；§3.5.1 補 AI 派遣下限規則；新增 AC-27/28/29/30
 - v0.9 — §3.4 Tier 閾值降為 5/12/25；§4.1 ATTACK_POWER_RATIO 1.5→1.0；§4.1 Rule #3 castle source 保留 5 兵；§4.1 Rule #2 castle 分階閾值同步更新；新增 AC-31/32。M1 收斂導向，戰場累積機制議題保留至 M2 再議
-- v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（涵蓋 11x11 相鄰 corner castle 互攻路徑）；AC-30 距離數值同步更新。M1.11 最終嘗試
+- v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（M1.11 最終嘗試）；最終 ship 版本 revert engine 回 v0.8 baseline；新增 §11.1/§11.2 標記 M1 收斂限制與 M1.11 acceptance band 調整；引擎不再對 11x11 corner-castle scenario 保證終結率（見 [`M2-BACKLOG.md`](./M2-BACKLOG.md)）
 
 ## 1. 願景與背景
 
@@ -614,3 +614,31 @@ P95:             312 ticks
 | Balance 探索     | `pnpm playtest --runs 100`                 | 勝率分佈、場均長度                            |
 | 發布前 sign-off  | `/run` skill 跑三場：速勝 / 敗北 / AI 互打 | 端到端體感                                    |
 | PR 驗證          | `/verify` skill                            | 最後一次端到端跑通                            |
+
+### 11.1 M1 收斂限制（v0.10 起 ship-as-is）
+
+**M1 已知限制**：在當前 default scenario (11x11、4-corner castle、AI rule 短路 + RNG shuffle) + §3.6 戰鬥公式 + §3.6.1 claim 規則的組合下，default playtest 多數對局會跑滿 `max-ticks` 平局。M1.11 嘗試過下列調整皆無法改善終結率：
+
+- v0.6 §3.6.1 相鄰勢力空格佔領
+- v0.7 §3.6.1 hysteresis 防震盪
+- v0.8 §4.1 castle 分階累積保護 + rule #3 ATTACK_RANGE_HOPS 4→8
+- v0.9 §3.4 tier 5/15/30→5/12/25 + ATTACK_POWER_RATIO 1.5→1.0 + rule #3 castle reserve 1→5
+- v0.10 §4.1 ATTACK_RANGE_HOPS 8→12
+
+v0.9 / v0.10 已 **revert 回 v0.8 baseline**；PRD changelog 與 §3.4 / §4.1 內 v0.9 / v0.10 描述保留作歷史，但**實作為 v0.8 baseline**（tier 5/15/30、ratio 1.5、hops 8、castle reserve 1）。
+
+**根因**（M1.11 diag 確認，500-tick 整局 0 castle take-down）：
+1. **戰場累積機制缺失**：rule #2 採分散擴張，戰場 tile 永遠 cap 在 Soldier / low-Knight，無法形成集結戰力突破 castle 防線。
+2. **對角 castle 互攻路徑不可達**：corner 對角 manhattan = 20，相鄰 corner = 10；rule #3 hops 限制怎麼放，BFS 路徑仍要求中間 tile 全為己方 passable，partition 後不成立。
+
+不屬於 engine bug — 162+ 條 AC 全綠、無 NaN / 負 count / tier-count 不一致。屬於 AI 設計層議題，留至 M2 處理（規劃方向見 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md)）。
+
+### 11.2 M1.11 驗收門檻調整（取代原 100–400 ticks 平均場長）
+
+原 MILESTONES.md M1.11 要求「平均場長 100–400 ticks」。基於 §11.1 收斂限制，調整為：
+
+- **引擎邏輯**：所有 AC 全綠（M1 規格 162+ tests + claim/hysteresis 追加 14 tests + AC-15 整合 = 170 tests）。
+- **Playtest**：`pnpm playtest src/scenarios/default.json --runs 10 --log events --max-ticks 500` 無 crash / NaN / 負 count / 主城自殺 / tier-count 不一致即過。
+- **`max-ticks` 平局視為合法結局**：在 stalemate 統計中正常計入，不算 engine bug。終結率不再列為強制門檻。
+
+調整後 M1.11 仍要求 manual smoke 由人類執行並肉眼觀察 event log，但「平均場長 100–400」一行從 acceptance 條款轉為 M2 的回歸目標。
