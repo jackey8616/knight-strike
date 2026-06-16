@@ -144,7 +144,10 @@ function printSummary(
   lengths.sort((a, b) => a - b);
 
   const total = results.length;
-  const pct = (n: number): string => ((n / total) * 100).toFixed(1) + "%";
+  // PRD §10.3 example shows integer percent ("24 (24%)") — match it. Rounding
+  // is fine for sample sizes >= 10; sub-1% precision isn't a goal of the
+  // summary view (the per-event log carries the detail).
+  const pct = (n: number): string => Math.round((n / total) * 100) + "%";
 
   stdout.write(`Scenario: ${scenario.name ?? "unnamed"}\n`);
   stdout.write(`Runs: ${total}\n`);
