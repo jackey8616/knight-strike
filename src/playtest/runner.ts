@@ -1,14 +1,25 @@
-import { dispatch, type DispatchRatio } from "@/engine/movement";
+import { stepAi } from "@/engine/ai";
+import { applyClaimPhase } from "@/engine/claim";
+import {
+  applyDrainDeductions,
+  resolveAdjacentCombat,
+  updateStalemates,
+} from "@/engine/combat";
+import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
+import { produce } from "@/engine/production";
 import { tileId } from "@/engine/state";
-import { step } from "@/engine/tick";
+import { deriveTier } from "@/engine/upgrade";
 import type {
   AiMode,
   FactionId,
   GameState,
+  MarchingStack,
+  PairKey,
   Province,
+  Tier,
   TileId,
 } from "@/engine/types";
-import { evaluateOutcome, NON_NEUTRAL_FACTIONS } from "@/engine/victory";
+import { applyDefeats, evaluateOutcome, NON_NEUTRAL_FACTIONS } from "@/engine/victory";
 
 export type ScenarioTile = {
   readonly x: number;
@@ -229,12 +240,82 @@ export type FactionSnapshot = {
   readonly marchingCount: number;
 };
 
+// PRD §10.3 detail-mode events — typed sub-events emitted alongside the
+// per-tick aggregate so log readers can grep for specific game transitions.
+// Type names match the verbs in PRD §10.3 "產兵 / 派遣 / 戰鬥 / 佔領 / 升級
+// / 敗北" plus march advance / arrival / stalemate counters for coverage.
+export type SubEvent =
+  | {
+      readonly type: "production";
+      readonly tile: TileId;
+      readonly faction: FactionId;
+      readonly count: number;
+    }
+  | {
+      readonly type: "ai_rule_fire";
+      readonly faction: FactionId;
+      readonly rule: 1 | 2 | 3;
+      readonly source: TileId;
+      readonly target: TileId;
+      readonly count: number;
+    }
+  | {
+      readonly type: "march_dispatch";
+      readonly stack: string;
+      readonly faction: FactionId;
+      readonly source: TileId;
+      readonly target: TileId;
+      readonly count: number;
+      readonly origin: "ai" | "scripted";
+    }
+  | {
+      readonly type: "march_arrival";
+      readonly stack: string;
+      readonly faction: FactionId;
+      readonly tile: TileId;
+      readonly count: number;
+    }
+  | {
+      readonly type: "combat";
+      readonly a: TileId;
+      readonly b: TileId;
+      readonly lossA: number;
+      readonly lossB: number;
+    }
+  | {
+      readonly type: "claim";
+      readonly tile: TileId;
+      readonly from: FactionId;
+      readonly to: FactionId;
+    }
+  | {
+      readonly type: "stalemate_inc";
+      readonly pair: PairKey;
+      readonly ticks: number;
+    }
+  | {
+      readonly type: "drain";
+      readonly tile: TileId;
+      readonly amount: number;
+    }
+  | {
+      readonly type: "tier_upgrade";
+      readonly tile: TileId;
+      readonly from: Tier;
+      readonly to: Tier;
+    }
+  | {
+      readonly type: "defeat";
+      readonly faction: FactionId;
+    };
+
 export type TickEvent = {
   readonly tick: number;
   readonly factions: readonly FactionSnapshot[];
   readonly newlyDefeated: readonly FactionId[];
   readonly scriptedDispatched: number;
   readonly scriptedRejected: number;
+  readonly events: readonly SubEvent[];
 };
 
 export type RunOptions = {
@@ -280,6 +361,177 @@ function snapshotFactions(state: GameState): FactionSnapshot[] {
   return out;
 }
 
+// Classify a freshly-introduced marching stack by inspecting its source and
+// terminus characteristics. AI rule order is defense (#1) → expand (#2) →
+// attack (#3); since each evaluation fires at most one rule per faction per
+// tick, target tile type uniquely identifies it.
+function classifyAiFire(
+  before: GameState,
+  stack: MarchingStack,
+): { readonly rule: 1 | 2 | 3 } | null {
+  const target = before.provinces.get(stack.path[stack.path.length - 1] as TileId);
+  if (target === undefined) return null;
+  if (target.isCastle && target.owner === stack.faction) return { rule: 1 };
+  if (target.isCastle) return { rule: 3 };
+  if (target.count === 0 && target.owner !== stack.faction) return { rule: 2 };
+  return null;
+}
+
+// New stacks introduced between two states keyed by stack id (path-stable).
+function diffNewStacks(
+  before: GameState,
+  after: GameState,
+): MarchingStack[] {
+  const known = new Set<string>();
+  for (const s of before.marchingStacks) known.add(s.id);
+  const out: MarchingStack[] = [];
+  for (const s of after.marchingStacks) if (!known.has(s.id)) out.push(s);
+  return out;
+}
+
+// Replicates engine/tick.step() while collecting sub-events between phases.
+// Engine purity preserved (step() in tick.ts unchanged); diffs derived here.
+function stepWithEvents(state: GameState): {
+  readonly state: GameState;
+  readonly events: readonly SubEvent[];
+} {
+  const events: SubEvent[] = [];
+  const preTier = new Map<TileId, Tier>();
+  for (const p of state.provinces.values()) preTier.set(p.id, deriveTier(p.count));
+
+  // §3.2 step 1 part A: AI evaluation (introduces new marching stacks).
+  const beforeAi = state;
+  let s = stepAi(beforeAi);
+  for (const stk of diffNewStacks(beforeAi, s)) {
+    const cls = classifyAiFire(beforeAi, stk);
+    const source = stk.path[0] as TileId;
+    const target = stk.path[stk.path.length - 1] as TileId;
+    if (cls !== null) {
+      events.push({
+        type: "ai_rule_fire",
+        faction: stk.faction,
+        rule: cls.rule,
+        source,
+        target,
+        count: stk.count,
+      });
+    }
+    events.push({
+      type: "march_dispatch",
+      stack: stk.id,
+      faction: stk.faction,
+      source,
+      target,
+      count: stk.count,
+      origin: "ai",
+    });
+  }
+
+  // §3.2 step 1 part B: advance + arrivals.
+  const beforeMove = s;
+  s = advanceMarching(s);
+  const afterMoveIds = new Set(s.marchingStacks.map((m) => m.id));
+  for (const stk of beforeMove.marchingStacks) {
+    if (afterMoveIds.has(stk.id)) continue;
+    // Arrived (consumed by terminus / merged / lost to combat). Best guess
+    // terminus is the path's last tile; that's right for non-collision
+    // arrivals and good-enough for the log otherwise.
+    const term = stk.path[stk.path.length - 1] as TileId;
+    events.push({
+      type: "march_arrival",
+      stack: stk.id,
+      faction: stk.faction,
+      tile: term,
+      count: stk.count,
+    });
+  }
+
+  // §3.2 step 2: combat damage per adjacent pair.
+  const cr = resolveAdjacentCombat(s);
+  s = cr.state;
+  for (const p of cr.pairs) {
+    if (p.lossA === 0 && p.lossB === 0) continue;
+    events.push({
+      type: "combat",
+      a: p.a,
+      b: p.b,
+      lossA: p.lossA,
+      lossB: p.lossB,
+    });
+  }
+
+  // §3.7: stalemate counter + drain.
+  const beforeStaleMap = s.stalemates;
+  const su = updateStalemates(beforeStaleMap, cr.pairs);
+  for (const [key, ticks] of su.nextMap) {
+    if (ticks > (beforeStaleMap.get(key) ?? 0)) {
+      events.push({ type: "stalemate_inc", pair: key, ticks });
+    }
+  }
+  for (const [tile, amount] of su.drainDeductions) {
+    events.push({ type: "drain", tile, amount });
+  }
+  s = applyDrainDeductions({ ...s, stalemates: su.nextMap }, su.drainDeductions);
+
+  // §3.2 step 3b: adjacent-empty claim ownership flips.
+  const beforeClaim = s;
+  s = applyClaimPhase(s);
+  if (s.provinces !== beforeClaim.provinces) {
+    for (const after of s.provinces.values()) {
+      const prev = beforeClaim.provinces.get(after.id);
+      if (prev === undefined) continue;
+      if (prev.owner !== after.owner) {
+        events.push({
+          type: "claim",
+          tile: after.id,
+          from: prev.owner,
+          to: after.owner,
+        });
+      }
+    }
+  }
+
+  // §3.2 step 3c: defeats.
+  const beforeDefeats = s.defeated;
+  s = applyDefeats(s);
+  for (const f of s.defeated) {
+    if (!beforeDefeats.has(f)) events.push({ type: "defeat", faction: f });
+  }
+
+  // §3.2 step 4: production. Castle counts that ticked up by ≥ 1 against
+  // the immediately-preceding state are productions.
+  const beforeProd = s;
+  s = produce(s);
+  for (const after of s.provinces.values()) {
+    if (!after.isCastle) continue;
+    if (after.owner === "NEUTRAL") continue;
+    const prev = beforeProd.provinces.get(after.id);
+    if (prev === undefined) continue;
+    if (after.count > prev.count) {
+      events.push({
+        type: "production",
+        tile: after.id,
+        faction: after.owner,
+        count: after.count,
+      });
+    }
+  }
+
+  // §3.2 step 5: tier upgrade — derived from any province whose tier flipped
+  // across the whole step. Combat-induced downgrades are emitted too so
+  // readers see when a stack drops below a threshold.
+  for (const after of s.provinces.values()) {
+    const prev = preTier.get(after.id);
+    if (prev === undefined) continue;
+    const curr = deriveTier(after.count);
+    if (prev !== curr) {
+      events.push({ type: "tier_upgrade", tile: after.id, from: prev, to: curr });
+    }
+  }
+
+  return { state: { ...s, tick: s.tick + 1 }, events };
+}
+
 export function runScenario(
   scenario: ScenarioInput,
   options: RunOptions,
@@ -300,6 +552,7 @@ export function runScenario(
   while (state.tick < options.maxTicks) {
     let scriptedDispatched = 0;
     let scriptedRejected = 0;
+    const scriptedEvents: SubEvent[] = [];
     const cmds = scriptedByTick.get(state.tick);
     if (cmds !== undefined) {
       for (const cmd of cmds) {
@@ -311,6 +564,17 @@ export function runScenario(
         if (result.ok) {
           state = result.state;
           scriptedDispatched += 1;
+          if (emit) {
+            scriptedEvents.push({
+              type: "march_dispatch",
+              stack: result.stack.id,
+              faction: result.stack.faction,
+              source: result.stack.path[0] as TileId,
+              target: result.stack.path[result.stack.path.length - 1] as TileId,
+              count: result.stack.count,
+              origin: "scripted",
+            });
+          }
         } else {
           scriptedRejected += 1;
         }
@@ -318,7 +582,8 @@ export function runScenario(
     }
 
     const prevDefeated = state.defeated;
-    state = step(state);
+    const stepped = stepWithEvents(state);
+    state = stepped.state;
 
     if (emit) {
       const newlyDefeated: FactionId[] = [];
@@ -333,6 +598,7 @@ export function runScenario(
         newlyDefeated,
         scriptedDispatched,
         scriptedRejected,
+        events: [...scriptedEvents, ...stepped.events],
       });
     }
 
