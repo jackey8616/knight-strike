@@ -163,22 +163,29 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 
 ---
 
-## M2 — 渲染、輸入、UI（可手動對局）
+## M2 — 渲染、輸入、UI + P0 收斂機制（可手動對局）
 
-**目標**：`pnpm dev` 開瀏覽器，能用滑鼠手動打完一場速勝。
+**目標**：`pnpm dev` 開瀏覽器，能用滑鼠手動打完一場速勝；AI vs AI spectator 對局能在 500 ticks 內穩定收斂。
 
-**涵蓋 PRD**：§5、§9.2、§9.3、§9.4
-**涵蓋 AC**：AC-01、AC-06、AC-07、AC-09、AC-11、AC-12、AC-13、AC-14（+ AC-16 UI 端整合驗證）
+**涵蓋 PRD**：§5、§9.2、§9.3、§9.4、**§3.5.5、§3.5.6、§4.1 rule #2.5、§11.1 v0.11 解法、§11.2 v0.11 update**
+**涵蓋 AC**：AC-01、AC-06、AC-07、AC-09、AC-11、AC-12、AC-13、AC-14、**AC-33、AC-34、AC-35**（+ AC-16 UI 端整合驗證）
 **退出條件**：
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test:run && \
-pnpm build
+pnpm build && \
+pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed 42
 ```
 
-加上 `pnpm dev` 後人類在瀏覽器內完成一場「玩家主動速勝」對局；engine 層此階段不大改（小於 50 行 diff、不動公式）。
+前四條全綠 + spectator 100-run 滿足三條 v0.11 acceptance（PRD §11.2 v0.11 update）：
 
-**Turn 上限**：50
+- **結束率 ≥ 50%**（至少 50 場非 stalemate 終止）
+- **任一勢力勝率 ≤ 50%**（無單勢力壓倒性偏袒）
+- **平均場長 ≤ 400 ticks**（保留「12–20 分鐘對局」願景）
+
+加上 `pnpm dev` 後人類在瀏覽器內完成一場「玩家主動速勝」對局。engine 層 P0 收斂機制（M2.2.6–M2.2.8）為 v0.11 新增規格，**動公式 / 動規則**；除此以外 M2 階段 engine 不大改（< 50 行 diff）。
+
+**Turn 上限**：60（含 M2.2.6/.7/.8 三個子 task）
 
 ### M2.0 — Pixi `Application` + 入口
 
@@ -236,6 +243,50 @@ pnpm build
 5. claim phase 觸發時，視覺上有沒有「格子瞬間易主但無單位移動」的奇怪感？
 
 觀察結果不在這個 task 處理，但會影響後續 M2 task 順序與 BACKLOG 優先級。
+
+### M2.2.6 — Castle 溢出 + AI Rule #2.5 集結（v0.11 P0 主力）
+
+- **檔案**：
+  - `src/engine/overflow.ts`（新）+ `src/engine/overflow.test.ts`
+  - `src/engine/ai.ts`（加 rule #2.5 集結，順序：威脅 → 擴張 → 集結 → 進攻 → 囤兵）+ `src/engine/ai.test.ts` 新增 case
+  - `src/engine/tick.ts`（加 castle overflow phase；step order 對齊 PRD §3.2 v0.11）+ `src/engine/tick.test.ts` 更新
+- **對應 PRD**：§3.2 step order v0.11、§3.5.5、§4.1 rule #2.5、§4.3 evalOffset 註
+- **對應 AC**：AC-33、AC-34
+- **依賴**：M1.6、M1.8、M1.9、M2.2.5
+- **完成定義**：
+  - 純函數 `castleOverflow(state) → { newMarchingStacks, castleCountChanges }`，無 mutation
+  - `CASTLE_OVERFLOW_THRESHOLD = 30` 常數匯出
+  - Rule #2.5 走同套 §4.3 evalOffset、anchor 選擇 + RNG tiebreak 確定性
+  - AC-33 / AC-34 vitest 綠（`it("[AC-33] ...")`、`it("[AC-34] ...")`）
+  - Spectator 觀察（人工跑 `pnpm dev`）：戰場 tile median count 上升至 ≥ 3、最高 power 至少觸及 Queen tier（≥ 60）
+
+### M2.2.7 — Castle vs castle BFS hops 例外
+
+- **檔案**：
+  - `src/engine/movement.ts`（BFS attack range 條件加例外分支）+ `src/engine/movement.test.ts` 新增 case
+  - `src/engine/ai.ts`（rule #3 條件描述更新，呼叫 movement 的新 hop 例外路徑）+ test 補
+- **對應 PRD**：§3.5.6、§4.1 rule #3 v0.11 例外註
+- **對應 AC**：AC-35
+- **依賴**：M2.2.6
+- **完成定義**：
+  - BFS API 加 `{ allowUnlimitedHops: boolean }` 選項（or 等價設計）；source castle && target castle 時開啟
+  - 其他條件全保留（passable / power ratio / castle reserve）
+  - AC-35 vitest 綠
+  - Spectator 觀察 100 ticks AI rule #3 fire 次數 > 0（M1.11 為 0）
+
+### M2.2.8 — Spectator 100-run 收斂回歸（v0.11 acceptance gate）
+
+- **檔案**：無新檔；PR comment 報告 + `src/scenarios/spectator-4ai.json` 若有調參記錄
+- **對應 PRD**：§11.2 v0.11 update（M2 退出條件）
+- **依賴**：M2.2.6、M2.2.7
+- **完成定義**：
+  - `pnpm playtest src/scenarios/spectator-4ai.json --runs 100 --max-ticks 500 --seed 42` 跑完無 crash
+  - **結束率 ≥ 50%**（≥ 50 場非 stalemate）
+  - **任一勢力勝率 ≤ 50%**
+  - **平均場長 ≤ 400 ticks**
+  - 三條皆過 → M2 退出條件達標、可進 M2.3 marching 動畫
+  - 未過 → 回頭 M2.2.6 / M2.2.7 調參（**只動實作層常數**：`CASTLE_OVERFLOW_THRESHOLD` 起始 30、overflow `max(2, ...)` 起始 2、anchor 選擇 tiebreak；**不動 PRD §3.5.5 / §3.5.6 / §4.1 rule #2.5 規格文字**，屬實作層調參，PRD 規格穩定）
+- 補跑 seed 7 / 99 各一次確認非單一 seed 巧合
 
 ### M2.3 — Marching stack 動畫 + 拖曳路徑虛線
 
@@ -440,3 +491,6 @@ pnpm build
 | AC-30  | ✅  |     |     |     |
 | AC-31  | ✅  |     |     |     |
 | AC-32  | ✅  |     |     |     |
+| AC-33  |     | ✅  |     |     |
+| AC-34  |     | ✅  |     |     |
+| AC-35  |     | ✅  |     |     |

@@ -1,6 +1,6 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v0.10
+**Version**: v0.11
 **Status**: Draft（pre-implementation）
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
@@ -13,6 +13,7 @@
 - v0.8 — §4.1 Rule #2 分階累積保護避免主城被抽乾；Rule #3 ATTACK_RANGE_HOPS 4→8；§3.5.1 補 AI 派遣下限規則；新增 AC-27/28/29/30
 - v0.9 — §3.4 Tier 閾值降為 5/12/25；§4.1 ATTACK_POWER_RATIO 1.5→1.0；§4.1 Rule #3 castle source 保留 5 兵；§4.1 Rule #2 castle 分階閾值同步更新；新增 AC-31/32。M1 收斂導向，戰場累積機制議題保留至 M2 再議
 - v0.10 — §4.1 ATTACK_RANGE_HOPS 8→12（M1.11 最終嘗試）；最終 ship 版本 revert engine 回 v0.8 baseline；新增 §11.1/§11.2 標記 M1 收斂限制與 M1.11 acceptance band 調整；引擎不再對 11x11 corner-castle scenario 保證終結率（見 [`M2-BACKLOG.md`](./M2-BACKLOG.md)）
+- v0.11 — §3.5.5 新增 Castle 自動溢出規則（`CASTLE_OVERFLOW_THRESHOLD = 30`）；§3.5.6 新增 Castle vs castle BFS hops 例外；§4.1 新增 Rule #2.5 集結（順序：威脅 → 擴張 → 集結 → 進攻 → 囤兵）；§3.2 step order 加 `castle overflow` phase（produce 之後、upgrade 之前）；新增 AC-33/34/35；§11.1 補 v0.11 解法；§11.2 把「平均場長 100–400 ticks + 結束率 ≥ 50% + 任一勢力勝率 ≤ 50%」重啟為 M2 退出條件。M2 P0 收斂導向（[`docs/M2-BACKLOG.md`](./M2-BACKLOG.md) P0、[`docs/MILESTONES.md`](./MILESTONES.md) M2.2.6–M2.2.8）
 
 ## 1. 願景與背景
 
@@ -72,7 +73,7 @@
   5. 升級判定（count 跨過閾值即時推導 tier）
   6. 勝負判定
 
-> 完整 step order：`movement → combat → drain (§3.7) → claim (3a 行軍抵達 + 3b §3.6.1) → defeats → produce → upgrade → victory`。claim phase 在 drain 之後：drain 剛清空的格在同 tick 內就能被相鄰勢力 claim，避免下一 tick 才反應的延遲感。
+> 完整 step order（v0.11）：`movement → combat → drain (§3.7) → claim (3a 行軍抵達 + 3b §3.6.1) → defeats → produce → castle overflow (§3.5.5) → upgrade → victory`。claim phase 在 drain 之後：drain 剛清空的格在同 tick 內就能被相鄰勢力 claim，避免下一 tick 才反應的延遲感。Castle overflow 在 produce 之後、upgrade 之前：剛產的兵若讓主城超過 `CASTLE_OVERFLOW_THRESHOLD`，同 tick 內就能溢出；tier 由 count 即時推導，overflow 後 count 是即時的，upgrade phase 仍能正確反映。
 
 ### 3.3 城堡與產兵
 
@@ -164,6 +165,36 @@
 6. **路徑經過格被敵方臨時切入（敵方剛佔下中間格）**：marching stack 停在前一格（`idx` 不再前進），下 tick 從相鄰格觸發 §3.6 戰鬥；不自動繞路（MVP 簡化，列入 future scope）。
 
 > 規則設計原則：所有同 tick 事件先計算「將發生什麼」（dry-run），再同步寫回，避免順序依賴造成 bug。
+
+#### 3.5.5 Castle 自動溢出（v0.11）
+
+每 tick 在 produce phase 之後、upgrade phase 之前，對每個己方 castle 執行自動溢出判定。**屬 engine 規則，非 AI 決策**；不在 §4.1 短路評估鏈內，不受 §4.3 評估錯開影響（每 tick 對每個 castle 評估）。
+
+- **觸發條件**：`castle.count > CASTLE_OVERFLOW_THRESHOLD`（= **30**，對齊 King tier 入口）
+- **溢出量**：`overflow = min(2, castle.count - 30)`，即每 tick 最多向外推 2 兵
+- **目標選擇**（BFS 距離最近優先，距離相同用 §4.2 同套 RNG `seed + tick + castle.id` 派生 tiebreak）：
+  1. **Frontline 己方 tile**：tile 為己方、相鄰至少 1 格非己方（敵方或 NEUTRAL 皆算；NEUTRAL `count = 0` 空格也算「非己方」）
+  2. 若無 frontline → 最近「非己方相鄰」的己方 tile（castle 自身排除）
+  3. 若仍無 → 跳過該 castle 本 tick 溢出
+- **動作**：產生標準 marching stack（§3.5.3），`source = castle.id`、`count = overflow`、`faction = castle.owner`、`path = BFS(castle, target)`、`idx = 0`、`dispatchedAtTick = currentTick`。從 castle 扣除對應 count。
+- **路徑**：BFS passable 規則同 §3.5.2（己方 + 空無主格）。Frontline 本身為己方 → 抵達後走 §3.5.4 #1（同勢力合併）。
+- **與 §4.1 rule #2 / #3 的關係**：
+  - Rule #2（擴張）：castle.count 對應 King 階時 50% 派出，與 overflow 觸發條件互斥前可同時 fire（rule #2 在 AI evaluate phase 派、overflow 在 castle overflow phase 派），兩條 marching stack 各自獨立。
+  - Rule #3（進攻）：rule #3 派遣量 = `count - 5`，若 fire 後 castle.count 跌至 ≤ 30 則 overflow 不觸發；若仍 > 30 則同 tick 兩條 marching 並行。
+
+**設計理由**：M1.11 diag 確認戰場 tile cap 在 Soldier–low-Knight 是因為「castle 為唯一兵源、產能未過剩前不會主動向前線輸送」。Overflow 把「主城兵滿即自動推進」變成 engine 層保證，給戰場累積一個結構性的兵源管道，不依賴 AI 評估節奏。
+
+#### 3.5.6 Castle vs castle BFS 例外（v0.11）
+
+§4.1 rule #3（進攻）使用 BFS 路徑，預設受 `ATTACK_RANGE_HOPS` 上限限制。**例外**：當 source 為己方 castle 且 target 為敵方 castle 時，hops 上限**不適用**，BFS 距離可為任意值。
+
+- 其他條件**保留**：
+  - 路徑中間格須 §3.5.2 passable（己方 + 空無主格）
+  - Target 為敵方 castle 終點
+  - 戰力差條件 `source.power ≥ target.power × ATTACK_POWER_RATIO`
+  - §3.5.1 主城 reserve = 5（派遣量 = `castle.count - 5`，若 ≤ 0 不 fire）
+
+**設計理由**：corner-castle scenario 中對角 castle 互攻最短路徑 ≥ 20 hops、相鄰 corner ≥ 10 hops，硬編 `ATTACK_RANGE_HOPS = 8` 永遠不滿足。M1.11 v0.10 嘗試放寬至 12 仍無解（partition 後路徑己方 passable 條件不成立）。本例外給「集結成功 → 戰線推到敵 castle 旁 → 一波決勝」一條贏路；要求路徑全己方 passable 確保不是「無中生有的長程進攻」，仍受戰場累積進度約束。
 
 ### 3.6 戰鬥公式（初稿，playtest 微調）
 
@@ -334,6 +365,15 @@ function updateStalemates(
 
    設計意圖：避免主城被 rule #2 永久鎖在 Knight 入口閾值。分階保護讓主城邊升級邊溢出，而非整段累積期完全靜默。King tier (≥ 30) 後完全解除限制，模擬「兵力溢滿」的戰略中樞。
 
+2.5. **集結（rally，v0.11）**：把分散的非主城兵向前線 anchor 流，配合 §3.5.5 castle overflow 形成「主城 → 前線 anchor」的累積管道。
+
+   - **候選 anchor**：所有「非主城、frontline 己方 tile」（frontline 定義同 §3.5.5：自己己方、相鄰至少 1 格非己方；NEUTRAL 空格亦算非己方）。
+   - **Anchor 選擇**：候選中 count 最大者；tie 用 §4.2 同套 RNG（`rngSeed + factionId + tick` 派生）shuffle 後取首。若無候選 → rule #2.5 不 fire，繼續評估 rule #3。
+   - **動作**：anchor 的相鄰己方 tile（**主城本身不參與集結**，以保留 §4.1 rule #2 castle 分階保護的純度；非主城相鄰己方皆派）各派 50% 兵向 anchor 行軍；source 至少留 1 兵（與 §3.5.1 AI rule #3 非主城 reserve = 1 一致）。
+   - **派遣量**：每個 source 派 `min(floor(source.count * 0.5), source.count - 1)` 兵；若 ≤ 0 該 source 跳過。所有合格 source 一次性產生 marching stack（不互相阻擋）。
+
+   設計意圖：rule #2 的擴張只把 castle 兵分散派去佔鄰格、單一 tile 無法累積；rule #2.5 把分散的非主城兵「向 anchor 流」，讓戰場兵在合理時間內升到 Knight / Queen tier。anchor 限定 frontline 確保集結方向有戰術意義（兵集中到前線、不是後方）；anchor 限定非主城避免與 castle overflow 的「主城向外推」方向衝突。
+
 3. **進攻**：若任一己方格能在 `≤ ATTACK_RANGE_HOPS` 格內到達敵方主城且戰力差有利（**己方 power**（即 `tilePower(source.count)`，使用 source 全 count 計算）` ≥ 敵方主城 power × `ATTACK_POWER_RATIO`），派 100% 進攻（受 §3.5.1 AI rule #3 派遣下限保護）。派遣量 = `source.count - reserve`，其中 reserve：
 
    - 非主城 source：reserve = 1
@@ -342,6 +382,8 @@ function updateStalemates(
    若派遣量 ≤ 0，rule #3 不 fire。
 
    常數：`ATTACK_RANGE_HOPS = 12`（v0.8 為 4，v0.9 為 8，v0.10 進一步放寬以涵蓋 11x11 相鄰 corner castle 互攻最短路徑 10 hops）；`ATTACK_POWER_RATIO = 1.0`（v0.8 為 1.5，v0.9 放寬）。
+
+   **§3.5.6 例外（v0.11）**：source 為己方 castle 且 target 為敵方 castle 時 hops 上限不適用；BFS 距離可為任意值，其他條件（路徑全己方 passable、戰力差、castle reserve）皆保留。
 
    設計意圖：
    - `ATTACK_RANGE_HOPS = 12`：v0.8 設 4、v0.9 設 8 仍不夠 — 11x11 corner 對角 manhattan = 20、相鄰 corner = 10，castle 為 source 到敵 castle 最短路徑 ≥ 10 hops。提升至 12 涵蓋相鄰 corner 對戰（10 hops 路徑），保留對角戰（20 hops）走 frontier 累積路線。
@@ -363,6 +405,8 @@ function updateStalemates(
 ### 4.3 評估間隔錯開
 
 四家 AI（含玩家若 AFK）各自獨立 5-tick 評估週期，但**起始 tick 偏移**錯開：Tokugawa tick 1、Takeda tick 2、Oda tick 3、Uesugi tick 4 開始評估，後續每 5 ticks 一次。避免同一 tick 大量 AI 同時下令造成 lag spike。
+
+§4.1 所有規則（含 v0.11 新增的 rule #2.5 集結）皆走同套 evalOffset：rule #1/#2/#2.5/#3/#4 在同一次評估內依序短路檢查、第一條觸發即退出本次評估。§3.5.5 castle overflow **不在此節奏內**（屬 engine 規則，每 tick 對每個 castle 評估，見 §3.5.5）。
 
 三家 AI 行為相同；難度差異留待 future scope。
 
@@ -461,6 +505,9 @@ function updateStalemates(
 | AC-30 | Rule #3 距離仍受限：source 到敵方主城最短路徑 = 13 hops (> 12) → rule #3 不 fire                                                | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
 | AC-31 | Rule #3 castle source 保留 5 兵：TOKUGAWA 主城 (0,0) count=14 (Queen, power 168)、TAKEDA 主城 (10,0) count=12 (Queen, power 144)、路徑 ≤ 8 hops、power ratio 1.0 滿足 → 派遣量 = 14 − 5 = 9，TOKUGAWA castle 保留 5（Knight） | Headless：stepAi 後斷言 marching stack count=9、source count=5、path 終點 = TAKEDA 主城                          |
 | AC-32 | Rule #3 派遣量 ≤ 0 時不 fire：TOKUGAWA 主城 count=5 (Knight, power 20)、TAKEDA 主城 count=5 (Knight, power 20)、ratio 1.0、hops 滿足 → 派遣量 = 5 − 5 = 0，跳過，rule #3 不 fire | Headless：stepAi 後斷言 marchingStacks 為空                                                                       |
+| AC-33 | §3.5.5 Castle 溢出：TOKUGAWA castle (0,0) count=32 (King)、相鄰 (1,0) 己方 frontline tile count=1（相鄰至少 1 格非己方） → 1 tick castle overflow phase 後產生 marching stack count=`min(2, 32-30)`=2、castle count=30；若 castle count=30（**不**> 30）→ 不觸發 | Headless：兩場景分別 stepCastleOverflow，斷言觸發/不觸發、castle count 與 marching stack 完全符 |
+| AC-34 | §4.1 Rule #2.5 集結 anchor 選擇：TOKUGAWA 非主城 frontline A count=8 (Knight)、B count=5 (Knight)，A 相鄰己方非主城 tile S1 count=4、S2 count=6 → rule #2.5 fire，anchor = A（count 較大），S1 派 `min(floor(4*0.5), 4-1)=2` 兵、S2 派 `min(floor(6*0.5), 6-1)=3` 兵向 A | Headless：stepAi 後斷言 marching stack 終點 = A、count 精確                            |
+| AC-35 | §3.5.6 Castle vs castle BFS hops 例外：TOKUGAWA 主城 (0,0) count=30 (King, power 900)、TAKEDA 主城 (10,10) count=3 (Soldier, power 3)、路徑全己方 passable 但 hops = 15 (> `ATTACK_RANGE_HOPS = 8`) → rule #3 fire，派遣量 = 30 − 5 = 25；若路徑中間有非己方非 castle tile（中斷 passable） → rule #3 不 fire | Headless：兩場景分別 stepAi 斷言 fire / 不 fire                                       |
 
 ## 8. 範圍外（Future Scope）
 
@@ -633,6 +680,14 @@ v0.9 / v0.10 已 **revert 回 v0.8 baseline**；PRD changelog 與 §3.4 / §4.1 
 
 不屬於 engine bug — 162+ 條 AC 全綠、無 NaN / 負 count / tier-count 不一致。屬於 AI 設計層議題，留至 M2 處理（規劃方向見 [`docs/M2-BACKLOG.md`](./M2-BACKLOG.md)）。
 
+**v0.11 解法（M2.2.6–M2.2.8）**：
+
+1. **§3.5.5 Castle 自動溢出**（engine 規則）：`castle.count > 30` 每 tick 推 1–2 兵到最近 frontline，給戰場累積建立「主城溢出 → 前線」的兵源管道，解根因 1。
+2. **§4.1 Rule #2.5 集結**（AI 規則）：把分散的非主城兵向 frontline anchor 流，配合 castle overflow 形成「主城 → 前線 anchor」的累積閉環。
+3. **§3.5.6 Castle vs castle BFS 例外**（engine 規則）：source castle → target castle 移除 hops 上限（路徑全己方 passable 仍要求），解根因 2 在「集結成功推到 castle 旁」之後仍卡 hops 不足的問題。
+
+v0.11 acceptance：spectator 100-run 結束率 ≥ 50%、任一勢力勝率 ≤ 50%、平均場長 ≤ 400 ticks（見 [`docs/MILESTONES.md`](./MILESTONES.md) M2 退出條件與 M2.2.8 回歸 task）。
+
 ### 11.2 M1.11 驗收門檻調整（取代原 100–400 ticks 平均場長）
 
 原 MILESTONES.md M1.11 要求「平均場長 100–400 ticks」。基於 §11.1 收斂限制，調整為：
@@ -642,3 +697,11 @@ v0.9 / v0.10 已 **revert 回 v0.8 baseline**；PRD changelog 與 §3.4 / §4.1 
 - **`max-ticks` 平局視為合法結局**：在 stalemate 統計中正常計入，不算 engine bug。終結率不再列為強制門檻。
 
 調整後 M1.11 仍要求 manual smoke 由人類執行並肉眼觀察 event log，但「平均場長 100–400」一行從 acceptance 條款轉為 M2 的回歸目標。
+
+**v0.11 update（M2.2.6–M2.2.8 完工後）**：M2 退出條件重啟以下三條為硬門檻（取代 v0.10 「不在 acceptance 內」狀態）：
+
+- **結束率 ≥ 50%**：`pnpm playtest src/scenarios/default.json --runs 100 --max-ticks 500` 至少 50 場非 stalemate 終止
+- **任一勢力勝率 ≤ 50%**：避免單一勢力被新規則過度偏袒
+- **平均場長 ≤ 400 ticks**：保留「12–20 分鐘對局」的願景門檻（PRD §1）
+
+未過 → 回頭調 §3.5.5 / §4.1 rule #2.5 / §3.5.6 參數，但 PRD 文字不動（屬實作層調參，不改規格）。
