@@ -24,7 +24,7 @@ export type MarchingStack = {
   readonly dispatchedAtTick: number;
 };
 
-export type StalemateMap = ReadonlyMap<PairKey, number>;
+export type EngagementMap = ReadonlyMap<PairKey, number>;
 
 export type RuleTier = "easy" | "normal" | "hard";
 
@@ -52,7 +52,7 @@ export type GameState = {
   readonly tick: number;
   readonly provinces: ReadonlyMap<TileId, Province>;
   readonly marchingStacks: readonly MarchingStack[];
-  readonly stalemates: StalemateMap;
+  readonly engagements: EngagementMap;
   readonly aiConfig: Readonly<Record<FactionId, AiMode>>;
   readonly defeated: ReadonlySet<FactionId>;
   readonly rngSeed: number;

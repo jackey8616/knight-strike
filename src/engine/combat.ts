@@ -1,37 +1,18 @@
 import { pairKey, tileId } from "./state";
-import { deriveTier } from "./upgrade";
-import type {
-  GameState,
-  PairKey,
-  Province,
-  StalemateMap,
-  Tier,
-  TileId,
-} from "./types";
+import type { GameState, PairKey, Province, TileId } from "./types";
 
-export const POWER_PER_TIER: Readonly<Record<Tier, number>> = {
-  SOLDIER: 1,
-  KNIGHT: 4,
-  QUEEN: 12,
-  KING: 30,
-};
-
-export function tilePower(count: number): number {
-  if (count <= 0) return 0;
-  return count * POWER_PER_TIER[deriveTier(count)];
-}
-
-export function computeLoss(ownPower: number, oppPower: number): number {
-  // PRD §3.6: loss = max(0, floor((opp_power - own_power / 4) / 4)).
-  // own_power / 4 is real division (the 2.5 in the worked example), not floor-div.
-  return Math.max(0, Math.floor((oppPower - ownPower / 4) / 4));
+// PRD §3.6 (v1.1): per-pair ramp damage, count-only. damage at `engagementTicks
+// = 0` is 0 (the visual "encounter" tick); subsequent ticks deal 2^(n-1) each.
+export function pairDamage(engagementTicks: number): number {
+  if (engagementTicks <= 0) return 0;
+  return 2 ** (engagementTicks - 1);
 }
 
 export type CombatPair = {
   readonly a: TileId;
   readonly b: TileId;
-  readonly lossA: number;
-  readonly lossB: number;
+  readonly damage: number;
+  readonly engagementTicks: number;
 };
 
 export type CombatResult = {
@@ -39,6 +20,8 @@ export type CombatResult = {
   readonly pairs: readonly CombatPair[];
 };
 
+// 4-conn iteration uses only the (+x, +y) cardinals so each unordered pair is
+// visited exactly once.
 const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
   [1, 0],
   [0, 1],
@@ -50,77 +33,57 @@ export function resolveAdjacentCombat(state: GameState): CombatResult {
 
   for (const [id, p] of state.provinces) {
     if (p.count <= 0) continue;
-    const powerA = tilePower(p.count);
     for (const [dx, dy] of NEIGHBOR_OFFSETS) {
       const nid = tileId(p.x + dx, p.y + dy);
       const np = state.provinces.get(nid);
       if (np === undefined) continue;
       if (np.owner === p.owner) continue;
       if (np.count <= 0) continue;
-      const powerB = tilePower(np.count);
-      const lossA = computeLoss(powerA, powerB);
-      const lossB = computeLoss(powerB, powerA);
-      // Order pair key by TileId so the downstream stalemate counter (M1.5) gets
-      // a stable identity regardless of iteration order.
-      const [a, b, la, lb] = id < nid ? [id, nid, lossA, lossB] : [nid, id, lossB, lossA];
-      pairs.push({ a, b, lossA: la, lossB: lb });
-      if (lossA > 0) lossPerTile.set(id, (lossPerTile.get(id) ?? 0) + lossA);
-      if (lossB > 0) lossPerTile.set(nid, (lossPerTile.get(nid) ?? 0) + lossB);
+      const [a, b] = id < nid ? [id, nid] : [nid, id];
+      const key = pairKey(a, b);
+      const prev = state.engagements.get(key) ?? 0;
+      const damage = pairDamage(prev);
+      pairs.push({ a, b, damage, engagementTicks: prev });
+      if (damage > 0) {
+        lossPerTile.set(id, (lossPerTile.get(id) ?? 0) + damage);
+        lossPerTile.set(nid, (lossPerTile.get(nid) ?? 0) + damage);
+      }
     }
   }
 
-  if (pairs.length === 0) return { state, pairs: [] };
-  if (lossPerTile.size === 0) return { state, pairs };
-
-  const next = new Map<TileId, Province>(state.provinces);
-  for (const [id, loss] of lossPerTile) {
-    const p = next.get(id);
-    if (p === undefined) continue;
-    next.set(id, { ...p, count: Math.max(0, p.count - loss) });
+  if (pairs.length === 0) {
+    if (state.engagements.size === 0) return { state, pairs: [] };
+    // All previously-engaged pairs dissolved this tick — drop counter map.
+    return { state: { ...state, engagements: new Map() }, pairs: [] };
   }
 
-  return { state: { ...state, provinces: next }, pairs };
-}
-
-export const STALEMATE_DRAIN_THRESHOLD = 5;
-
-export type StalemateUpdate = {
-  readonly nextMap: StalemateMap;
-  readonly drainDeductions: ReadonlyMap<TileId, number>;
-};
-
-export function updateStalemates(
-  prev: StalemateMap,
-  combatPairs: readonly CombatPair[],
-): StalemateUpdate {
-  const nextMap = new Map<PairKey, number>();
-  const drain = new Map<TileId, number>();
-  for (const { a, b, lossA, lossB } of combatPairs) {
-    const key = pairKey(a, b);
-    // PRD §3.7.1: counter only ticks up on a true 0-loss stalemate; any real
-    // damage resets it. Pairs absent from combatPairs (dissolved) are
-    // naturally dropped because we only ever write keys we saw this tick.
-    const prevCount = prev.get(key) ?? 0;
-    const nextCount = lossA === 0 && lossB === 0 ? prevCount + 1 : 0;
-    nextMap.set(key, nextCount);
-    if (nextCount >= STALEMATE_DRAIN_THRESHOLD) {
-      drain.set(a, (drain.get(a) ?? 0) + 1);
-      drain.set(b, (drain.get(b) ?? 0) + 1);
+  // Apply damage first so we know which tiles still have count > 0 to keep
+  // their counters alive.
+  let nextProvinces: ReadonlyMap<TileId, Province> = state.provinces;
+  if (lossPerTile.size > 0) {
+    const map = new Map<TileId, Province>(state.provinces);
+    for (const [id, loss] of lossPerTile) {
+      const p = map.get(id);
+      if (p === undefined) continue;
+      map.set(id, { ...p, count: Math.max(0, p.count - loss) });
     }
+    nextProvinces = map;
   }
-  return { nextMap, drainDeductions: drain };
-}
 
-export function applyDrainDeductions(
-  state: GameState,
-  deductions: ReadonlyMap<TileId, number>,
-): GameState {
-  if (deductions.size === 0) return state;
-  const next = new Map<TileId, Province>(state.provinces);
-  for (const [id, drop] of deductions) {
-    const p = next.get(id);
-    if (p === undefined) continue;
-    next.set(id, { ...p, count: Math.max(0, p.count - drop) });
+  // Advance counters for pairs whose both tiles survive; pairs that just had
+  // a side reduced to 0 dissolve (key omitted, counter discarded — matches
+  // PRD §3.6 dissolution rule and v1.0 §3.7.1 semantics).
+  const nextEngagements = new Map<PairKey, number>();
+  for (const pair of pairs) {
+    const ap = nextProvinces.get(pair.a);
+    const bp = nextProvinces.get(pair.b);
+    if (ap === undefined || bp === undefined) continue;
+    if (ap.count <= 0 || bp.count <= 0) continue;
+    nextEngagements.set(pairKey(pair.a, pair.b), pair.engagementTicks + 1);
   }
-  return { ...state, provinces: next };
+
+  return {
+    state: { ...state, provinces: nextProvinces, engagements: nextEngagements },
+    pairs,
+  };
 }

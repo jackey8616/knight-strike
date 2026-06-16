@@ -1,9 +1,5 @@
 import { stepAi } from "@/engine/ai";
-import {
-  applyDrainDeductions,
-  resolveAdjacentCombat,
-  updateStalemates,
-} from "@/engine/combat";
+import { resolveAdjacentCombat } from "@/engine/combat";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
 import { applyCastleOverflow } from "@/engine/overflow";
 import { produce } from "@/engine/production";
@@ -267,7 +263,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
     tick: 0,
     provinces,
     marchingStacks: [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig,
     defeated: new Set<FactionId>(),
     rngSeed: scenario.rngSeed >>> 0,
@@ -287,7 +283,7 @@ export type FactionSnapshot = {
 // PRD §10.3 detail-mode events — typed sub-events emitted alongside the
 // per-tick aggregate so log readers can grep for specific game transitions.
 // Type names match the verbs in PRD §10.3 "產兵 / 派遣 / 戰鬥 / 佔領 / 升級
-// / 敗北" plus march advance / arrival / stalemate counters for coverage.
+// / 敗北" plus march advance / arrival / engagement counters for coverage.
 export type SubEvent =
   | {
       readonly type: "production";
@@ -323,18 +319,13 @@ export type SubEvent =
       readonly type: "combat";
       readonly a: TileId;
       readonly b: TileId;
-      readonly lossA: number;
-      readonly lossB: number;
+      readonly damage: number;
+      readonly engagementTicks: number;
     }
   | {
-      readonly type: "stalemate_inc";
+      readonly type: "engagement_inc";
       readonly pair: PairKey;
       readonly ticks: number;
-    }
-  | {
-      readonly type: "drain";
-      readonly tile: TileId;
-      readonly amount: number;
     }
   | {
       readonly type: "tier_upgrade";
@@ -493,32 +484,25 @@ function stepWithEvents(state: GameState): {
     });
   }
 
-  // §3.2 step 2: combat damage per adjacent pair.
+  // §3.2 step 2 (v1.1): combat damage + engagement counter advance, single pass.
+  const beforeEngagements = s.engagements;
   const cr = resolveAdjacentCombat(s);
   s = cr.state;
   for (const p of cr.pairs) {
-    if (p.lossA === 0 && p.lossB === 0) continue;
+    if (p.damage === 0) continue;
     events.push({
       type: "combat",
       a: p.a,
       b: p.b,
-      lossA: p.lossA,
-      lossB: p.lossB,
+      damage: p.damage,
+      engagementTicks: p.engagementTicks,
     });
   }
-
-  // §3.7: stalemate counter + drain.
-  const beforeStaleMap = s.stalemates;
-  const su = updateStalemates(beforeStaleMap, cr.pairs);
-  for (const [key, ticks] of su.nextMap) {
-    if (ticks > (beforeStaleMap.get(key) ?? 0)) {
-      events.push({ type: "stalemate_inc", pair: key, ticks });
+  for (const [key, ticks] of s.engagements) {
+    if (ticks > (beforeEngagements.get(key) ?? 0)) {
+      events.push({ type: "engagement_inc", pair: key, ticks });
     }
   }
-  for (const [tile, amount] of su.drainDeductions) {
-    events.push({ type: "drain", tile, amount });
-  }
-  s = applyDrainDeductions({ ...s, stalemates: su.nextMap }, su.drainDeductions);
 
   // §3.2 step 3: defeats. (§3.6.1 adjacent-empty claim phase removed in
   // v0.12 — owner now flips only via §3.5.4 marching arrival, already logged

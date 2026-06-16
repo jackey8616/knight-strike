@@ -50,7 +50,7 @@ function buildState(opts: BuildOpts): GameState {
     tick: opts.tick ?? 1,
     provinces: map,
     marchingStacks: opts.marchingStacks ?? [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig: idleAi,
     defeated: new Set<FactionId>(),
     rngSeed: 1,
@@ -427,11 +427,11 @@ describe("advanceMarching: solo stack movement", () => {
     expect(tile?.count).toBe(3);
   });
 
-  it("arrival at enemy garrison (terminus): mutual loss via §3.6", () => {
-    // 5 Knight TOKUGAWA vs 5 Knight TAKEDA garrison.
-    // Power 20 vs 20. Each loss = floor((20 - 20/4)/4) = floor(3.75) = 3.
-    // Both survive (TOKUGAWA marching surv 2, TAKEDA garrison surv 2).
-    // Defender keeps tile (terminus-side wins ties).
+  it("arrival at enemy garrison (terminus): one-shot mutual −1 (v1.1)", () => {
+    // PRD §3.5.4 #5 (v1.1): marching vs garrison runs §3.6 engagementTicks = 1
+    // — both sides lose 1. 5 TOKUGAWA marching arrives at 5 TAKEDA garrison →
+    // TOKUGAWA surv 4, TAKEDA surv 4. Defender holds the tile (ties go to
+    // garrison since attacker can't co-occupy).
     const stack: MarchingStack = {
       id: "mstack:1",
       faction: "TOKUGAWA",
@@ -452,14 +452,13 @@ describe("advanceMarching: solo stack movement", () => {
     expect(after.marchingStacks).toHaveLength(0);
     const tile = after.provinces.get(tileId(1, 0));
     expect(tile?.owner).toBe("TAKEDA");
-    expect(tile?.count).toBe(2);
+    expect(tile?.count).toBe(4);
   });
 
-  it("marching wins terminus against weaker enemy garrison", () => {
-    // 10 Knight TOKUGAWA (power 40) vs 1 Soldier TAKEDA (power 1).
-    // TOKUGAWA loss = floor((1 - 10)/4) = -3 → 0.
-    // TAKEDA  loss = floor((40 - 0.25)/4) = floor(9.9375) = 9 → 1-9 → 0.
-    // Marching takes the tile with full count.
+  it("marching wins terminus against weaker enemy garrison (v1.1: 1-count defender wiped)", () => {
+    // 10 TOKUGAWA marching arrives at 1 TAKEDA garrison. Both lose 1
+    // (§3.5.4 #5 one-shot). Defender → 0; marching → 9. Attacker takes the
+    // tile with the survivors.
     const stack: MarchingStack = {
       id: "mstack:1",
       faction: "TOKUGAWA",
@@ -479,7 +478,7 @@ describe("advanceMarching: solo stack movement", () => {
     const after = advanceMarching(state);
     const tile = after.provinces.get(tileId(1, 0));
     expect(tile?.owner).toBe("TOKUGAWA");
-    expect(tile?.count).toBe(10);
+    expect(tile?.count).toBe(9);
   });
 
   it("non-terminus pass-through own garrison does not merge", () => {
@@ -544,8 +543,12 @@ describe("advanceMarching: solo stack movement", () => {
         (p.a === tileId(2, 0) && p.b === tileId(1, 0)),
     );
     expect(pair).toBeDefined();
-    // Garrison crushes the weak blocker via §3.6: 5K vs 3S → blocker loses 4 → drops to 0.
-    expect(combat.state.provinces.get(tileId(2, 0))?.count).toBe(0);
+    // PRD §3.6 v1.1: first combat tick of a new pair (engagementTicks 0) deals
+    // no damage; the blocker stays at 3 this tick. The engagement counter
+    // advances to 1 so subsequent ticks ramp.
+    expect(combat.state.provinces.get(tileId(2, 0))?.count).toBe(3);
+    expect(pair?.damage).toBe(0);
+    expect(pair?.engagementTicks).toBe(0);
   });
 
   it("stalled stack remains stalled while block persists, advances after block clears", () => {
@@ -741,10 +744,10 @@ describe("advanceMarching: same-faction merge (AC-20)", () => {
 });
 
 describe("advanceMarching: head-on enemy collision (AC-17, AC-21)", () => {
-  it("[AC-17] enemy marching stacks colliding mid-tile take §3.6 mutual losses", () => {
-    // Both stacks pass through NEUTRAL empty (5,5) on opposing terminus-bound paths.
-    // 5 Knight TOKUGAWA (power 20) vs 5 Knight TAKEDA (power 20).
-    // Each loss = floor((20 - 20/4)/4) = floor(3.75) = 3 → each survivor 2.
+  it("[AC-17] enemy marching stacks colliding mid-tile: one-shot mutual −1 (v1.1)", () => {
+    // PRD §3.5.4 #4 (v1.1): head-on collisions are transient — engagementTicks
+    // = 1 single resolution, both sides lose 1 (multi-way 3+ stacks linear
+    // pile-on). 5 TOKUGAWA vs 5 TAKEDA crossing (5,5) → each survives at 4.
     const stackA: MarchingStack = {
       id: "mstack:1",
       faction: "TOKUGAWA",
@@ -774,8 +777,10 @@ describe("advanceMarching: head-on enemy collision (AC-17, AC-21)", () => {
     expect(after.marchingStacks).toHaveLength(2);
     const tokSurv = after.marchingStacks.find((s) => s.faction === "TOKUGAWA");
     const takSurv = after.marchingStacks.find((s) => s.faction === "TAKEDA");
-    expect(tokSurv?.count).toBe(2);
-    expect(takSurv?.count).toBe(2);
+    expect(tokSurv?.count).toBe(4);
+    expect(takSurv?.count).toBe(4);
+    // Pair is transient — not written to engagementMap.
+    expect(after.engagements.size).toBe(0);
   });
 
   it("[AC-21] head-on non-terminus: survivors continue, tile unchanged", () => {
@@ -817,12 +822,10 @@ describe("advanceMarching: head-on enemy collision (AC-17, AC-21)", () => {
     expect(takSurv?.path).toEqual(stackB.path);
   });
 
-  it("head-on annihilation: both die → tile unchanged, no continuation", () => {
-    // 3 Soldier vs 3 Soldier: loss = floor((3 - 3/4)/4) = floor(0.5625) = 0 each.
-    // Tweak to 100 vs 100 Knight to ensure both die: floor((400 - 25)/4) = 93 → both surv 7.
-    // Better: 1 Soldier vs 100 KING → 1S loss = floor((3000 - 0.25)/4) = ~750 → 0; 100K loss = 0.
-    // Let's pick a true mutual-kill: 5 Knight (power 20) vs huge → can't get mutual kill easily.
-    // Skip exact "both die" — covered by formula edges, simpler to test the tile-unchanged path.
+  it("head-on non-terminus pass-through: tile owner unchanged regardless of survivors", () => {
+    // v1.1 head-on is one-shot −1 each, so 100 vs 100 leaves both at 99 and
+    // both continue. The assertion below only cares about the §3.5.4 (b)
+    // sub-scenario invariant: the collision tile keeps its prior owner.
     const stackA: MarchingStack = {
       id: "mstack:1",
       faction: "TOKUGAWA",
@@ -849,14 +852,13 @@ describe("advanceMarching: head-on enemy collision (AC-17, AC-21)", () => {
     });
 
     const after = advanceMarching(state);
-    // Both KING-tier (power 30): loss = floor((3000 - 750)/4) = 562 → 0.
-    // Both still survive (positive count). Just verify they continued, no ownership change.
+    // v1.1 each side loses 1 → 99 each, both pass through, tile owner stays NEUTRAL.
     expect(after.provinces.get(tileId(5, 5))?.owner).toBe("NEUTRAL");
   });
 
   it("head-on mixed terminus (sub-scenario c): terminus survivor claims tile, pass-through survivor continues", () => {
     // TOKUGAWA path terminus at (5,5). TAKEDA path passes through (5,5) en route to (4,5).
-    // 5 Knight each → each survivor 2.
+    // v1.1 head-on one-shot −1 each → both survive at 4.
     // TOKUGAWA terminus → claims (5,5). TAKEDA pass-through → continues to (4,5).
     const stackA: MarchingStack = {
       id: "mstack:1",
@@ -884,14 +886,14 @@ describe("advanceMarching: head-on enemy collision (AC-17, AC-21)", () => {
     });
 
     const after = advanceMarching(state);
-    // TOKUGAWA claims (5,5) with surv count 2.
+    // TOKUGAWA claims (5,5) with surv count 4.
     expect(after.provinces.get(tileId(5, 5))?.owner).toBe("TOKUGAWA");
-    expect(after.provinces.get(tileId(5, 5))?.count).toBe(2);
+    expect(after.provinces.get(tileId(5, 5))?.count).toBe(4);
     // TAKEDA continues as marching stack.
     expect(after.marchingStacks).toHaveLength(1);
     const tak = after.marchingStacks[0];
     expect(tak?.faction).toBe("TAKEDA");
-    expect(tak?.count).toBe(2);
+    expect(tak?.count).toBe(4);
     expect(tak?.idx).toBe(1);
   });
 });

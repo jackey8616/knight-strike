@@ -1,4 +1,3 @@
-import { computeLoss, tilePower } from "./combat";
 import { parseTileId, tileId } from "./state";
 import type {
   FactionId,
@@ -430,13 +429,11 @@ function resolveSingleFactionArrival(
     return;
   }
 
-  // PRD §3.5.4 #5 marching vs garrison: garrison plays terminus side.
-  const ownPower = tilePower(arrival.count);
-  const oppPower = tilePower(province.count);
-  const lossOwn = computeLoss(ownPower, oppPower);
-  const lossOpp = computeLoss(oppPower, ownPower);
-  const survOwn = Math.max(0, arrival.count - lossOwn);
-  const survOpp = Math.max(0, province.count - lossOpp);
+  // PRD §3.5.4 #5 (v1.1) marching vs garrison: garrison plays terminus side;
+  // one-shot engagementTicks = 1 → both sides lose 1. No persistent pair is
+  // recorded since this is a transient arrival event.
+  const survOwn = Math.max(0, arrival.count - 1);
+  const survOpp = Math.max(0, province.count - 1);
 
   if (survOwn === 0 && survOpp === 0) {
     newProvinces.set(tile, { ...province, count: 0 });
@@ -464,16 +461,10 @@ function resolveHeadOnCollision(
   const province = newProvinces.get(tile);
   if (province === undefined) return;
 
-  // PRD §3.5.4 #4 head-on: dry-run mutual loss vs every other faction's power.
-  const powers = arrivals.map((a) => tilePower(a.count));
-  const losses = arrivals.map((_, i) => {
-    let total = 0;
-    for (let j = 0; j < arrivals.length; j++) {
-      if (i === j) continue;
-      total += computeLoss(powers[i] as number, powers[j] as number);
-    }
-    return total;
-  });
+  // PRD §3.5.4 #4 (v1.1) head-on: one-shot engagementTicks = 1 vs every other
+  // faction at the tile. Each arrival loses 1 per opposing arrival; multi-way
+  // (3+) collisions stack linearly. No persistent pair is recorded.
+  const losses = arrivals.map(() => arrivals.length - 1);
   const survivors = arrivals.map((a, i) =>
     Math.max(0, a.count - (losses[i] as number)),
   );

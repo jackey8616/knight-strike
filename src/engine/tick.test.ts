@@ -55,7 +55,7 @@ function buildState(opts: BuildOpts): GameState {
     tick: opts.tick ?? 0,
     provinces: map,
     marchingStacks: opts.marchingStacks ?? [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig: opts.aiConfig ?? idleAi,
     defeated: opts.defeated ?? new Set<FactionId>(),
     rngSeed: opts.rngSeed ?? 42,
@@ -229,9 +229,11 @@ describe("step composes movement before combat (PRD §3.2 step order)", () => {
 describe("step composes defeats before production (PRD §3.2 step 3 then 4)", () => {
   it("castle captured this tick does not produce for the losing faction", () => {
     // Marching Tokugawa stack arrives at Takeda's castle (tick=2 so produce
-    // would otherwise fire). After defeat conversion, Takeda is in `defeated`
-    // and produce() skips it; the captured castle now belongs to Tokugawa, who
-    // gets the +1 production instead.
+    // would otherwise fire). v1.1 §3.5.4 #5 head-on at the terminus: both
+    // sides lose 1, so we set Takeda's garrison to 1 to guarantee it's wiped
+    // and Tokugawa takes the castle this tick. After defeat conversion, Takeda
+    // is in `defeated` and produce() skips it; the captured castle now belongs
+    // to Tokugawa, who gets the +1 production instead.
     const stack: MarchingStack = {
       id: "mstack:seed",
       faction: "TOKUGAWA",
@@ -243,7 +245,7 @@ describe("step composes defeats before production (PRD §3.2 step 3 then 4)", ()
     const state = buildState({
       provinces: [
         makeProvince(0, 0, "TOKUGAWA", 1, true),
-        makeProvince(1, 0, "TAKEDA", 3, true),
+        makeProvince(1, 0, "TAKEDA", 1, true),
       ],
       tick: 2,
       marchingStacks: [stack],
@@ -253,8 +255,8 @@ describe("step composes defeats before production (PRD §3.2 step 3 then 4)", ()
     const captured = out.provinces.get(tileId(1, 0)) as Province;
     expect(captured.owner).toBe("TOKUGAWA");
     expect(captured.isCastle).toBe(true);
-    // capture surplus = arrival.count - lossOwn; the +1 from production lands
-    // on top because the castle now belongs to Tokugawa, an undefeated faction.
+    // Capture surplus = arrival.count - 1; the +1 from production lands on top
+    // because the castle now belongs to Tokugawa, an undefeated faction.
     expect(captured.count).toBeGreaterThanOrEqual(1);
     expect(out.defeated.has("TAKEDA")).toBe(true);
   });

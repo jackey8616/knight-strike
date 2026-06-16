@@ -49,7 +49,7 @@ function buildState(opts: BuildOpts): GameState {
     tick: opts.tick ?? 1,
     provinces: map,
     marchingStacks: [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig: idleAi,
     defeated: opts.defeated ?? new Set<FactionId>(),
     rngSeed: opts.rngSeed ?? 42,

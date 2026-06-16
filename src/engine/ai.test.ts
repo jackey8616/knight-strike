@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyDrainDeductions,
-  resolveAdjacentCombat,
-  updateStalemates,
-} from "./combat";
+import { resolveAdjacentCombat } from "./combat";
 import { AI_EVAL_INTERVAL, shouldEvaluate, stepAi } from "./ai";
 import { advanceMarching } from "./movement";
 import { produce } from "./production";
@@ -56,7 +52,7 @@ function buildState(opts: BuildOpts): GameState {
     tick: opts.tick ?? 1,
     provinces: map,
     marchingStacks: opts.marchingStacks ?? [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig: opts.aiConfig ?? defaultAi,
     defeated: opts.defeated ?? new Set<FactionId>(),
     rngSeed: opts.rngSeed ?? 42,
@@ -93,18 +89,12 @@ function buildDefaultBoard(opts: {
 }
 
 // Composes the engine pieces M1.8 has access to, in PRD §3.2 step order
-// (input → movement → combat+stalemate → produce → defeats). The real `step()`
-// arrives in M1.9; this is a thin local fake just for AC-15 integration.
+// (input → movement → combat → produce → defeats). v1.1 folded the stalemate/
+// drain phase into resolveAdjacentCombat, so this is now a single call.
 function fakeStep(state: GameState): GameState {
   let s = stepAi(state);
   s = advanceMarching(s);
-  const cr = resolveAdjacentCombat(s);
-  s = cr.state;
-  const su = updateStalemates(s.stalemates, cr.pairs);
-  s = applyDrainDeductions(
-    { ...s, stalemates: su.nextMap },
-    su.drainDeductions,
-  );
+  s = resolveAdjacentCombat(s).state;
   s = produce(s);
   s = applyDefeats(s);
   return { ...s, tick: s.tick + 1 };

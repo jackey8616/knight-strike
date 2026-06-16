@@ -1,5 +1,4 @@
 import { RULE_PROFILES, type RuleProfile } from "./ai-profile";
-import { tilePower } from "./combat";
 import {
   dispatch,
   findPath,
@@ -355,9 +354,13 @@ function tryAttack(
     // tiles — power check has to mirror what will actually march out.
     const effectiveCount = own.count - 1;
     if (effectiveCount <= 0) continue;
-    const ownPower = tilePower(effectiveCount);
+    // PRD v1.1: tier power multipliers removed; AI attack heuristic falls
+    // back to raw count ratio. Spec-orphan code (PRD §4 deferred), so this
+    // is a placeholder until the AI redesign lands — it preserves the
+    // "stronger attacks weaker by ratio" intent without referencing the
+    // dead tilePower helper.
     for (const target of targets) {
-      if (ownPower < tilePower(target.count) * profile.attackPowerRatio) {
+      if (effectiveCount < target.count * profile.attackPowerRatio) {
         continue;
       }
       const path = findPath(state, own.id, target.id, faction);

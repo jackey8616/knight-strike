@@ -54,7 +54,7 @@ function buildState(
     tick: 1,
     provinces: map,
     marchingStacks: options.marchingStacks ?? [],
-    stalemates: new Map(),
+    engagements: new Map(),
     aiConfig: idleAi,
     defeated: options.defeated ?? new Set<FactionId>(),
     rngSeed: 1,
