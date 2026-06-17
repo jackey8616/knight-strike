@@ -1,7 +1,12 @@
 name: Deploy to GitHub Pages
 
+# Depends on CI: this runs only after the CI workflow finishes on main, and the
+# build job below bails unless that run passed. CI is the single quality gate —
+# deploy no longer re-runs typecheck/lint/test itself, it just builds + ships.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master, main]
   workflow_dispatch:
 
@@ -16,9 +21,16 @@ concurrency:
 
 jobs:
   build:
+    # Ship only a CI run that went green. workflow_dispatch has no workflow_run
+    # context (manual redeploy), so let it through.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the exact commit CI validated, not just main's tip (they can
+          # differ if main moved on while this run was queued).
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 8.3.1
@@ -27,9 +39,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test:run
       - run: pnpm build:pages
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
