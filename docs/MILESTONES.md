@@ -93,7 +93,7 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 
 **範圍**：production build + GitHub Pages。
 
-**對應 PRD**：§2、§6.1（sprite）。
+**對應 PRD**：§6.1（sprite）；技術棧 / build 細節見 CLAUDE.md §2、§6。
 
 - `vite.config.ts` + `build:pages`（`VITE_BASE_PATH=/knight-strike/`）；`.github/workflows/deploy.yml` 自動部署。
 - 資產：`public/knight.png` + tint / scale 區分 tier。

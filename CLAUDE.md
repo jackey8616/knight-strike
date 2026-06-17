@@ -27,7 +27,9 @@ Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 we
 - **不用 localStorage / IndexedDB / cookie**（存檔列入 PRD §9 future scope，MVP 不做）。
 - **不引入大型 state 管理庫**（Redux / Zustand / MobX）。Engine 層自己管，UI 層用 props / 直接讀 engine state snapshot。
 
-## 3. 檔案結構（與 PRD §10 對齊）
+## 3. 檔案結構與實作對應（工程細節單一真相）
+
+> 本節是**工程細節的單一真相**：檔案結構、模組職責、與「PRD 規格 → 模組 / 函式」對應（見樹狀註解的 `PRD §x` 標註）。PRD 只描述產品設計（玩法 / 規則 / 數值），不重述實作；spec 數值改動時這裡只引用 PRD 章節、不複製數字。
 
 ```
 knight-strike/
@@ -40,15 +42,15 @@ knight-strike/
 │   ├── engine/               # 【純邏輯層】無 Pixi / DOM / GSAP 依賴
 │   │   ├── types.ts          # FactionId / Tier / Terrain / Province / Occupant / MarchingStack / AttackOrder / AiMode / GameState
 │   │   ├── state.ts          # derivedOwner / isOwnClaimed / findOccupant
-│   │   ├── tick.ts           # step：ai→movement→produce→combat→defeats
-│   │   ├── upgrade.ts        # deriveTier(count)，閾值 5/15/30
-│   │   ├── production.ts     # self-replicate（每 tick +1、cap 100、圍攻凍結）
-│   │   ├── combat.ts         # resolveOrders：cross-edge ramp + break→capture
-│   │   ├── movement.ts       # findPath / dispatch / cancel / advanceMarching
-│   │   ├── terrain.ts        # 不可通行 / 減傷 / seeded generateTerrain
-│   │   ├── ai.ts             # stepAi 三檔規則狀態機 + RNG 決定論
-│   │   ├── ai-profile.ts     # RULE_PROFILES（easy / normal / hard 旋鈕）
-│   │   ├── victory.ts        # applyDefeats + evaluateOutcome
+│   │   ├── tick.ts           # step()：每 tick 結算順序（PRD §4.2）
+│   │   ├── upgrade.ts        # deriveTier()：兵力→tier（PRD §4.4）
+│   │   ├── production.ts     # produce()：self-replicate（PRD §4.3）
+│   │   ├── combat.ts         # resolveOrders()：cross-edge 戰鬥 + break→capture（PRD §4.6）
+│   │   ├── movement.ts       # findPath / dispatch / advanceMarching / cancelMarchingStack（PRD §4.5）
+│   │   ├── terrain.ts        # generateTerrain / 不可通行 / 減傷（PRD §4.7）
+│   │   ├── ai.ts             # stepAi()：規則狀態機（PRD §5）
+│   │   ├── ai-profile.ts     # RULE_PROFILES：難度旋鈕（PRD §5.3）
+│   │   ├── victory.ts        # applyDefeats / evaluateOutcome（PRD §7）
 │   │   └── util/             # rng (seedable)、helpers
 │   ├── render/               # 【Pixi 渲染層】
 │   │   ├── app.ts            # Pixi Application 初始化 / resize
@@ -206,28 +208,22 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 ### 5.2 AC 對應
 
-下列 AC **必須**各對應至少一個 vitest case，`it()` 描述以 `[AC-XX]` 開頭：
+PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 
-| AC    | 對應模組          | 範例                                                          |
-| ----- | ----------------- | ------------------------------------------------------------- |
-| AC-04 | upgrade           | `it("[AC-04] amount 5→KNIGHT, 15→QUEEN, 30→KING")`            |
-| AC-03 | production        | `it("[AC-03] 非戰鬥 garrison +1/tick, cap 100, 圍攻凍結")`    |
-| AC-10 | combat            | `it("[AC-10] stageDamage ramp; t=0 只有 defender 還擊")`      |
-| AC-11 | combat            | `it("[AC-11] break→capture：敵 claim 格需 2 步")`             |
-| AC-12 | combat / movement | `it("[AC-12] capture 後前進 / route 為空則駐紮")`             |
-| AC-13 | combat            | `it("[AC-13] NEUTRAL 永不還擊")`                              |
-| AC-07 | movement          | `it("[AC-07] 己方目標 own-only 路徑；非己方格擋路 → null")`   |
-| AC-08 | movement          | `it("[AC-08] 征服行軍：忽略所有權最短路徑")`                  |
-| AC-09 | movement          | `it("[AC-09] siege staging 建 AttackOrder，不踏入敵格")`      |
-| AC-14 | movement          | `it("[AC-14] 同陣營合併：剩餘步數最少者勝")`                  |
-| AC-15 | movement          | `it("[AC-15] cancelMarchingStack 落兵於當前格")`              |
-| AC-16 | terrain / combat  | `it("[AC-16] FOREST ×0.75 ceil；不可通行不可作目標")`         |
-| AC-17 | terrain           | `it("[AC-17] seeded 地形固定點恆連通")`                       |
-| AC-18 | ai                | `it("[AC-18] 同 seed → 確定；異 seed → 分歧")`                |
-| AC-19 | ai                | `it("[AC-19] normal AI 擴張鄰近空格")`                        |
-| AC-20 | ai                | `it("[AC-20] 交錯評估 offset 1/2/3/4")`                       |
-| AC-21 | ai / playtest     | `it("[AC-21] idle 不派兵；scripted 指定 tick 派一筆")`        |
-| AC-22 | victory           | `it("[AC-22] 敗北 → 殘兵 NEUTRAL，清 stack/order")`           |
+- **每條 engine AC** → 對應模組至少一個 `it("[AC-XX] …")` vitest case（與模組同目錄）。
+- **UI AC** → §8 工作流的 manual smoke 驗。
+- 不在此重列各 AC 內容，避免與 PRD 漂移。
+
+模組 → AC 對照（AC 內容查 PRD §8）：
+
+- `production`（PRD §4.3）→ AC-03
+- `upgrade`（§4.4）→ AC-04
+- `movement`（§4.5）→ AC-05 / 07 / 08 / 09 / 14 / 15
+- `combat`（§4.6）→ AC-10 / 11 / 12 / 13
+- `terrain`（§4.7）→ AC-16 / 17
+- `ai`（§5）→ AC-18 / 19 / 20 / 21
+- `victory`（§7）→ AC-22
+- render / input / ui → AC-01 / 02 / 06 / 23 / 24
 
 ### 5.3 整合測試
 
@@ -268,7 +264,7 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 格式：`feature/<milestone>-<short-desc>`
 
-Milestone 列表（與 PRD §10 / [`MILESTONES.md`](docs/MILESTONES.md) 對齊）：
+Milestone 列表（與 [`MILESTONES.md`](docs/MILESTONES.md) 對齊）：
 
 | Milestone              | 範圍                                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------- |
