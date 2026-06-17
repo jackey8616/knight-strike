@@ -1,7 +1,7 @@
 import {
+  BitmapText,
   Container,
   Sprite,
-  Text,
   type TextStyleOptions,
   type Texture,
 } from "pixi.js";
@@ -51,7 +51,10 @@ type UnitGfx = {
   readonly id: TileId;
   readonly node: Container;
   readonly sprite: Sprite;
-  readonly count: Text;
+  // BitmapText: glyph atlas rasterized once and shared, so a per-tick count
+  // change is a cheap quad re-layout, not a canvas re-rasterization (the latter
+  // dominated render cost once the board filled with troops).
+  readonly count: BitmapText;
   prevTier: Tier;
   prevCount: number;
   prevOwner: FactionId;
@@ -88,7 +91,7 @@ function createUnitGfx(
   sprite.tint = FACTION_COLORS[owner];
   node.addChild(sprite);
 
-  const text = new Text({ text: "", style: COUNT_TEXT_STYLE });
+  const text = new BitmapText({ text: "", style: COUNT_TEXT_STYLE });
   // Pin the count's baseline to the tile's bottom edge so the glyph height +
   // stroke can never spill into the row below — the old top-anchored
   // (0, TILE_HEIGHT/4) placement let the descender pass y=16.
@@ -218,14 +221,19 @@ export function createUnitsRenderer(
       }
 
       const tierTexture = textures[tier];
+      const targetScale = tierScale(tier, tierTexture);
+      // Only touch GPU-facing props when they actually change — redundant
+      // writes mark the sprite dirty and break Pixi's batching every frame.
       if (gfx.sprite.texture !== tierTexture) {
         gfx.sprite.texture = tierTexture;
+        gfx.sprite.scale.set(targetScale);
       }
-      const targetScale = tierScale(tier, tierTexture);
-      gfx.sprite.tint = FACTION_COLORS[renderFaction];
-      gfx.sprite.scale.set(targetScale);
-      gfx.count.text = shownTotal > 0 ? String(shownTotal) : "";
-      gfx.node.visible = shownTotal > 0;
+      const tint = FACTION_COLORS[renderFaction];
+      if (gfx.sprite.tint !== tint) gfx.sprite.tint = tint;
+      const label = shownTotal > 0 ? String(shownTotal) : "";
+      if (gfx.count.text !== label) gfx.count.text = label;
+      const visible = shownTotal > 0;
+      if (gfx.node.visible !== visible) gfx.node.visible = visible;
 
       if (!isNew) {
         if (TIER_RANK[tier] > TIER_RANK[gfx.prevTier]) {

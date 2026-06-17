@@ -1,8 +1,8 @@
 import {
+  BitmapText,
   Container,
   Rectangle,
   Sprite,
-  Text,
   type FederatedPointerEvent,
   type TextStyleOptions,
   type Texture,
@@ -36,7 +36,7 @@ const COUNT_TEXT_STYLE: TextStyleOptions = {
 type MarchGfx = {
   readonly node: Container;
   readonly sprite: Sprite;
-  readonly count: Text;
+  readonly count: BitmapText;
   prevTile: TileId;
 };
 
@@ -120,7 +120,10 @@ export function createMarchingRenderer(
     sprite.scale.set(spriteScale(texture));
     node.addChild(sprite);
 
-    const text = new Text({ text: String(v.count), style: COUNT_TEXT_STYLE });
+    const text = new BitmapText({
+      text: String(v.count),
+      style: COUNT_TEXT_STYLE,
+    });
     text.anchor.set(0.5, 1);
     text.position.set(0, TILE_HEIGHT / 2);
     node.addChild(text);
@@ -158,8 +161,10 @@ export function createMarchingRenderer(
       gfx.prevTile = v.prevForNew;
     }
 
-    gfx.count.text = String(v.count);
-    gfx.sprite.tint = FACTION_COLORS[v.faction];
+    const label = String(v.count);
+    if (gfx.count.text !== label) gfx.count.text = label;
+    const tint = FACTION_COLORS[v.faction];
+    if (gfx.sprite.tint !== tint) gfx.sprite.tint = tint;
     const tier = deriveTier(v.count);
     const tierTex = textures[tier];
     if (gfx.sprite.texture !== tierTex) {

@@ -226,6 +226,13 @@ type TileGfx = {
   readonly selection: Graphics;
   readonly terrain: Terrain;
   readonly elevation: number;
+  // Last-painted inputs — terrain/elevation never change, so a tile only needs
+  // its (expensive) prism geometry rebuilt when the ownership tint changes, and
+  // its alpha re-set when the occlusion fade flips. Skipping the no-op redraws
+  // keeps board.update near-free on the vast majority of steady-state ticks.
+  painted: boolean;
+  paintedColor: number | null;
+  paintedAlpha: number;
 };
 
 export type BoardEvents = {
@@ -510,7 +517,18 @@ export function createBoardRenderer(
       }
 
       board.addChild(node);
-      tiles.set(id, { id, node, base, hover, selection, terrain, elevation });
+      tiles.set(id, {
+        id,
+        node,
+        base,
+        hover,
+        selection,
+        terrain,
+        elevation,
+        painted: false,
+        paintedColor: null,
+        paintedAlpha: 1,
+      });
     }
   }
 
@@ -534,19 +552,27 @@ export function createBoardRenderer(
       } else if (province.isCastle && province.castleOwner !== null) {
         ownerColor = FACTION_COLORS[province.castleOwner];
       }
-      drawTilePrism(t.base, t.terrain, ownerColor, t.elevation);
-      if (province.isCastle) {
-        drawCastleMarker(t.base);
+      if (!t.painted || t.paintedColor !== ownerColor) {
+        drawTilePrism(t.base, t.terrain, ownerColor, t.elevation);
+        if (province.isCastle) {
+          drawCastleMarker(t.base);
+        }
+        t.painted = true;
+        t.paintedColor = ownerColor;
       }
       // PRD §3.9: a raised tile fades when a unit sits on a tile it occludes
       // (the row behind/above it under the 45° camera), so vision isn't blocked.
-      t.base.alpha =
+      const alpha =
         t.elevation > 0 &&
         (hasUnit(state, province.x - 1, province.y - 1) ||
           hasUnit(state, province.x - 1, province.y) ||
           hasUnit(state, province.x, province.y - 1))
           ? 0.4
           : 1;
+      if (t.paintedAlpha !== alpha) {
+        t.base.alpha = alpha;
+        t.paintedAlpha = alpha;
+      }
     }
   }
 
