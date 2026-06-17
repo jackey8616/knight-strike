@@ -255,11 +255,21 @@ export function createBoardRenderer(
   }
 
   function resize(width: number, height: number): void {
-    // Centre the iso block within the canvas. iso x spans
-    // [-(n-1)*TW/2, (n-1)*TW/2] (already symmetric around 0) and iso y spans
-    // [0, (n-1)*TH], so vertical centring needs the upper-half offset.
+    // Fit the whole iso board within the canvas so the entire battlefield is
+    // visible (it spans ~boardSize*TILE_WIDTH wide, which overflows a phone at
+    // native scale). Cap at 1 so desktop keeps native, crisp pixels; a small
+    // margin keeps the corners off the edges.
+    const contentW = boardSize * TILE_WIDTH;
+    const contentH = boardSize * TILE_HEIGHT;
+    const fit = Math.min(width / contentW, height / contentH) * 0.94;
+    const scale = Math.min(fit, 1);
+    container.scale.set(scale);
+
+    // Centre the iso block. iso x spans [-(n-1)*TW/2, (n-1)*TW/2] (symmetric
+    // around 0) and iso y spans [0, (n-1)*TH], so vertical centring needs the
+    // (scaled) upper-half offset.
     centerX = width / 2;
-    centerY = height / 2 - ((boardSize - 1) * TILE_HEIGHT) / 2;
+    centerY = height / 2 - (scale * (boardSize - 1) * TILE_HEIGHT) / 2;
     applyTransform();
   }
 

@@ -7,8 +7,9 @@
 // tile-info centre, dispatch right) which collides on a phone. Mobile layout:
 //   HUD        → top-centre (shrunk)
 //   tile-info  → top-left, under the HUD
-//   faction    → top-right, under the HUD
-//   dispatch   → bottom-centre (the one interactive control stays in thumb reach)
+//   faction    → bottom-left, compact (off the board; top-right covered it)
+//   dispatch   → bottom-right (in thumb reach, clear of the faction panel)
+// This keeps the top-right corner clear so the whole board stays visible.
 
 const STYLE_ID = "ks-responsive";
 
@@ -37,21 +38,21 @@ const CSS = `
   }
 
   .ks-faction {
-    top: 44px !important;
-    bottom: auto !important;
-    left: auto !important;
-    right: 8px !important;
+    top: auto !important;
+    bottom: 10px !important;
+    left: 8px !important;
+    right: auto !important;
     padding: 4px 6px !important;
     font-size: 9px !important;
-    max-width: 48vw !important;
+    max-width: 46vw !important;
     line-height: 1.3 !important;
   }
 
   .ks-dispatch {
     bottom: 10px !important;
-    right: auto !important;
-    left: 50% !important;
-    transform: translateX(-50%) !important;
+    left: auto !important;
+    right: 8px !important;
+    transform: none !important;
     padding: 5px !important;
     gap: 4px !important;
     font-size: 11px !important;
