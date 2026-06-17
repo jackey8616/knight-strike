@@ -22,10 +22,11 @@ import { createMarchingRenderer } from "@/render/marching";
 import { createPathRenderer } from "@/render/paths";
 import { createTierTextures } from "@/render/sprites";
 import { createUnitsRenderer } from "@/render/units";
-import { playNormalScenario } from "@/scenarios/play-normal";
+import { makeScenario, readMapSize } from "@/scenarios/sized";
 import { evaluateOutcome } from "@/engine/victory";
 import { createFactionPanel } from "@/ui/faction-panel";
 import { createHud } from "@/ui/hud";
+import { createMapSizePanel } from "@/ui/map-size";
 import { createTileInfoPanel } from "@/ui/tile-info";
 import { createEndScreen } from "@/ui/end-screen";
 
@@ -43,7 +44,8 @@ async function bootstrap(): Promise<void> {
 
   const render = await createRenderApp(container);
   const tierTextures = createTierTextures(render.app);
-  const initialState = buildInitialState(playNormalScenario);
+  const mapSize = readMapSize(window.location.search);
+  const initialState = buildInitialState(makeScenario(mapSize));
   let state: GameState = initialState;
   let ended = false;
 
@@ -104,6 +106,12 @@ async function bootstrap(): Promise<void> {
   });
   const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
   const tileInfo = createTileInfoPanel(document.body);
+  // Switching size starts a fresh game at that board size, carried in the URL.
+  const mapSizePanel = createMapSizePanel(document.body, mapSize, (size) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("size", String(size));
+    window.location.assign(url.toString());
+  });
 
   function pushHudStatus(): void {
     hud.setStatus({
@@ -359,6 +367,7 @@ async function bootstrap(): Promise<void> {
       pointer.destroy();
       ratioPanel.destroy();
       tileInfo.destroy();
+      mapSizePanel.destroy();
       factionPanel.destroy();
       hud.destroy();
       endScreen.destroy();

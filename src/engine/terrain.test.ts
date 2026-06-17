@@ -20,6 +20,7 @@ const FIXED = new Set<TileId>([...CASTLES, tileId(5, 5)]);
 function reachable(
   grid: ReadonlyMap<TileId, Terrain>,
   root: TileId,
+  size = BOARD,
 ): Set<TileId> {
   const seen = new Set<TileId>([root]);
   const queue = [root];
@@ -34,7 +35,7 @@ function reachable(
     ] as const) {
       const nx = x + dx;
       const ny = y + dy;
-      if (nx < 0 || nx >= BOARD || ny < 0 || ny >= BOARD) continue;
+      if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
       const nid = tileId(nx, ny);
       if (seen.has(nid) || isImpassableTerrain(grid.get(nid))) continue;
       seen.add(nid);
@@ -42,6 +43,18 @@ function reachable(
     }
   }
   return seen;
+}
+
+function cornersAndCentre(size: number): Set<TileId> {
+  const m = size - 1;
+  const c = Math.floor(size / 2);
+  return new Set<TileId>([
+    tileId(0, 0),
+    tileId(m, 0),
+    tileId(0, m),
+    tileId(m, m),
+    tileId(c, c),
+  ]);
 }
 
 describe("isImpassableTerrain", () => {
@@ -109,6 +122,17 @@ describe("generateTerrain", () => {
       const grid = generateTerrain(BOARD, seed, FIXED);
       const reach = reachable(grid, tileId(0, 0));
       for (const id of FIXED) expect(reach.has(id)).toBe(true);
+    }
+  });
+
+  it("[AC-V6-03] connectivity holds at every selectable map size", () => {
+    for (const size of [11, 15, 19, 27]) {
+      const fixed = cornersAndCentre(size);
+      for (const seed of [1, 42, 7, 999]) {
+        const grid = generateTerrain(size, seed, fixed);
+        const reach = reachable(grid, tileId(0, 0), size);
+        for (const id of fixed) expect(reach.has(id)).toBe(true);
+      }
     }
   });
 });
