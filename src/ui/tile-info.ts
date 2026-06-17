@@ -43,7 +43,6 @@ const TIER_LABEL = {
 
 const TERRAIN_LABEL: Readonly<Record<string, string>> = {
   PLAINS: "Plains",
-  HILL: "Hill · −50% dmg",
   FOREST: "Forest · −25% dmg",
   MOUNTAIN: "Mountain · impassable",
   WATER: "Water · impassable",

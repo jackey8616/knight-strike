@@ -4,7 +4,6 @@ import { createRng } from "./util/rng";
 
 // PRD §3.9 (v1.6) terrain rules.
 //   MOUNTAIN / WATER → impassable (can't enter, claim, or path through).
-//   HILL  → the unit on it takes 50% incoming combat damage.
 //   FOREST → the unit on it takes 75% incoming combat damage.
 //   PLAINS → neutral.
 
@@ -14,7 +13,6 @@ export function isImpassableTerrain(t: Terrain | undefined): boolean {
 
 const DEFENSE_MULT: Readonly<Record<Terrain, number>> = {
   PLAINS: 1,
-  HILL: 0.5,
   FOREST: 0.75,
   MOUNTAIN: 1, // never holds a unit
   WATER: 1, // never holds a unit
@@ -29,11 +27,9 @@ export function applyTerrainDefense(dmg: number, t: Terrain | undefined): number
   return Math.ceil(dmg * mult);
 }
 
-// Weighted terrain palette for blob scattering — hills/forest common, the
-// impassable mountain/water rarer so the board stays mostly traversable.
+// Weighted terrain palette for blob scattering — forest common, mountains form
+// occasional ranges, water rarer so the board stays mostly traversable.
 const BLOB_KINDS: readonly Terrain[] = [
-  "HILL",
-  "HILL",
   "FOREST",
   "FOREST",
   "FOREST",

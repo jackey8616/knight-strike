@@ -62,22 +62,19 @@ describe("isImpassableTerrain", () => {
     expect(isImpassableTerrain("MOUNTAIN")).toBe(true);
     expect(isImpassableTerrain("WATER")).toBe(true);
     expect(isImpassableTerrain("PLAINS")).toBe(false);
-    expect(isImpassableTerrain("HILL")).toBe(false);
     expect(isImpassableTerrain("FOREST")).toBe(false);
     expect(isImpassableTerrain(undefined)).toBe(false);
   });
 });
 
 describe("applyTerrainDefense", () => {
-  it("[AC-V6-01] hill halves, forest 75%, plains unchanged (ceil, never zeroes)", () => {
+  it("[AC-V6-01] forest 75%, plains unchanged (ceil, never zeroes)", () => {
     expect(applyTerrainDefense(4, "PLAINS")).toBe(4);
     expect(applyTerrainDefense(4, undefined)).toBe(4);
-    expect(applyTerrainDefense(4, "HILL")).toBe(2);
-    expect(applyTerrainDefense(8, "HILL")).toBe(4);
-    expect(applyTerrainDefense(1, "HILL")).toBe(1); // ceil keeps ≥1
     expect(applyTerrainDefense(4, "FOREST")).toBe(3);
     expect(applyTerrainDefense(8, "FOREST")).toBe(6);
-    expect(applyTerrainDefense(0, "HILL")).toBe(0);
+    expect(applyTerrainDefense(1, "FOREST")).toBe(1); // ceil keeps ≥1
+    expect(applyTerrainDefense(0, "FOREST")).toBe(0);
   });
 });
 

@@ -36,24 +36,26 @@ const TILE_OUTLINE_COLOR = 0x111111;
 // territory still reads while the terrain stays visible underneath.
 const TERRAIN_TOP: Readonly<Record<Terrain, number>> = {
   PLAINS: 0x3f6b3a,
-  HILL: 0x8f7d44,
   MOUNTAIN: 0x6f6f78,
   WATER: 0x2f5aa0,
   FOREST: 0x2f5530,
 };
-const TERRAIN_ELEVATION: Readonly<Record<Terrain, number>> = {
-  PLAINS: 0,
-  WATER: 0,
-  FOREST: 6,
-  HILL: 14,
-  MOUNTAIN: 26,
-};
 
-// Screen-space lift (px) a unit/column standing on this terrain gets so it sits
-// on the raised top face instead of sinking into the prism. Exported for the
-// unit + marching renderers.
-export function terrainElevation(t: Terrain | undefined): number {
-  return TERRAIN_ELEVATION[t ?? "PLAINS"];
+// PRD §3.9 (v1.6): only mountains have height — a continuous "wave" (a smooth
+// function of position) so adjacent mountain tiles form a rolling ridge rather
+// than uniform blocks. Plains / water / forest are flat and told apart by
+// colour. Since all passable terrain is now flat, units never need lifting.
+const MOUNTAIN_BASE = 22;
+const MOUNTAIN_WAVE = 16;
+
+function mountainHeight(x: number, y: number): number {
+  const w =
+    Math.sin(x * 0.8 + y * 0.5) * 0.5 + Math.sin(x * 0.35 - y * 0.9) * 0.5;
+  return Math.round(MOUNTAIN_BASE + ((w + 1) / 2) * MOUNTAIN_WAVE);
+}
+
+function tileElevation(terrain: Terrain, x: number, y: number): number {
+  return terrain === "MOUNTAIN" ? mountainHeight(x, y) : 0;
 }
 
 function shade(color: number, f: number): number {
@@ -129,9 +131,9 @@ function drawTilePrism(
   g: Graphics,
   terrain: Terrain,
   ownerColor: number | null,
+  e: number,
 ): void {
   g.clear();
-  const e = TERRAIN_ELEVATION[terrain];
   const top = TERRAIN_TOP[terrain];
   const hw = TILE_WIDTH / 2;
   const hh = TILE_HEIGHT / 2;
@@ -223,7 +225,7 @@ export function createBoardRenderer(
       // Terrain is generated once at load and never changes, so the elevation
       // (and the raised hover/selection overlays) can be fixed at creation.
       const terrain = initial.provinces.get(id)?.terrain ?? "PLAINS";
-      const elevation = TERRAIN_ELEVATION[terrain];
+      const elevation = tileElevation(terrain, x, y);
 
       const base = new Graphics();
       node.addChild(base);
@@ -292,7 +294,7 @@ export function createBoardRenderer(
       } else if (province.isCastle && province.castleOwner !== null) {
         ownerColor = FACTION_COLORS[province.castleOwner];
       }
-      drawTilePrism(t.base, t.terrain, ownerColor);
+      drawTilePrism(t.base, t.terrain, ownerColor, t.elevation);
       if (province.isCastle) {
         drawCastleMarker(t.base);
       }

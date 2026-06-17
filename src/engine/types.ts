@@ -3,9 +3,11 @@ export type FactionId = "TOKUGAWA" | "TAKEDA" | "ODA" | "UESUGI" | "NEUTRAL";
 export type Tier = "SOLDIER" | "KNIGHT" | "QUEEN" | "KING";
 
 // PRD §3.9 (v1.6): per-tile terrain. PLAINS is the neutral baseline. MOUNTAIN
-// and WATER are impassable (can't be entered / claimed / pathed through). HILL
-// and FOREST give the unit standing on them a defensive damage reduction.
-export type Terrain = "PLAINS" | "HILL" | "MOUNTAIN" | "WATER" | "FOREST";
+// and WATER are impassable (can't be entered / claimed / pathed through). FOREST
+// gives the unit standing on it a defensive damage reduction. Only MOUNTAIN is
+// rendered with height (a continuous wave); the rest are flat, told apart by
+// colour.
+export type Terrain = "PLAINS" | "MOUNTAIN" | "WATER" | "FOREST";
 
 export type TileId = string;
 
