@@ -60,6 +60,30 @@ function spriteScale(texture: Texture): number {
   return (TILE_WIDTH * MARCHING_TILE_FRACTION) / texture.width;
 }
 
+// The marching layer renders above the units layer, so a column sharing a tile
+// with a garrison would sit right on top of it (two sprites + two count labels
+// overlapping). Lift every in-transit / besieging column off the tile centre,
+// and additionally lean a besieging column toward its target — so a siege
+// launched from a garrisoned tile (e.g. a castle that kept a reserve) reads as
+// a separate force pushing at the edge instead of stacking on the garrison.
+const COLUMN_LIFT = 7;
+const SIEGE_LEAN = 0.4;
+
+function columnPos(
+  curTile: TileId,
+  leanToward: TileId | undefined,
+): { x: number; y: number } {
+  const c = tileCenter(curTile);
+  let x = c.x;
+  let y = c.y - COLUMN_LIFT;
+  if (leanToward !== undefined) {
+    const t = tileCenter(leanToward);
+    x += (t.x - c.x) * SIEGE_LEAN;
+    y += (t.y - c.y) * SIEGE_LEAN;
+  }
+  return { x, y };
+}
+
 export function createMarchingRenderer(
   textures: TierTextures,
   events: MarchingRendererEvents = {},
@@ -81,14 +105,12 @@ export function createMarchingRenderer(
     readonly prevForNew: TileId;
     readonly animate: boolean; // false = static (a besieging siege column)
     readonly cancelId?: string; // only marching stacks are right-click cancellable
+    readonly leanToward?: TileId; // besieging target — lean toward it
   };
 
   function createColumnGfx(v: ColumnView): MarchGfx {
     const node = new Container();
-    // One z-step above the tile face but below garrisoned units (board.ts puts
-    // units at x+y+0.5). Use x+y+0.25 so a marcher / besieger doesn't occlude a
-    // same-tile defender.
-    const c = tileCenter(v.prevForNew);
+    const c = columnPos(v.prevForNew, v.leanToward);
     node.position.set(c.x, c.y);
     const { x: ix, y: iy } = parseTileId(v.prevForNew);
     node.zIndex = ix + iy + 0.25;
@@ -148,7 +170,7 @@ export function createMarchingRenderer(
       gfx.sprite.scale.set(spriteScale(tierTex));
     }
 
-    const target = tileCenter(v.curTile);
+    const target = columnPos(v.curTile, v.leanToward);
     gsap.killTweensOf(gfx.node.position);
     if (!v.animate || gfx.prevTile === v.curTile) {
       gfx.node.position.set(target.x, target.y);
@@ -156,7 +178,7 @@ export function createMarchingRenderer(
       // Seed the start explicitly so a mid-flight tick-rate change doesn't
       // strand the sprite between tiles.
       if (isNew) {
-        const startC = tileCenter(gfx.prevTile);
+        const startC = columnPos(gfx.prevTile, v.leanToward);
         gfx.node.position.set(startC.x, startC.y);
       }
       gsap.to(gfx.node.position, {
@@ -208,6 +230,7 @@ export function createMarchingRenderer(
           curTile: o.from,
           prevForNew: o.from,
           animate: false,
+          leanToward: o.to,
         },
         tickIntervalMs,
       );
