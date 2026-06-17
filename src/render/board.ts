@@ -52,8 +52,6 @@ const DECOR = {
   LEAF: 0x357a3c,
   LEAF_HI: 0x4f9a52,
   RIPPLE: 0x6fa0d8,
-  ROCK: 0x9a9aa2,
-  ROCK_DARK: 0x55555c,
   SNOW: 0xeef2f6,
 } as const;
 
@@ -208,24 +206,9 @@ function drawTerrainDecor(
       const [dx, dy] = diamondPoint(rng, e, 0.6);
       drawRipple(g, dx, dy);
     }
-  } else if (terrain === "MOUNTAIN") {
-    if (e >= MOUNTAIN_UNIT_PX * 2) {
-      const hw = (TILE_WIDTH / 2) * 0.5;
-      const hh = (TILE_HEIGHT / 2) * 0.5;
-      g.moveTo(0, -e - hh);
-      g.lineTo(hw, -e);
-      g.lineTo(0, -e + hh);
-      g.lineTo(-hw, -e);
-      g.closePath();
-      g.fill({ color: DECOR.SNOW, alpha: 0.92 });
-    }
-    const n = 2 + Math.floor(rng() * 2);
-    for (let i = 0; i < n; i++) {
-      const [dx, dy] = diamondPoint(rng, e, 0.55);
-      g.rect(dx, dy, 1.6, 1.2);
-      g.fill({ color: rng() < 0.5 ? DECOR.ROCK : DECOR.ROCK_DARK });
-    }
   }
+  // MOUNTAIN has no flat-top decor — its snow cap and shaded rock faces are
+  // drawn as part of the peak geometry in drawMountainPeak.
 }
 
 const HOVER_COLOR = 0xffffff;
@@ -287,6 +270,76 @@ function quad(
   g.closePath();
 }
 
+function tri(
+  g: Graphics,
+  x0: number, y0: number,
+  x1: number, y1: number,
+  x2: number, y2: number,
+): void {
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.lineTo(x2, y2);
+  g.closePath();
+}
+
+// PRD §3.9: cap a mountain's cube tower with a pyramidal peak — two shaded
+// front faces (left darker, right lit) meeting at an apex above the tile,
+// topped with a snow cap — so mountains read as pointed peaks rather than
+// flat-topped cubes. Taller (more interior) tiles get a higher apex, so the
+// mass still rises into a curved ridge. The apex sits above the tile's back
+// corner, folding the rear faces out of sight under the 45° camera.
+function drawMountainPeak(
+  g: Graphics,
+  top: number,
+  ownerColor: number | null,
+  e: number,
+): void {
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  const cap = MOUNTAIN_UNIT_PX * MOUNTAIN_MAX_UNITS;
+  const peakH = TILE_HEIGHT * 0.7 + Math.min(e, cap) * 0.25;
+  const ax = 0;
+  const ay = -e - peakH;
+  const wx = -hw, wy = -e; // left rim corner
+  const ex = hw, ey = -e; // right rim corner
+  const sx = 0, sy = hh - e; // front rim corner
+
+  tri(g, wx, wy, ax, ay, sx, sy);
+  g.fill({ color: shade(top, 0.62) });
+  tri(g, ax, ay, ex, ey, sx, sy);
+  g.fill({ color: shade(top, 0.85) });
+
+  // Snow cap: the upper slice of each face, bounded by points a fraction of
+  // the way down the left/right ridges and the centre seam.
+  const t = 0.42;
+  const lx = ax + (wx - ax) * t, ly = ay + (wy - ay) * t;
+  const rx = ax + (ex - ax) * t, ry = ay + (ey - ay) * t;
+  const mx = ax + (sx - ax) * t, my = ay + (sy - ay) * t;
+  tri(g, ax, ay, lx, ly, mx, my);
+  g.fill({ color: shade(DECOR.SNOW, 0.88) });
+  tri(g, ax, ay, rx, ry, mx, my);
+  g.fill({ color: DECOR.SNOW });
+
+  if (ownerColor !== null) {
+    g.moveTo(wx, wy);
+    g.lineTo(ax, ay);
+    g.lineTo(ex, ey);
+    g.lineTo(sx, sy);
+    g.closePath();
+    g.fill({ color: ownerColor, alpha: 0.3 });
+  }
+
+  g.moveTo(wx, wy);
+  g.lineTo(ax, ay);
+  g.lineTo(ex, ey);
+  g.lineTo(sx, sy);
+  g.closePath();
+  g.stroke({ color: TILE_OUTLINE_COLOR, width: 1, alpha: 1 });
+  g.moveTo(ax, ay);
+  g.lineTo(sx, sy);
+  g.stroke({ color: shade(top, 0.42), width: 1, alpha: 0.7 });
+}
+
 // PRD §3.9 (v1.6): draw a tile as an iso prism — front-left/front-right side
 // walls under a raised top face — coloured by terrain, with the owner colour
 // tinted over the top. PLAINS/WATER have zero elevation (flat diamond).
@@ -312,6 +365,10 @@ function drawTilePrism(
       g.lineTo(TILE_WIDTH / 2, -h);
       g.stroke({ color: shade(top, 0.38), width: 1, alpha: 0.85 });
     }
+  }
+  if (terrain === "MOUNTAIN" && e > 0) {
+    drawMountainPeak(g, top, ownerColor, e);
+    return;
   }
   diamondPathAt(g, e);
   g.fill({ color: top, alpha: 1 });
