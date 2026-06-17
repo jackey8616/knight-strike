@@ -1,0 +1,49 @@
+name: CI
+
+# Single quality gate for the project (CLAUDE.md §6 / §8.4 milestone-done
+# checks). Runs on every PR before merge, and on every push to main — where a
+# green run is what triggers deploy.yml via workflow_run, so deploy never ships
+# code CI hasn't validated.
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to the same PR makes earlier runs obsolete — cancel them.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.3.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:coverage
+      - run: pnpm build
+      # Headless smoke: the engine must run a full game to completion without
+      # crashing. Matches the milestone-done check in CLAUDE.md §6.
+      - run: pnpm playtest src/scenarios/default.json --runs 10
+      # Engine coverage (§5.1 target ≥ 90%) is enforced at PR review, so surface
+      # the report as an artifact rather than hard-failing the build on it.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage
+          if-no-files-found: ignore
