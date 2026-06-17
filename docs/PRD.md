@@ -72,13 +72,13 @@
   - **§3.2 step order**：combat phase 的 `resolveOrders` 現在除了結算 siege，還會在 capture 時**生成 / 推進 marching stack**（回寫 `marchingStacks` 與 `nextMarchingId`）。
   - **production freeze**：被圍攻的目標格（任一 order 的 `to`）暫停 self-replicate（縱隊兵力 `order.count` 本就不是 occupant，不另外 freeze `from`）。
   - 設計意圖：玩家一次拖曳即可下達「沿這條線打過去」的征服指令，免去 v1.4 逐格手動派遣的繁瑣；同時保留每格 siege 的成本與節奏，長線征服會自然因兵力耗盡而停。AI 仍 deferred。
-- v1.6 — **地形（terrain）**：把 §8 future scope 的「地形效果」落地為 §3.9。每個 tile 有 `terrain: Terrain`（`PLAINS` / `HILL` / `MOUNTAIN` / `WATER` / `FOREST`），seeded 程序生成。
+- v1.6 — **地形（terrain）**：把 §8 future scope 的「地形效果」落地為 §3.9。每個 tile 有 `terrain: Terrain`（`PLAINS` / `MOUNTAIN` / `WATER` / `FOREST`），seeded 程序生成。
   - **不可通行（MOUNTAIN / WATER）**：不能進駐、不能攻佔、不能作 BFS 中間經過格，也不能當派遣目標（§3.5.2 findPath：目標為不可通行 → null；中間經過格為不可通行 → 不入列，征服行軍最短路徑改為繞過）。
-  - **防禦減傷（§3.6'）**：站在 `HILL` 的單位受到的戰鬥傷害 ×0.5、`FOREST` ×0.75（`applyTerrainDefense` 用 `ceil`，傷害 ≥1 永不歸零以免卡死）。攻方縱隊受還擊時按**自身所在格（from）**地形減傷；守軍受傷按**自身所在格（to）**地形減傷。
-  - **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)` 由 scenario `rngSeed` 決定 —— 撒佈有機 blob（丘/林常見、山/水稀少），主城與中立據點及其四鄰強制 `PLAINS`，最後跑連通修復（carve L 型 PLAINS 走廊）保證所有固定點在可通行地形上互相連通（不會把主城封死）。
+  - **防禦減傷（§3.6'）**：站在 `FOREST` 的單位受到的戰鬥傷害 ×0.75（`applyTerrainDefense` 用 `ceil`，傷害 ≥1 永不歸零以免卡死）。攻方縱隊受還擊時按**自身所在格（from）**地形減傷；守軍受傷按**自身所在格（to）**地形減傷。
+  - **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)` 由 scenario `rngSeed` 決定 —— 撒佈有機 blob（林常見、山成嶺、水稀少），主城與中立據點及其四鄰強制 `PLAINS`，最後跑連通修復（carve L 型 PLAINS 走廊）保證所有固定點在可通行地形上互相連通（不會把主城封死）。
   - **資料模型**：`Province.terrain?: Terrain`（optional，舊 fixture 省略 → 視為 `PLAINS`，引擎行為不變）。helpers 在 `engine/terrain.ts`：`isImpassableTerrain`、`applyTerrainDefense`、`generateTerrain`。
-  - **渲染（§5.1）**：tile 畫成 iso 稜柱（prism）—— 丘/林/山有高度（top face 抬升 + 前左/前右側牆），地形色為 base、所有權色半透明疊在 top face；單位 / 行軍縱隊抬到地形頂面。**45° 遮擋處理**：抬高的地形若其「後方（被遮擋）」格上有單位，該地形 prism 淡化（alpha 0.4），確保視野不被擋（使用者指定）。
-  - 新增 AC-V6-01..05（見 §7.4）。AI 仍 deferred。
+  - **渲染（§5.1）**：**只有山有高度** —— 山以「連續波（mountain wave，高度為座標的平滑函數）」繪製,相鄰山格高度平滑變化形成綿延山嶺,而非等高方塊;平原 / 水 / 林為平面,僅以**顏色**區分。山畫成 iso 稜柱（top face 抬升 + 前左/前右側牆）。**45° 遮擋處理**：抬高的山格若其「後方（被遮擋）」格上有單位,該山 prism 淡化（alpha 0.4）,確保視野不被擋。所有可通行地形皆為平面,單位不再抬升。
+  - 新增 AC-V6-01..05（見 §7.4）。設計微調：移除 `HILL`、林去高度（只留顏色 + 減傷）、山改連續波。AI 仍 deferred。
 
 ## 1. 願景與背景
 
@@ -385,21 +385,22 @@ v0.12 以前 §3.5 / §3.6 / §3.7 多處用「相鄰」、「鄰格」、「距
 
 ### 3.9 地形（terrain，v1.6）
 
-每個 tile 持有 `terrain: Terrain`（`PLAINS` / `HILL` / `MOUNTAIN` / `WATER` / `FOREST`）。`PLAINS` 為中性 baseline。
+每個 tile 持有 `terrain: Terrain`（`PLAINS` / `MOUNTAIN` / `WATER` / `FOREST`）。`PLAINS` 為中性 baseline。**只有山有高度**（連續波）；其餘為平面，僅以顏色區分。
 
 - **不可通行（MOUNTAIN / WATER）**：永遠不能進駐、攻佔、或作為 BFS 中間經過格，也不能作派遣目標。
   - §3.5.2 findPath：目標格不可通行 → 回 `null`；中間經過格不可通行 → 不入列（征服行軍的最短路徑自動繞開）。
-- **防禦減傷（HILL / FOREST）**：套在 §3.6' 戰鬥傷害上。`applyTerrainDefense(dmg, terrain)`：
+- **防禦減傷（FOREST）**：套在 §3.6' 戰鬥傷害上。`applyTerrainDefense(dmg, terrain)`：
 
   | terrain | 倍率 | 套用對象 |
   | ------- | ---- | -------- |
   | PLAINS  | ×1   | — |
-  | HILL    | ×0.5 | 站在該格的單位受到的傷害 |
-  | FOREST  | ×0.75| 同上 |
+  | FOREST  | ×0.75| 站在該格的單位受到的傷害 |
+  | MOUNTAIN / WATER | ×1 | 不可通行,永無單位 |
 
   - 用 `Math.ceil` 確保任何 ≥1 的傷害減免後仍 ≥1（不會歸零卡死）。
   - 攻方縱隊受守方還擊：按**攻方所在格（`from`）**地形減傷。守軍受攻方傷害：按**守軍所在格（`to`）**地形減傷。
-- **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)`（`engine/terrain.ts`，純函數）。seed 取自 scenario `rngSeed`。流程：撒佈有機 blob（丘/林權重高、山/水低）→ 強制 `fixedPlains`（主城 + 中立據點）及其四鄰為非不可通行 → **連通修復**：BFS 可通行地形，對未連通的固定點 carve L 型 `PLAINS` 走廊，保證所有固定點互相連通（任何主城都不會被地形封死）。
+- **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)`（`engine/terrain.ts`，純函數）。seed 取自 scenario `rngSeed`。流程：撒佈有機 blob（林權重高、山成嶺、水低）→ 強制 `fixedPlains`（主城 + 中立據點）及其四鄰為非不可通行 → **連通修復**：BFS 可通行地形，對未連通的固定點 carve L 型 `PLAINS` 走廊，保證所有固定點互相連通（任何主城都不會被地形封死）。
+- **渲染（§5.1）**：只有山有高度 —— 以連續波（高度 = 座標的平滑函數）繪製成綿延山嶺的 iso 稜柱；平原 / 水 / 林為平面，僅以顏色區分。山若遮擋到後方有單位的格 → prism 淡化（alpha 0.4）。可通行地形皆平面，單位不抬升。
 - **資料模型**：`Province.terrain?: Terrain`（optional；舊 fixture 省略 → 視為 `PLAINS`）。生產 / self-replicate（§3.3）不受影響（不可通行格永無 occupant）。
 
 ## 4. 非玩家勢力控制（v1.0 暫定，AI 規格 deferred）
@@ -583,11 +584,11 @@ v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI
 
 | #        | 條件 | 驗證 |
 | -------- | ---- | ---- |
-| AC-V6-01 | **防禦減傷公式**：`applyTerrainDefense` —— HILL ×0.5、FOREST ×0.75、PLAINS ×1，用 `ceil`（傷害 ≥1 永不歸零）；undefined 視為 PLAINS | Headless |
+| AC-V6-01 | **防禦減傷公式**：`applyTerrainDefense` —— FOREST ×0.75、PLAINS ×1，用 `ceil`（傷害 ≥1 永不歸零）；undefined 視為 PLAINS | Headless |
 | AC-V6-02 | **固定點淨空**：seeded `generateTerrain` 後，主城 + 中立據點恆為 `PLAINS`，且其四鄰無不可通行地形 | Headless：多 seed |
 | AC-V6-03 | **連通保證**：所有固定點在可通行地形上互相連通（BFS 可達） | Headless：多 seed |
 | AC-V6-04 | **不可通行阻擋**：山/水不能作派遣目標（`findPath` → null）；征服行軍最短路徑繞過山/水（path 不含該格） | Headless |
-| AC-V6-05 | **戰鬥減傷**：守軍站在 HILL → 受到的 §3.6' 傷害減半（`ceil`） | Headless |
+| AC-V6-05 | **戰鬥減傷**：守軍站在 FOREST → 受到的 §3.6' 傷害 ×0.75（`ceil`） | Headless |
 
 ## 8. 範圍外（Future Scope）
 
