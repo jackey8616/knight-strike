@@ -42,14 +42,5 @@
     "vitest.config.ts",
     "eslint.config.js"
   ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "src/game",
-    "src/map",
-    "src/unit",
-    "src/manager",
-    "src/event",
-    "src/namedMap"
-  ]
+  "exclude": ["node_modules", "dist"]
 }
