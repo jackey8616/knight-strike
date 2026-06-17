@@ -123,7 +123,7 @@
 
 - 全域時鐘以 **2 秒 / tick** 推進。HUD 顯示當前 tick 數與下一 tick 倒數。
 - **Tick 編號約定**：Tick 0 為初始狀態（僅渲染、無結算）。Tick 1 起執行下述六步結算順序。產兵於 tick 2 首次觸發（「每 2 ticks +1」= tick 2, 4, 6, ...）。v0.12 期間還規範了四家 AI 的評估偏移（Tokugawa tick 1、Takeda tick 2 等，每 5 ticks 一次），隨 §4.3 一併移出 v1.0；`engine/ai.ts` 的 `shouldEvaluate` 程式碼仍存在但屬規格 orphan。
-- 暫停 / 繼續 / 變速 (1x / 2x) 支援；變速影響 tick 實際間隔。
+- 暫停 / 繼續 / 變速 (1x / 2x / 3x / 4x) 支援；變速影響 tick 實際間隔（`TICK_INTERVAL_MS / speed`）。
 - 每個 tick 結算順序固定（v1.4）：
   1. **Movement + 抵達**：marching stack `idx++`、§3.5.4' 抵達結算 —— 抵達己方格 → 部隊移入 occupant（併入 / 新增）；抵達 staging tile（終點為非己方目標）→ 併入 staging occupant + 建立 / 更新 `AttackOrder`。所有加法寫回。
   2. **Production（產兵）**：每座 castle 為「castleOwner faction 在該 castle tile 上的 occupant」amount +1（§3.3 細則）；亦屬加法。
@@ -407,7 +407,7 @@ v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI
 
 ### 5.2 HUD 與 UI 面板
 
-- **頂部 Bar**：當前 tick 數、下一 tick 倒數條、暫停 / 1x / 2x 按鈕。
+- **頂部 Bar**：當前 tick 數、下一 tick 倒數條、暫停 / 1x / 2x / 3x / 4x 按鈕。
 - **左下 Faction Panel**：4 勢力小頭像，顯示各自控制格數、總兵力、主城狀態（活 / 失）。玩家自己高亮。
 - **右下 Tile Info Panel**：滑鼠 hover 任一格時顯示 `所有權 / tier / count / 是否主城`。
 - **派遣中 Tooltip**：拖曳時跟隨游標顯示「派遣 X 兵 → 目標格（距離 Y tick）」；同步顯示派遣比例滑桿。
@@ -425,7 +425,7 @@ v0.12 期間 §4 規定四家勢力都有 AI 自動派兵、生產；v1.0 把 AI
 | **中鍵 / 滾輪**       | 縮放（zoom，限制 1x / 2x / 3x 整數）|
 | **方向鍵 / WASD**     | 平移視窗（鍵盤替代）                |
 | **`Space`**           | 暫停 / 繼續                         |
-| **`1` / `2`**         | 1x / 2x 倍速                        |
+| **`1` / `2` / `3` / `4`** | 1x / 2x / 3x / 4x 倍速              |
 | **`R`**               | 重置攝影機到棋盤中央                |
 | **`Esc`**             | 取消當前拖曳派遣                    |
 

@@ -32,7 +32,7 @@ const TICK_INTERVAL_MS = 2000;
 const MOUNT_ID = "app";
 const PLAYER_FACTION: FactionId = "TOKUGAWA";
 
-type Speed = 1 | 2;
+type Speed = 1 | 2 | 3 | 4;
 
 async function bootstrap(): Promise<void> {
   const container = document.getElementById(MOUNT_ID);

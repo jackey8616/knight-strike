@@ -1,4 +1,4 @@
-export type Speed = 1 | 2;
+export type Speed = 1 | 2 | 3 | 4;
 
 export type KeyboardDeps = {
   isPaused(): boolean;
@@ -69,6 +69,12 @@ export function createKeyboardController(
         return;
       case "2":
         deps.setSpeed(2);
+        return;
+      case "3":
+        deps.setSpeed(3);
+        return;
+      case "4":
+        deps.setSpeed(4);
         return;
       case "Escape":
         deps.cancelDrag();

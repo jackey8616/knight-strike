@@ -1,4 +1,6 @@
-export type HudSpeed = 1 | 2;
+export type HudSpeed = 1 | 2 | 3 | 4;
+
+const SPEEDS: readonly HudSpeed[] = [1, 2, 3, 4];
 
 export type HudStatus = {
   readonly tick: number;
@@ -95,19 +97,16 @@ export function createHud(parent: HTMLElement, deps: HudDeps): Hud {
   pauseBtn.addEventListener("click", () => deps.onTogglePause());
   root.appendChild(pauseBtn);
 
-  const speed1Btn = document.createElement("button");
-  speed1Btn.type = "button";
-  speed1Btn.style.cssText = BTN_BASE;
-  speed1Btn.textContent = "1x";
-  speed1Btn.addEventListener("click", () => deps.onSpeed(1));
-  root.appendChild(speed1Btn);
-
-  const speed2Btn = document.createElement("button");
-  speed2Btn.type = "button";
-  speed2Btn.style.cssText = BTN_BASE;
-  speed2Btn.textContent = "2x";
-  speed2Btn.addEventListener("click", () => deps.onSpeed(2));
-  root.appendChild(speed2Btn);
+  const speedBtns: { readonly speed: HudSpeed; readonly el: HTMLButtonElement }[] = [];
+  for (const s of SPEEDS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = BTN_BASE;
+    btn.textContent = `${s}x`;
+    btn.addEventListener("click", () => deps.onSpeed(s));
+    root.appendChild(btn);
+    speedBtns.push({ speed: s, el: btn });
+  }
 
   let cur: HudStatus = { tick: 0, paused: false, speed: 1, intervalMs: 2000 };
   let lastTickAt = performance.now();
@@ -118,8 +117,9 @@ export function createHud(parent: HTMLElement, deps: HudDeps): Hud {
   function paintControls(): void {
     pauseBtn.textContent = cur.paused ? "Resume" : "Pause";
     pauseBtn.style.cssText = cur.paused ? BTN_ACTIVE : BTN_BASE;
-    speed1Btn.style.cssText = cur.speed === 1 ? BTN_ACTIVE : BTN_BASE;
-    speed2Btn.style.cssText = cur.speed === 2 ? BTN_ACTIVE : BTN_BASE;
+    for (const { speed, el } of speedBtns) {
+      el.style.cssText = cur.speed === speed ? BTN_ACTIVE : BTN_BASE;
+    }
     tickLabel.textContent = `Tick ${cur.tick}`;
   }
 
