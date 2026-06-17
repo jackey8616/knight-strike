@@ -159,21 +159,49 @@ export function createUnitsRenderer(
       dispatchOut.set(src, (dispatchOut.get(src) ?? 0) + m.count);
     }
 
+    // PRD §5.1 one-unit-per-faction-per-tile: same-faction columns (marching
+    // stacks + besieging orders) sitting on a tile. The marching layer skips
+    // drawing them when a garrison shares the tile; here we fold their troops
+    // into that garrison's single sprite so the tile shows one combined unit.
+    const columnsByTile = new Map<TileId, Map<FactionId, number>>();
+    const addColumn = (tile: TileId, faction: FactionId, n: number): void => {
+      let bucket = columnsByTile.get(tile);
+      if (bucket === undefined) {
+        bucket = new Map<FactionId, number>();
+        columnsByTile.set(tile, bucket);
+      }
+      bucket.set(faction, (bucket.get(faction) ?? 0) + n);
+    };
+    for (const m of state.marchingStacks) {
+      const t = m.path[m.idx];
+      if (t !== undefined) addColumn(t, m.faction, m.count);
+    }
+    for (const o of state.attackOrders) addColumn(o.from, o.faction, o.count);
+
     for (const province of state.provinces.values()) {
       // PRD §3.4 v1.2: pick the dominant occupant for rendering. Contested
       // tiles will visually appear as the largest faction (with the actual
       // multi-occupant breakdown surfaced via tile-info hover instead).
       let display: { faction: FactionId; amount: number } | null = null;
-      let totalAmount = 0;
+      let garrisonTotal = 0;
       for (const o of province.occupants) {
-        totalAmount += o.amount;
+        garrisonTotal += o.amount;
         if (display === null || o.amount > display.amount) {
           display = { faction: o.faction, amount: o.amount };
         }
       }
       const renderFaction = display?.faction ?? province.castleOwner ?? "NEUTRAL";
-      const renderAmount = display?.amount ?? 0;
-      const tier = deriveTier(renderAmount);
+      // Fold in same-faction columns the marching layer suppressed here (only
+      // when a garrison is actually present, matching that suppression rule).
+      // The count label + sprite tier use the combined total; the combat-bump
+      // and dispatch heuristics below stay on the garrison total so a column
+      // passing through doesn't fire a spurious flash.
+      let extra = 0;
+      if (display !== null && display.amount > 0) {
+        extra = columnsByTile.get(province.id)?.get(display.faction) ?? 0;
+      }
+      const shownTotal = garrisonTotal + extra;
+      const tier = deriveTier(shownTotal);
       let gfx = units.get(province.id);
       const isNew = gfx === undefined;
       if (gfx === undefined) {
@@ -182,7 +210,7 @@ export function createUnitsRenderer(
           province.x,
           province.y,
           renderFaction,
-          renderAmount,
+          shownTotal,
           textures,
         );
         container.addChild(gfx.node);
@@ -196,14 +224,14 @@ export function createUnitsRenderer(
       const targetScale = tierScale(tier, tierTexture);
       gfx.sprite.tint = FACTION_COLORS[renderFaction];
       gfx.sprite.scale.set(targetScale);
-      gfx.count.text = totalAmount > 0 ? String(totalAmount) : "";
-      gfx.node.visible = totalAmount > 0;
+      gfx.count.text = shownTotal > 0 ? String(shownTotal) : "";
+      gfx.node.visible = shownTotal > 0;
 
       if (!isNew) {
         if (TIER_RANK[tier] > TIER_RANK[gfx.prevTier]) {
           playUpgradeFx(gfx.sprite, targetScale);
         }
-        const drop = gfx.prevCount - totalAmount;
+        const drop = gfx.prevCount - garrisonTotal;
         const dispatched = dispatchOut.get(province.id) ?? 0;
         const combatLoss = drop - dispatched;
         const overtaken =
@@ -216,7 +244,7 @@ export function createUnitsRenderer(
       }
 
       gfx.prevTier = tier;
-      gfx.prevCount = totalAmount;
+      gfx.prevCount = garrisonTotal;
       gfx.prevOwner = renderFaction;
     }
   }

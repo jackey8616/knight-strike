@@ -10,7 +10,12 @@ import {
 import { gsap } from "gsap";
 
 import { parseTileId } from "@/engine/state";
-import type { FactionId, GameState, TileId } from "@/engine/types";
+import type {
+  FactionId,
+  GameState,
+  MarchingStack,
+  TileId,
+} from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
 import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
@@ -60,39 +65,20 @@ function spriteScale(texture: Texture): number {
   return (TILE_WIDTH * MARCHING_TILE_FRACTION) / texture.width;
 }
 
-// The marching layer renders above the units layer, so a column sharing a tile
-// with a garrison would sit right on top of it (two sprites + two count labels
-// overlapping). Only when a garrison actually shares the tile do we nudge the
-// column off-centre: lift it, and (for a besieger) lean toward its target so it
-// reads as a separate force at the edge. With no garrison to avoid, the column
-// stays centred on its tile like a normal unit.
-const COLUMN_LIFT = 7;
-const SIEGE_LEAN = 0.32;
-
-function columnPos(
-  curTile: TileId,
-  leanToward: TileId | undefined,
-  offset: boolean,
-): { x: number; y: number } {
-  const c = tileCenter(curTile);
-  if (!offset) return { x: c.x, y: c.y };
-  let x = c.x;
-  let y = c.y - COLUMN_LIFT;
-  if (leanToward !== undefined) {
-    const t = tileCenter(leanToward);
-    x += (t.x - c.x) * SIEGE_LEAN;
-    y += (t.y - c.y) * SIEGE_LEAN;
-  }
-  return { x, y };
-}
-
-// A garrison (any occupant with troops) shares the given tile — the only case
-// where a column would visually overlap a stationary unit.
-function tileHasGarrison(state: GameState, id: TileId): boolean {
+// PRD §5.1 one-unit-per-faction-per-tile: a column that shares a tile with a
+// same-faction garrison is folded into that garrison's sprite by the units
+// layer (its count added there), so the marching layer skips drawing it.
+// Columns on a garrison-free tile are drawn here, centred like a normal unit,
+// and multiple same-faction columns on one tile collapse into a single sprite.
+function garrisonAmount(
+  state: GameState,
+  id: TileId,
+  faction: FactionId,
+): number {
   const p = state.provinces.get(id);
-  if (p === undefined) return false;
-  for (const o of p.occupants) if (o.amount > 0) return true;
-  return false;
+  if (p === undefined) return 0;
+  for (const o of p.occupants) if (o.faction === faction) return o.amount;
+  return 0;
 }
 
 export function createMarchingRenderer(
@@ -115,14 +101,13 @@ export function createMarchingRenderer(
     // place (the path step we came from, or the staging tile for a siege).
     readonly prevForNew: TileId;
     readonly animate: boolean; // false = static (a besieging siege column)
-    readonly cancelId?: string; // only marching stacks are right-click cancellable
-    readonly leanToward?: TileId; // besieging target — lean toward it
-    readonly offset: boolean; // nudge off-centre (a garrison shares the tile)
+    // Marching stacks merged into this sprite — right-click cancels them all.
+    readonly cancelIds: readonly string[];
   };
 
   function createColumnGfx(v: ColumnView): MarchGfx {
     const node = new Container();
-    const c = columnPos(v.prevForNew, v.leanToward, v.offset);
+    const c = tileCenter(v.prevForNew);
     node.position.set(c.x, c.y);
     const { x: ix, y: iy } = parseTileId(v.prevForNew);
     node.zIndex = ix + iy + 0.25;
@@ -144,8 +129,8 @@ export function createMarchingRenderer(
     // pointer button; the controller catches the event before our window-level
     // pointer listener so the press doesn't auto-pause via the canvas DOM
     // pointerdown either.
-    if (events.onCancel !== undefined && v.cancelId !== undefined) {
-      const cancelId = v.cancelId;
+    if (events.onCancel !== undefined && v.cancelIds.length > 0) {
+      const cancelIds = v.cancelIds;
       node.eventMode = "static";
       node.cursor = "pointer";
       node.hitArea = new Rectangle(
@@ -156,7 +141,7 @@ export function createMarchingRenderer(
       );
       node.on("rightdown", (e: FederatedPointerEvent) => {
         e.stopPropagation();
-        events.onCancel?.(cancelId);
+        for (const id of cancelIds) events.onCancel?.(id);
       });
     }
 
@@ -182,7 +167,7 @@ export function createMarchingRenderer(
       gfx.sprite.scale.set(spriteScale(tierTex));
     }
 
-    const target = columnPos(v.curTile, v.leanToward, v.offset);
+    const target = tileCenter(v.curTile);
     gsap.killTweensOf(gfx.node.position);
     if (!v.animate || gfx.prevTile === v.curTile) {
       gfx.node.position.set(target.x, target.y);
@@ -190,7 +175,7 @@ export function createMarchingRenderer(
       // Seed the start explicitly so a mid-flight tick-rate change doesn't
       // strand the sprite between tiles.
       if (isNew) {
-        const startC = columnPos(gfx.prevTile, v.leanToward, v.offset);
+        const startC = tileCenter(gfx.prevTile);
         gfx.node.position.set(startC.x, startC.y);
       }
       gsap.to(gfx.node.position, {
@@ -205,50 +190,85 @@ export function createMarchingRenderer(
     gfx.prevTile = v.curTile;
   }
 
+  // One renderable group per (tile, faction): the marching stacks currently on
+  // that tile plus any besieging order staged there. Their counts sum so the
+  // tile shows a single combined column.
+  type Group = {
+    readonly tile: TileId;
+    readonly faction: FactionId;
+    count: number;
+    readonly stacks: MarchingStack[];
+    hasOrder: boolean;
+  };
+
   function update(state: GameState, tickIntervalMs: number): void {
     const seen = new Set<string>();
 
+    const groups = new Map<string, Group>();
+    const ensure = (tile: TileId, faction: FactionId): Group => {
+      const key = `${tile}|${faction}`;
+      let g = groups.get(key);
+      if (g === undefined) {
+        g = { tile, faction, count: 0, stacks: [], hasOrder: false };
+        groups.set(key, g);
+      }
+      return g;
+    };
     for (const stack of state.marchingStacks) {
-      const curTile = stack.path[stack.idx] as TileId;
-      const prevForNew =
-        stack.idx > 0 ? (stack.path[stack.idx - 1] as TileId) : curTile;
-      renderColumn(
-        {
-          id: stack.id,
-          faction: stack.faction,
-          count: stack.count,
-          curTile,
-          prevForNew,
-          animate: true,
-          cancelId: stack.id,
-          offset: tileHasGarrison(state, curTile),
-        },
-        tickIntervalMs,
-      );
-      seen.add(stack.id);
+      const g = ensure(stack.path[stack.idx] as TileId, stack.faction);
+      g.count += stack.count;
+      g.stacks.push(stack);
+    }
+    // Besieging columns (AttackOrders) stage on `from`. Parking them there keeps
+    // a unit from vanishing while it grinds / breaks / captures a target, and
+    // reinforcements visibly grow the count.
+    for (const o of state.attackOrders) {
+      const g = ensure(o.from, o.faction);
+      g.count += o.count;
+      g.hasOrder = true;
     }
 
-    // Besieging columns (AttackOrders) — draw them parked on their staging tile
-    // so a unit doesn't vanish while it grinds / breaks / captures a target, and
-    // reinforcements visibly grow the column's count. The march→siege and
-    // siege→advance hand-offs both happen on `from`, so swapping sprites there
-    // stays visually continuous.
-    for (const o of state.attackOrders) {
-      const id = `order:${o.from}|${o.to}|${o.faction}`;
-      renderColumn(
-        {
-          id,
-          faction: o.faction,
-          count: o.count,
-          curTile: o.from,
-          prevForNew: o.from,
-          animate: false,
-          leanToward: o.to,
-          offset: tileHasGarrison(state, o.from),
-        },
-        tickIntervalMs,
-      );
-      seen.add(id);
+    for (const [key, g] of groups) {
+      // A same-faction garrison on this tile absorbs the column — the units
+      // layer renders the combined count, so skip drawing a second sprite.
+      if (garrisonAmount(state, g.tile, g.faction) > 0) continue;
+
+      const cancelIds = g.stacks.map((s) => s.id);
+      if (g.stacks.length === 1 && !g.hasOrder) {
+        // Lone marching stack: keep its own id so it tweens smoothly tile→tile.
+        const s = g.stacks[0] as MarchingStack;
+        const prevForNew = s.idx > 0 ? (s.path[s.idx - 1] as TileId) : g.tile;
+        renderColumn(
+          {
+            id: s.id,
+            faction: g.faction,
+            count: s.count,
+            curTile: g.tile,
+            prevForNew,
+            animate: true,
+            cancelIds,
+          },
+          tickIntervalMs,
+        );
+        seen.add(s.id);
+      } else {
+        // Multiple columns and/or a siege share the tile → one merged sprite,
+        // keyed to the tile so it's stable while the mix changes underneath.
+        const id = `grp:${key}`;
+        renderColumn(
+          {
+            id,
+            faction: g.faction,
+            count: g.count,
+            curTile: g.tile,
+            prevForNew: g.tile,
+            animate: false,
+            cancelIds,
+          },
+          tickIntervalMs,
+        );
+        seen.add(id);
+      }
     }
 
     for (const [id, gfx] of gfxById) {
