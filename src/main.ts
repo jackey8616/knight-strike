@@ -12,6 +12,7 @@ import {
   createDispatchController,
   createRatioPanel,
 } from "@/input/dispatch";
+import { createCameraGestures } from "@/input/camera";
 import { createKeyboardController } from "@/input/keyboard";
 import { createPointerController } from "@/input/pointer";
 import { buildInitialState } from "@/playtest/runner";
@@ -175,6 +176,13 @@ async function bootstrap(): Promise<void> {
     if (!paused) startTicker();
   });
 
+  const cameraGestures = createCameraGestures(render.app.canvas, {
+    zoomBy: (factor, fx, fy) => board.zoomBy(factor, fx, fy),
+    panBy: (dx, dy) => board.panBy(dx, dy),
+    onGestureStart: () => pointer.suspend(),
+    onGestureEnd: () => pointer.resume(),
+  });
+
   board.resize(render.app.screen.width, render.app.screen.height);
 
   const onResize = (): void => {
@@ -296,6 +304,7 @@ async function bootstrap(): Promise<void> {
       stopTicker();
       window.removeEventListener("resize", onResize);
       keyboard.destroy();
+      cameraGestures.destroy();
       pointer.destroy();
       ratioPanel.destroy();
       tileInfo.destroy();

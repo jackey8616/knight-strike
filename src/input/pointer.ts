@@ -22,6 +22,10 @@ export type PointerController = {
   onTileOver(id: TileId): void;
   onTileOut(id: TileId): void;
   cancelActiveDrag(): void;
+  // Mute single-pointer dispatch/select while a multi-touch camera gesture
+  // (pinch / 2-finger pan) is in progress, then re-enable it.
+  suspend(): void;
+  resume(): void;
   destroy(): void;
 };
 
@@ -49,6 +53,7 @@ export function createPointerController(
 ): PointerController {
   let hoverId: TileId | null = null;
   let press: PressState | null = null;
+  let suspended = false;
 
   function endPress(commit: "click" | "cancel"): void {
     if (press === null) return;
@@ -64,6 +69,7 @@ export function createPointerController(
   }
 
   function onPointerDown(e: PointerEvent): void {
+    if (suspended) return;
     if (press !== null) return;
     if (hoverId === null) return;
     const button = buttonToLogical(e.button);
@@ -123,6 +129,15 @@ export function createPointerController(
     endPress("cancel");
   }
 
+  function suspend(): void {
+    endPress("cancel");
+    suspended = true;
+  }
+
+  function resume(): void {
+    suspended = false;
+  }
+
   canvas.addEventListener("pointerdown", onPointerDown);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
@@ -141,6 +156,8 @@ export function createPointerController(
     onTileOver,
     onTileOut,
     cancelActiveDrag,
+    suspend,
+    resume,
     destroy,
   };
 }

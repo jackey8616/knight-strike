@@ -25,6 +25,10 @@ export async function createRenderApp(
     resolution: window.devicePixelRatio,
   });
 
+  // Let the game own all touch gestures (pinch-zoom / pan / drag-dispatch)
+  // instead of the browser scrolling or page-zooming the canvas away.
+  app.canvas.style.touchAction = "none";
+
   container.appendChild(app.canvas);
 
   return {

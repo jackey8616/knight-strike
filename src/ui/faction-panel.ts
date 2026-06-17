@@ -44,16 +44,17 @@ const ROOT_STYLE = [
   "color: #eee",
   "z-index: 20",
   "user-select: none",
-  "min-width: 200px",
+  "min-width: 150px",
 ].join(";");
 
 const ROW_BASE = [
   "display: grid",
-  "grid-template-columns: 14px 80px 1fr 60px",
+  "grid-template-columns: 12px auto 1fr auto",
   "gap: 6px",
   "align-items: center",
-  "padding: 2px 4px",
+  "padding: 1px 4px",
   "border-radius: 3px",
+  "white-space: nowrap",
 ].join(";");
 
 const ROW_PLAYER = ROW_BASE + ";background: rgba(255,255,255,0.08);";
@@ -137,10 +138,11 @@ export function createFactionPanel(
     name.textContent = SHORT[f] + (f === playerFaction ? " (You)" : "");
     row.appendChild(name);
     const stats = document.createElement("span");
-    stats.textContent = "0 tiles · 0 troops";
+    stats.textContent = "0t · 0";
+    stats.style.cssText = "text-align: right; opacity: 0.85;";
     row.appendChild(stats);
     const castle = document.createElement("span");
-    castle.textContent = "Castle ✓";
+    castle.textContent = "✓";
     castle.style.cssText = "text-align: right;";
     row.appendChild(castle);
     rows.set(f, row);
@@ -157,12 +159,13 @@ export function createFactionPanel(
       row.style.cssText = rowStyle(f === playerFaction, defeated);
       const statsEl = row.children[2];
       if (statsEl !== undefined) {
-        statsEl.textContent = `${s.tiles} tiles · ${s.total} troops`;
+        // tiles · troops, abbreviated so each faction stays on one line.
+        statsEl.textContent = `${s.tiles}t · ${s.total}`;
       }
       const castleEl = row.children[3];
       if (castleEl !== undefined) {
-        if (defeated) castleEl.textContent = "Defeated";
-        else castleEl.textContent = s.hasCastle ? "Castle ✓" : "Castle ✗";
+        if (defeated) castleEl.textContent = "☠";
+        else castleEl.textContent = s.hasCastle ? "✓" : "✗";
       }
     }
   }

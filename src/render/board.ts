@@ -60,6 +60,7 @@ export type BoardRenderer = {
   setSelection(id: TileId | null): void;
   resize(width: number, height: number): void;
   panBy(dx: number, dy: number): void;
+  zoomBy(factor: number, focalX: number, focalY: number): void;
   resetCamera(): void;
   destroy(): void;
 };
@@ -242,46 +243,98 @@ export function createBoardRenderer(
     }
   }
 
-  let centerX = 0;
-  let centerY = 0;
-  let camOffsetX = 0;
-  let camOffsetY = 0;
+  // Camera = fit-to-viewport scale × user zoom, plus a screen-space pan.
+  // userZoom 1 = "whole board fits" (the resting state); MAX_ZOOM lets the
+  // player lean into a single fight.
+  const MIN_ZOOM = 1;
+  const MAX_ZOOM = 5;
+  let viewW = 0;
+  let viewH = 0;
+  let fitScale = 1;
+  let userZoom = 1;
+  let panX = 0;
+  let panY = 0;
+
+  function effectiveScale(): number {
+    return fitScale * userZoom;
+  }
+
+  // Screen position of the iso origin (tile 0,0) when un-panned. iso x is
+  // symmetric around 0 → centre on width/2; iso y spans [0,(n-1)*TH] → shift up
+  // by half the (scaled) span.
+  function baseCenterY(s: number): number {
+    return viewH / 2 - (s * (boardSize - 1) * TILE_HEIGHT) / 2;
+  }
+
+  function clampPan(): void {
+    // Keep the board reachable — never let the pan fling the origin more than
+    // half a viewport from its centred spot.
+    const maxX = viewW / 2;
+    const maxY = viewH / 2;
+    panX = Math.max(-maxX, Math.min(maxX, panX));
+    panY = Math.max(-maxY, Math.min(maxY, panY));
+  }
 
   function applyTransform(): void {
+    const s = effectiveScale();
+    container.scale.set(s);
     container.position.set(
-      Math.round(centerX + camOffsetX),
-      Math.round(centerY + camOffsetY),
+      Math.round(viewW / 2 + panX),
+      Math.round(baseCenterY(s) + panY),
     );
   }
 
   function resize(width: number, height: number): void {
-    // Fit the whole iso board within the canvas so the entire battlefield is
-    // visible (it spans ~boardSize*TILE_WIDTH wide, which overflows a phone at
-    // native scale). Cap at 1 so desktop keeps native, crisp pixels; a small
-    // margin keeps the corners off the edges.
+    // Fit the whole iso board within the canvas (it spans ~boardSize*TILE_WIDTH
+    // wide, which overflows a phone). Cap at 1 so desktop keeps native crisp
+    // pixels; a small margin keeps the corners off the edges.
+    viewW = width;
+    viewH = height;
     const contentW = boardSize * TILE_WIDTH;
     const contentH = boardSize * TILE_HEIGHT;
-    const fit = Math.min(width / contentW, height / contentH) * 0.94;
-    const scale = Math.min(fit, 1);
-    container.scale.set(scale);
-
-    // Centre the iso block. iso x spans [-(n-1)*TW/2, (n-1)*TW/2] (symmetric
-    // around 0) and iso y spans [0, (n-1)*TH], so vertical centring needs the
-    // (scaled) upper-half offset.
-    centerX = width / 2;
-    centerY = height / 2 - (scale * (boardSize - 1) * TILE_HEIGHT) / 2;
+    fitScale = Math.min(
+      Math.min(width / contentW, height / contentH) * 0.94,
+      1,
+    );
     applyTransform();
   }
 
   function panBy(dx: number, dy: number): void {
-    camOffsetX += dx;
-    camOffsetY += dy;
+    panX += dx;
+    panY += dy;
+    clampPan();
+    applyTransform();
+  }
+
+  // Zoom by `factor` while keeping the world point under (focalX, focalY) — the
+  // cursor or pinch centroid, in canvas CSS px — fixed on screen. Snaps pan
+  // back to centre when zoomed all the way out so the fit view is the resting
+  // state.
+  function zoomBy(factor: number, focalX: number, focalY: number): void {
+    const sOld = effectiveScale();
+    const px = viewW / 2 + panX;
+    const py = baseCenterY(sOld) + panY;
+    const worldX = (focalX - px) / sOld;
+    const worldY = (focalY - py) / sOld;
+
+    userZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, userZoom * factor));
+    if (userZoom === MIN_ZOOM) {
+      panX = 0;
+      panY = 0;
+      applyTransform();
+      return;
+    }
+    const sNew = effectiveScale();
+    panX = focalX - sNew * worldX - viewW / 2;
+    panY = focalY - sNew * worldY - baseCenterY(sNew);
+    clampPan();
     applyTransform();
   }
 
   function resetCamera(): void {
-    camOffsetX = 0;
-    camOffsetY = 0;
+    userZoom = 1;
+    panX = 0;
+    panY = 0;
     applyTransform();
   }
 
@@ -298,6 +351,7 @@ export function createBoardRenderer(
     setSelection,
     resize,
     panBy,
+    zoomBy,
     resetCamera,
     destroy,
   };
