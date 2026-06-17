@@ -223,12 +223,14 @@ t = currentTick - order.startTick
 
 ### 6.2 HUD 與面板
 
-- **頂部 HUD**：當前 tick、下一 tick 倒數、暫停 + 1x/2x/3x/4x。
-- **Faction Panel**：4 勢力控制格數、總兵力、主城存活，玩家高亮。
-- **Tile Info**：hover 格顯示所有權 / tier / count / 是否主城。
-- **Map Size 選單**：切換 11 / 15 / 19 / 27（= 開新局）。
-- **End Screen**：勝利 / 敗北 + 統計 + 重新開始。
-- **Responsive**：桌機底部三面板、窄螢幕自適應。
+桌機佈局——底部一排：Faction Panel（左）／ HUD（中）／ 派遣比例滑桿（右）；頂部：Tile Info（中）／ Map Size 選單（右）。
+
+- **HUD（底部中央）**：當前 tick、下一 tick 倒數、暫停 + 1x/2x/3x/4x。
+- **Faction Panel（底部左）**：4 勢力控制格數、總兵力、主城存活，玩家高亮。
+- **Tile Info（頂部中央）**：hover 格顯示所有權 / tier / count / 是否主城。
+- **Map Size 選單（頂部右）**：切換 11 / 15 / 19 / 27（= 開新局）。
+- **End Screen**：勝利 / 敗北 + 統計 + 重新開始（滿版覆蓋）。
+- **Responsive（窄螢幕）**：HUD 移頂部中央、Tile Info 移頂部左、Faction 移底部左，避免重疊。
 
 ### 6.3 操作方案
 
