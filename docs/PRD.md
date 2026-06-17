@@ -326,8 +326,6 @@ t = currentTick - order.startTick
 | `ai-profile.ts` | `RULE_PROFILES`（easy / normal / hard 旋鈕表）                                                                            |
 | `util/rng.ts`   | `createRng`（seedable PRNG）                                                                                              |
 
-> `overflow.ts`（`applyCastleOverflow`）為歷史遺留的 no-op stub，未被 `tick.ts` 呼叫，無實際行為。
-
 ### 10.2 渲染 / 輸入 / UI 層
 
 | 層           | 模組                                                                                                                                         |

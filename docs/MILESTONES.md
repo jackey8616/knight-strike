@@ -36,7 +36,7 @@
 | `ai.ts` / `ai-profile.ts`               | `stepAi` 三檔規則狀態機（defense → assault → expand → rally）、交錯評估、`mixSeed` 決定論、`RULE_PROFILES`                                              | §5       | AC-18 / 19 / 20 / 21           |
 | `tick.ts`                               | `step(state)`：AI → movement → produce → combat → defeats → `tick+1`                                                                                    | §4.2     | AC-02                          |
 
-> **重點對齊 v2.0**：戰鬥為**鄰邊 cross-edge + 兩階段 claim**（非舊版同 tile multi-occupant）；`AttackOrder` 帶 `count` / `route`（征服行軍）；**AI 已實作並寫入 PRD §5**（非舊文件的「deferred / 規格 orphan」）。`overflow.ts`（`applyCastleOverflow`）為歷史遺留 no-op，未被 `tick.ts` 呼叫。
+> **重點對齊 v2.0**：戰鬥為**鄰邊 cross-edge + 兩階段 claim**（非舊版同 tile multi-occupant）；`AttackOrder` 帶 `count` / `route`（征服行軍）；**AI 已實作並寫入 PRD §5**（非舊文件的「deferred / 規格 orphan」）。
 
 **退出條件**：
 
