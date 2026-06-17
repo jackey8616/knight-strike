@@ -144,11 +144,14 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     expect((r.state.provinces.get(T) as Province).lastClaimedFaction).toBe("TOKUGAWA");
     expect((r.state.provinces.get(T) as Province).occupants).toHaveLength(0); // intermediate left empty-claim
     expect(r.state.attackOrders).toHaveLength(0); // order consumed
-    // Column re-spawned on T, heading to U.
+    // Column re-spawned advancing onto T (idx 1), still heading to U. `from`
+    // stays at path[0] so the renderer can tween the move out of it.
     expect(r.state.marchingStacks).toHaveLength(1);
     const ms = r.state.marchingStacks[0] as MarchingStack;
     expect(ms.count).toBe(4);
-    expect(ms.path).toEqual([T, U]);
+    expect(ms.path).toEqual([F, T, U]);
+    expect(ms.idx).toBe(1);
+    expect(ms.path[ms.idx]).toBe(T); // current tile is the captured one
     expect(ms.faction).toBe("TOKUGAWA");
     expect(r.state.nextMarchingId).toBe(2);
   });

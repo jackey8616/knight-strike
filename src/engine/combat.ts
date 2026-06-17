@@ -161,12 +161,16 @@ export function resolveOrders(state: GameState): CombatResult {
     } else {
       // Intermediate → advance: re-spawn the column on the captured tile to
       // keep conquering the route (the captured tile is left as empty claim).
+      // The path keeps `from` as path[0] with idx=1 so it stays the column's
+      // current tile (`to`) while the renderer interpolates the move out of
+      // `from` — otherwise a fresh idx=0 stack pops onto `to` with no tween,
+      // which reads as the unit "jumping" a tile mid-march.
       newStacks.push({
         id: `mstack:${nextMarchingId}`,
         faction: o.faction,
         count: remaining,
-        path: [o.to, ...o.route],
-        idx: 0,
+        path: [o.from, o.to, ...o.route],
+        idx: 1,
         dispatchedAtTick: state.tick,
       });
       nextMarchingId += 1;
