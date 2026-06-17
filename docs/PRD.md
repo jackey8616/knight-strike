@@ -77,8 +77,8 @@
   - **防禦減傷（§3.6'）**：站在 `FOREST` 的單位受到的戰鬥傷害 ×0.75（`applyTerrainDefense` 用 `ceil`，傷害 ≥1 永不歸零以免卡死）。攻方縱隊受還擊時按**自身所在格（from）**地形減傷；守軍受傷按**自身所在格（to）**地形減傷。
   - **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)` 由 scenario `rngSeed` 決定 —— 撒佈有機 blob（林常見、山成嶺、水稀少），主城與中立據點及其四鄰強制 `PLAINS`，最後跑連通修復（carve L 型 PLAINS 走廊）保證所有固定點在可通行地形上互相連通（不會把主城封死）。
   - **資料模型**：`Province.terrain?: Terrain`（optional，舊 fixture 省略 → 視為 `PLAINS`，引擎行為不變）。helpers 在 `engine/terrain.ts`：`isImpassableTerrain`、`applyTerrainDefense`、`generateTerrain`。
-  - **渲染（§5.1）**：**只有山有高度** —— 山以「連續波（mountain wave，高度為座標的平滑函數）」繪製,相鄰山格高度平滑變化形成綿延山嶺,而非等高方塊;平原 / 水 / 林為平面,僅以**顏色**區分。山畫成 iso 稜柱（top face 抬升 + 前左/前右側牆）。**45° 遮擋處理**：抬高的山格若其「後方（被遮擋）」格上有單位,該山 prism 淡化（alpha 0.4）,確保視野不被擋。所有可通行地形皆為平面,單位不再抬升。
-  - 新增 AC-V6-01..05（見 §7.4）。設計微調：移除 `HILL`、林去高度（只留顏色 + 減傷）、山改連續波。AI 仍 deferred。
+  - **渲染（§5.1）**：**只有山有高度** —— 山以**堆疊方塊（stacked cubes）**繪製：每個山格的高度（cube 單位數）= 該格「深入山體的距離」（4-conn distance transform：山體邊緣 = 1，每往內一格 +1，棋盤邊界算邊緣），故一坨山會由邊緣往中心逐級升高、形成曲面山峰，相鄰山格高度只差約一格。每單位 12px、封頂 5 單位；iso 稜柱前面畫出 cube 接縫線。平原 / 水 / 林為平面,僅以**顏色**區分。**45° 遮擋處理**：抬高的山格若遮到後方有單位的格 → prism 淡化（alpha 0.4）。可通行地形皆平面,單位不抬升。
+  - 新增 AC-V6-01..05（見 §7.4）。設計微調：移除 `HILL`、林去高度（只留顏色 + 減傷）、山改「距離變換堆疊方塊」（cluster 中心升高成曲面）。AI 仍 deferred。
 
 ## 1. 願景與背景
 
@@ -385,7 +385,7 @@ v0.12 以前 §3.5 / §3.6 / §3.7 多處用「相鄰」、「鄰格」、「距
 
 ### 3.9 地形（terrain，v1.6）
 
-每個 tile 持有 `terrain: Terrain`（`PLAINS` / `MOUNTAIN` / `WATER` / `FOREST`）。`PLAINS` 為中性 baseline。**只有山有高度**（連續波）；其餘為平面，僅以顏色區分。
+每個 tile 持有 `terrain: Terrain`（`PLAINS` / `MOUNTAIN` / `WATER` / `FOREST`）。`PLAINS` 為中性 baseline。**只有山有高度**（堆疊方塊，距離變換）；其餘為平面，僅以顏色區分。
 
 - **不可通行（MOUNTAIN / WATER）**：永遠不能進駐、攻佔、或作為 BFS 中間經過格，也不能作派遣目標。
   - §3.5.2 findPath：目標格不可通行 → 回 `null`；中間經過格不可通行 → 不入列（征服行軍的最短路徑自動繞開）。
@@ -400,7 +400,7 @@ v0.12 以前 §3.5 / §3.6 / §3.7 多處用「相鄰」、「鄰格」、「距
   - 用 `Math.ceil` 確保任何 ≥1 的傷害減免後仍 ≥1（不會歸零卡死）。
   - 攻方縱隊受守方還擊：按**攻方所在格（`from`）**地形減傷。守軍受攻方傷害：按**守軍所在格（`to`）**地形減傷。
 - **程序生成（seeded）**：`generateTerrain(boardSize, seed, fixedPlains)`（`engine/terrain.ts`，純函數）。seed 取自 scenario `rngSeed`。流程：撒佈有機 blob（林權重高、山成嶺、水低）→ 強制 `fixedPlains`（主城 + 中立據點）及其四鄰為非不可通行 → **連通修復**：BFS 可通行地形，對未連通的固定點 carve L 型 `PLAINS` 走廊，保證所有固定點互相連通（任何主城都不會被地形封死）。
-- **渲染（§5.1）**：只有山有高度 —— 以連續波（高度 = 座標的平滑函數）繪製成綿延山嶺的 iso 稜柱；平原 / 水 / 林為平面，僅以顏色區分。山若遮擋到後方有單位的格 → prism 淡化（alpha 0.4）。可通行地形皆平面，單位不抬升。
+- **渲染（§5.1）**：只有山有高度 —— 以堆疊方塊繪製，高度（cube 單位）= 山格深入山體的 4-conn 距離（邊緣 1、往內 +1），cluster 由邊往中心升高成曲面山峰；每單位 12px、封頂 5 單位、前面畫 cube 接縫。平原 / 水 / 林為平面，僅以顏色區分。山若遮擋到後方有單位的格 → prism 淡化（alpha 0.4）。可通行地形皆平面，單位不抬升。
 - **資料模型**：`Province.terrain?: Terrain`（optional；舊 fixture 省略 → 視為 `PLAINS`）。生產 / self-replicate（§3.3）不受影響（不可通行格永無 occupant）。
 
 ## 4. 非玩家勢力控制（v1.0 暫定，AI 規格 deferred）

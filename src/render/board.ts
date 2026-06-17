@@ -41,21 +41,66 @@ const TERRAIN_TOP: Readonly<Record<Terrain, number>> = {
   FOREST: 0x2f5530,
 };
 
-// PRD §3.9 (v1.6): only mountains have height — a continuous "wave" (a smooth
-// function of position) so adjacent mountain tiles form a rolling ridge rather
-// than uniform blocks. Plains / water / forest are flat and told apart by
-// colour. Since all passable terrain is now flat, units never need lifting.
-const MOUNTAIN_BASE = 22;
-const MOUNTAIN_WAVE = 16;
+// PRD §3.9 (v1.6): mountains render as stacked unit-cubes. A mountain tile's
+// height (in cube units) is its distance INTO the mountain mass — 1 at the edge
+// of the cluster, +1 per step inward (4-conn distance transform, board border
+// counts as edge). So a blob steps up toward its centre into a curved peak, and
+// adjacent mountain tiles differ by ~one cube. Plains / water / forest stay
+// flat and are told apart by colour.
+const MOUNTAIN_UNIT_PX = 12; // screen height of one cube unit
+const MOUNTAIN_MAX_UNITS = 5; // cap so a big mass doesn't tower off-screen
 
-function mountainHeight(x: number, y: number): number {
-  const w =
-    Math.sin(x * 0.8 + y * 0.5) * 0.5 + Math.sin(x * 0.35 - y * 0.9) * 0.5;
-  return Math.round(MOUNTAIN_BASE + ((w + 1) / 2) * MOUNTAIN_WAVE);
-}
+const NEIGHBOR4: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
 
-function tileElevation(terrain: Terrain, x: number, y: number): number {
-  return terrain === "MOUNTAIN" ? mountainHeight(x, y) : 0;
+// Per-mountain-tile pixel height from the distance transform. Computed once at
+// load (terrain never changes).
+function computeMountainHeights(
+  state: GameState,
+  boardSize: number,
+): Map<TileId, number> {
+  const isMtn = (x: number, y: number): boolean =>
+    x >= 0 &&
+    x < boardSize &&
+    y >= 0 &&
+    y < boardSize &&
+    state.provinces.get(tileId(x, y))?.terrain === "MOUNTAIN";
+
+  const units = new Map<TileId, number>();
+  const queue: [number, number][] = [];
+  // Seed: mountain tiles touching a non-mountain tile or the board border = 1.
+  for (const p of state.provinces.values()) {
+    if (p.terrain !== "MOUNTAIN") continue;
+    const edge = NEIGHBOR4.some(([dx, dy]) => !isMtn(p.x + dx, p.y + dy));
+    if (edge) {
+      units.set(p.id, 1);
+      queue.push([p.x, p.y]);
+    }
+  }
+  // BFS inward: deeper tiles get +1.
+  while (queue.length > 0) {
+    const [x, y] = queue.shift() as [number, number];
+    const d = units.get(tileId(x, y)) as number;
+    for (const [dx, dy] of NEIGHBOR4) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!isMtn(nx, ny)) continue;
+      const nid = tileId(nx, ny);
+      if (units.has(nid)) continue;
+      units.set(nid, d + 1);
+      queue.push([nx, ny]);
+    }
+  }
+
+  const px = new Map<TileId, number>();
+  for (const [id, u] of units) {
+    px.set(id, Math.min(u, MOUNTAIN_MAX_UNITS) * MOUNTAIN_UNIT_PX);
+  }
+  return px;
 }
 
 function shade(color: number, f: number): number {
@@ -142,6 +187,13 @@ function drawTilePrism(
     g.fill({ color: shade(top, 0.55), alpha: 1 });
     quad(g, 0, hh - e, hw, -e, hw, 0, 0, hh);
     g.fill({ color: shade(top, 0.72), alpha: 1 });
+    // Cube-layer seams across the front faces so the stack reads as units.
+    for (let h = MOUNTAIN_UNIT_PX; h < e; h += MOUNTAIN_UNIT_PX) {
+      g.moveTo(-TILE_WIDTH / 2, -h);
+      g.lineTo(0, TILE_HEIGHT / 2 - h);
+      g.lineTo(TILE_WIDTH / 2, -h);
+      g.stroke({ color: shade(top, 0.38), width: 1, alpha: 0.85 });
+    }
   }
   diamondPathAt(g, e);
   g.fill({ color: top, alpha: 1 });
@@ -211,6 +263,7 @@ export function createBoardRenderer(
 
   const tiles = new Map<TileId, TileGfx>();
   const boardSize = initial.boardSize;
+  const mountainPx = computeMountainHeights(initial, boardSize);
 
   for (let y = 0; y < boardSize; y++) {
     for (let x = 0; x < boardSize; x++) {
@@ -225,7 +278,8 @@ export function createBoardRenderer(
       // Terrain is generated once at load and never changes, so the elevation
       // (and the raised hover/selection overlays) can be fixed at creation.
       const terrain = initial.provinces.get(id)?.terrain ?? "PLAINS";
-      const elevation = tileElevation(terrain, x, y);
+      const elevation =
+        terrain === "MOUNTAIN" ? (mountainPx.get(id) ?? MOUNTAIN_UNIT_PX) : 0;
 
       const base = new Graphics();
       node.addChild(base);
