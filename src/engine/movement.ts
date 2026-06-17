@@ -5,6 +5,7 @@ import {
   parseTileId,
   tileId,
 } from "./state";
+import { isImpassableTerrain } from "./terrain";
 import type {
   AttackOrder,
   FactionId,
@@ -46,6 +47,9 @@ export function findPath(
   if (source === undefined || target === undefined) return null;
   // PRD §3.5.1: dispatch must originate from a fully-owned source tile.
   if (derivedOwner(source) !== faction) return null;
+  // PRD §3.9 (v1.6): impassable terrain (mountain / water) can't be entered or
+  // captured, so it's never a valid target.
+  if (isImpassableTerrain(target.terrain)) return null;
 
   // PRD §3.5.2 (v1.5 conquer-march): an own target = pure reinforcement, so the
   // whole path must stay on own claim (v1.4 rule). A non-own target = a
@@ -81,8 +85,9 @@ export function findPath(
         path.reverse();
         return path;
       }
-      // Own target → only own-claimed intermediates extend the frontier.
-      // Non-own target → all in-bounds tiles are walkable (conquer-march).
+      // Impassable terrain never extends the frontier. Otherwise: own target →
+      // only own-claimed intermediates; non-own target → any tile (§1.5).
+      if (isImpassableTerrain(np.terrain)) continue;
       if (!ownTarget || isPassableIntermediate(np, faction)) queue.push(nid);
     }
   }

@@ -1,3 +1,4 @@
+import { applyTerrainDefense } from "./terrain";
 import type {
   AttackOrder,
   FactionId,
@@ -80,6 +81,7 @@ export function resolveOrders(state: GameState): CombatResult {
   const stageOneKeys = new Set<string>();
 
   for (const o of state.attackOrders) {
+    const fromP = provinces.get(o.from);
     const toP = provinces.get(o.to);
     if (toP === undefined || o.count <= 0) continue; // invalid / spent → drop
     const defender = hostileOccupant(toP, o.faction);
@@ -92,12 +94,14 @@ export function resolveOrders(state: GameState): CombatResult {
     const base = stageDamage(t);
     const attacks: Attack[] = [];
     if (defender.faction !== "NEUTRAL") {
-      const dmg = Math.min(base, defender.amount);
+      // Return fire is reduced by the attacking column's own terrain (§3.9).
+      const dmg = applyTerrainDefense(Math.min(base, defender.amount), fromP?.terrain);
       columnDamage.set(orderKey(o), (columnDamage.get(orderKey(o)) ?? 0) + dmg);
       attacks.push({ attacker: defender.faction, defender: o.faction, damage: dmg });
     }
     if (t >= 1 && o.faction !== "NEUTRAL") {
-      const dmg = Math.min(base, o.count);
+      // The defender's loss is reduced by its own terrain (hill / forest).
+      const dmg = applyTerrainDefense(Math.min(base, o.count), toP.terrain);
       defenderIncoming.set(o.to, (defenderIncoming.get(o.to) ?? 0) + dmg);
       attacks.push({ attacker: o.faction, defender: defender.faction, damage: dmg });
     }

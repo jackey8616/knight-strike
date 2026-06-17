@@ -2,6 +2,11 @@ export type FactionId = "TOKUGAWA" | "TAKEDA" | "ODA" | "UESUGI" | "NEUTRAL";
 
 export type Tier = "SOLDIER" | "KNIGHT" | "QUEEN" | "KING";
 
+// PRD §3.9 (v1.6): per-tile terrain. PLAINS is the neutral baseline. MOUNTAIN
+// and WATER are impassable (can't be entered / claimed / pathed through). HILL
+// and FOREST give the unit standing on them a defensive damage reduction.
+export type Terrain = "PLAINS" | "HILL" | "MOUNTAIN" | "WATER" | "FOREST";
+
 export type TileId = string;
 
 export type Occupant = {
@@ -17,6 +22,10 @@ export type Province = {
   readonly y: number;
   readonly isCastle: boolean;
   readonly castleOwner: FactionId | null;
+  // PRD §3.9 (v1.6): tile terrain. Optional in the type so existing fixtures
+  // omit it; engine helpers treat absent as PLAINS. Generated per game (seeded)
+  // and assigned at scenario load.
+  readonly terrain?: Terrain;
   // PRD §3.6' (v1.4): invariant — at most one faction present at a time.
   // Units never share a tile with the enemy (combat is cross-edge).
   readonly occupants: readonly Occupant[];

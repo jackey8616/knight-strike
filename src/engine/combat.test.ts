@@ -225,6 +225,27 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     expect(colCount(r.state, F2, T)).toBe(9);
   });
 
+  it("[AC-V6-05] a defender on a hill takes halved combat damage", () => {
+    const toHill: Province = {
+      id: T,
+      x: 0,
+      y: 0,
+      isCastle: false,
+      castleOwner: null,
+      occupants: [occ("TAKEDA", 30)],
+      lastClaimedFaction: "TAKEDA",
+      terrain: "HILL",
+    };
+    // t=2 → base 2. On plains the defender would lose 2; on a hill ceil(2*0.5)=1.
+    const state = makeState(
+      new Map([[F, tile(F, [], "TOKUGAWA")], [T, toHill]]),
+      [order(F, T, "TOKUGAWA", 50)],
+      2,
+    );
+    const r = resolveOrders(state);
+    expect(amountOf(r.state, T, "TAKEDA")).toBe(29);
+  });
+
   it("treats a defeated faction's claim as directly capturable", () => {
     const state = makeState(
       new Map([

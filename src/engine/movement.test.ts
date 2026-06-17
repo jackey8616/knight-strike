@@ -13,6 +13,7 @@ import {
   type MarchingStack,
   type Occupant,
   type Province,
+  type Terrain,
 } from "./types";
 
 function emptyState(boardSize = 5): GameState {
@@ -83,6 +84,20 @@ function claim(state: GameState, x: number, y: number, faction: FactionId): Game
   return { ...state, provinces: next };
 }
 
+function setTerrain(
+  state: GameState,
+  x: number,
+  y: number,
+  terrain: Terrain,
+): GameState {
+  const id = tileId(x, y);
+  const prov = state.provinces.get(id);
+  if (prov === undefined) throw new Error(`no province at ${id}`);
+  const next = new Map(state.provinces);
+  next.set(id, { ...prov, terrain });
+  return { ...state, provinces: next };
+}
+
 function occ(
   faction: FactionId,
   amount: number,
@@ -148,6 +163,17 @@ describe("findPath (v1.5: own target = own-only, non-own = shortest)", () => {
       tileId(0, 0),
       tileId(1, 0),
     ]);
+  });
+
+  it("[AC-V6-04] impassable terrain is routed around and can't be targeted", () => {
+    let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
+    s = setTerrain(s, 1, 0, "MOUNTAIN");
+    // Non-own target (2,0): path must detour around the mountain at (1,0).
+    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
+    expect(path).not.toBeNull();
+    expect(path?.some((id) => id === tileId(1, 0))).toBe(false);
+    // The mountain itself is never a valid target.
+    expect(findPath(s, tileId(0, 0), tileId(1, 0), "TOKUGAWA")).toBeNull();
   });
 
   it("[AC-V4-08] no hop limit across own territory", () => {

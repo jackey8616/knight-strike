@@ -3,6 +3,7 @@ import { resolveOrders } from "@/engine/combat";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
 import { produce } from "@/engine/production";
 import { derivedOwner, tileId } from "@/engine/state";
+import { generateTerrain } from "@/engine/terrain";
 import { deriveTier } from "@/engine/upgrade";
 import type {
   AiMode,
@@ -264,6 +265,23 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       lastClaimedFaction: t.count > 0 ? t.owner : null,
     });
   }
+  // PRD §3.9 (v1.6): generate seeded terrain. Castles + neutral camps stay on
+  // flat ground (and get a clear ring), and connectivity is guaranteed.
+  const fixedPlains = new Set<TileId>();
+  for (const [id, p] of provinces) {
+    if (p.isCastle || p.occupants.some((o) => o.faction === "NEUTRAL")) {
+      fixedPlains.add(id);
+    }
+  }
+  const terrain = generateTerrain(
+    scenario.boardSize,
+    scenario.rngSeed >>> 0,
+    fixedPlains,
+  );
+  for (const [id, p] of provinces) {
+    provinces.set(id, { ...p, terrain: terrain.get(id) ?? "PLAINS" });
+  }
+
   const aiConfig: Record<FactionId, AiMode> = {
     TOKUGAWA: scenario.aiConfig.TOKUGAWA,
     TAKEDA: scenario.aiConfig.TAKEDA,
