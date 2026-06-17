@@ -1,8 +1,8 @@
-import { findOccupant } from "./state";
 import type {
   AttackOrder,
   FactionId,
   GameState,
+  MarchingStack,
   Occupant,
   Province,
   TileId,
@@ -42,8 +42,7 @@ function orderKey(o: AttackOrder): string {
 }
 
 // The single hostile (different-faction, amount > 0) occupant on a tile, if any.
-// v1.4 keeps the "at most one faction per tile" invariant, so there is at most
-// one such occupant.
+// v1.4+ keeps "at most one faction per tile", so there is at most one.
 function hostileOccupant(
   province: Province,
   faction: FactionId,
@@ -54,158 +53,128 @@ function hostileOccupant(
   return undefined;
 }
 
-// Reduce the (single) occupant of `faction` on a tile by `amount`; drop the
-// occupant if it reaches 0. lastClaimedFaction is intentionally preserved so a
-// freshly-emptied tile still reads as that faction's claim (break/capture).
-function spend(
-  provinces: Map<TileId, Province>,
-  tile: TileId,
-  faction: FactionId,
-  amount: number,
-): number {
-  const p = provinces.get(tile);
-  if (p === undefined) return 0;
-  const occ = findOccupant(p, faction);
-  if (occ === undefined) return 0;
-  const next = Math.max(0, occ.amount - amount);
-  const occupants =
-    next > 0
-      ? p.occupants.map((o) => (o.faction === faction ? { ...o, amount: next } : o))
-      : p.occupants.filter((o) => o.faction !== faction);
-  provinces.set(tile, { ...p, occupants });
-  return next;
-}
-
-// PRD §3.6' (v1.4): resolve every AttackOrder.
-//   • target has a hostile garrison → cross-edge step-function combat (stage 1);
-//     defender-only at t=0, both fire from t≥1, NEUTRAL never fires back.
-//   • target empty + enemy-claimed → break: spend 1, claim → null (stage 2).
-//   • target empty + neutral/unclaimed → capture: spend 1, claim → faction (3).
-// All stage-1 damage is dry-run against the start-of-tick amounts then applied
-// together; claim steps run sequentially (sorted by from-tile id) so two orders
-// on one target see each other's progress.
+// PRD §3.6' (v1.4) + conquer-march (v1.5): resolve every AttackOrder.
+//   • target has a hostile garrison → cross-edge step-function combat: the
+//     defender hits the column (order.count), the column hits the defender from
+//     t≥1, NEUTRAL never fires back.
+//   • target empty + enemy-claimed → break: spend 1 from the column, claim→null.
+//   • target empty + neutral/unclaimed → capture: spend 1, claim→faction, then
+//     ADVANCE — re-spawn the column on the captured tile to keep conquering the
+//     route, or garrison it when the route is exhausted (final target).
+// Stage-1 damage is dry-run against start-of-tick values then applied; claim
+// steps run sequentially (sorted by from-tile id) so co-targeting orders agree.
 export function resolveOrders(state: GameState): CombatResult {
   if (state.attackOrders.length === 0) return { state, events: [] };
 
   const provinces = new Map<TileId, Province>(state.provinces);
+  const newStacks: MarchingStack[] = [...state.marchingStacks];
+  let nextMarchingId = state.nextMarchingId;
   const events: CombatEvent[] = [];
 
-  const stageOne: AttackOrder[] = [];
-  const claim: AttackOrder[] = [];
-  const kept = new Set<string>();
+  const kept: AttackOrder[] = [];
+  const claimOrders: AttackOrder[] = [];
 
-  // Pass 1: validate + classify by start-of-tick target state.
-  const incoming = new Map<TileId, number>();
-  for (const order of state.attackOrders) {
-    const fromP = provinces.get(order.from);
-    const toP = provinces.get(order.to);
-    if (fromP === undefined || toP === undefined) continue; // invalid → drop
-    const attacker = findOccupant(fromP, order.faction);
-    if (attacker === undefined || attacker.amount <= 0) continue; // §D8 drop
-    const defender = hostileOccupant(toP, order.faction);
+  // --- Stage one: dry-run cross-edge damage ---
+  const defenderIncoming = new Map<TileId, number>(); // target tile → damage to its occupant
+  const columnDamage = new Map<string, number>(); // order key → damage to the column
+  const stageOneKeys = new Set<string>();
+
+  for (const o of state.attackOrders) {
+    const toP = provinces.get(o.to);
+    if (toP === undefined || o.count <= 0) continue; // invalid / spent → drop
+    const defender = hostileOccupant(toP, o.faction);
     if (defender === undefined) {
-      claim.push(order);
+      claimOrders.push(o);
       continue;
     }
-    stageOne.push(order);
-    const t = state.tick - order.startTick;
+    stageOneKeys.add(orderKey(o));
+    const t = state.tick - o.startTick;
     const base = stageDamage(t);
     const attacks: Attack[] = [];
-    // Defender returns fire (NEUTRAL bandits / remnants never do, §6.3).
     if (defender.faction !== "NEUTRAL") {
       const dmg = Math.min(base, defender.amount);
-      incoming.set(order.from, (incoming.get(order.from) ?? 0) + dmg);
-      attacks.push({ attacker: defender.faction, defender: order.faction, damage: dmg });
+      columnDamage.set(orderKey(o), (columnDamage.get(orderKey(o)) ?? 0) + dmg);
+      attacks.push({ attacker: defender.faction, defender: o.faction, damage: dmg });
     }
-    // Attacker hits the defender from t≥1 (tick-0 defender advantage, §D3).
-    if (t >= 1 && order.faction !== "NEUTRAL") {
-      const dmg = Math.min(base, attacker.amount);
-      incoming.set(order.to, (incoming.get(order.to) ?? 0) + dmg);
-      attacks.push({ attacker: order.faction, defender: defender.faction, damage: dmg });
+    if (t >= 1 && o.faction !== "NEUTRAL") {
+      const dmg = Math.min(base, o.count);
+      defenderIncoming.set(o.to, (defenderIncoming.get(o.to) ?? 0) + dmg);
+      attacks.push({ attacker: o.faction, defender: defender.faction, damage: dmg });
     }
-    events.push({
-      from: order.from,
-      to: order.to,
-      kind: "fight",
-      combatTick: t,
-      baseDamage: base,
-      attacks,
-    });
+    events.push({ from: o.from, to: o.to, kind: "fight", combatTick: t, baseDamage: base, attacks });
   }
 
-  // Pass 2: apply all stage-1 damage simultaneously (single occupant per tile).
-  for (const [tile, dmg] of incoming) {
+  // Apply defender losses (single occupant per tile).
+  for (const [tile, dmg] of defenderIncoming) {
     const p = provinces.get(tile);
     if (p === undefined) continue;
     const occ = p.occupants[0];
     if (occ === undefined) continue;
     const next = Math.max(0, occ.amount - dmg);
-    const occupants = next > 0 ? [{ ...occ, amount: next }] : [];
-    provinces.set(tile, { ...p, occupants });
+    provinces.set(tile, { ...p, occupants: next > 0 ? [{ ...occ, amount: next }] : [] });
   }
 
-  // Stage-1 orders survive iff the attacking garrison is still alive. A target
-  // killed this tick stays an order — its break happens next tick.
-  for (const order of stageOne) {
-    const fromP = provinces.get(order.from);
-    if (fromP !== undefined && findOccupant(fromP, order.faction) !== undefined) {
-      kept.add(orderKey(order));
-    }
+  // Stage-one orders survive iff the column is still alive.
+  for (const o of state.attackOrders) {
+    if (!stageOneKeys.has(orderKey(o))) continue;
+    const left = o.count - (columnDamage.get(orderKey(o)) ?? 0);
+    if (left > 0) kept.push({ ...o, count: left });
   }
 
-  // Pass 3: claim steps, deterministic order so co-targeting orders converge.
-  const claimSorted = [...claim].sort((a, b) =>
-    a.from < b.from ? -1 : a.from > b.from ? 1 : 0,
-  );
-  for (const order of claimSorted) {
-    const fromP = provinces.get(order.from);
-    const toP = provinces.get(order.to);
-    if (fromP === undefined || toP === undefined) continue;
-    const attacker = findOccupant(fromP, order.faction);
-    if (attacker === undefined || attacker.amount <= 0) continue;
-    // A hostile garrison may have (re)appeared via this tick's movement; if so,
-    // fight it next tick rather than claim.
-    if (hostileOccupant(toP, order.faction) !== undefined) {
-      kept.add(orderKey(order));
+  // --- Claim steps: deterministic order so co-targeting orders converge ---
+  claimOrders.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+  for (const o of claimOrders) {
+    const toP = provinces.get(o.to);
+    if (toP === undefined || o.count <= 0) continue;
+    // A garrison may have (re)appeared via this tick's movement → fight next tick.
+    if (hostileOccupant(toP, o.faction) !== undefined) {
+      kept.push(o);
       continue;
     }
     const claimedBy = toP.lastClaimedFaction;
-    if (claimedBy === order.faction) continue; // already ours → order complete
+    if (claimedBy === o.faction) continue; // already ours → order complete
 
     const enemyClaim =
-      claimedBy !== null &&
-      claimedBy !== "NEUTRAL" &&
-      !state.defeated.has(claimedBy);
+      claimedBy !== null && claimedBy !== "NEUTRAL" && !state.defeated.has(claimedBy);
+    const t = state.tick - o.startTick;
 
     if (enemyClaim) {
-      const left = spend(provinces, order.from, order.faction, 1);
-      const cur = provinces.get(order.to) as Province;
-      provinces.set(order.to, { ...cur, lastClaimedFaction: null });
-      events.push({
-        from: order.from,
-        to: order.to,
-        kind: "break",
-        combatTick: state.tick - order.startTick,
-        baseDamage: 0,
-        attacks: [],
+      const left = o.count - 1; // break costs 1
+      provinces.set(o.to, { ...toP, lastClaimedFaction: null });
+      events.push({ from: o.from, to: o.to, kind: "break", combatTick: t, baseDamage: 0, attacks: [] });
+      if (left > 0) kept.push({ ...o, count: left }); // capture next tick
+      continue;
+    }
+
+    // Capture (claim → faction) then advance.
+    const remaining = o.count - 1;
+    provinces.set(o.to, { ...toP, lastClaimedFaction: o.faction });
+    events.push({ from: o.from, to: o.to, kind: "capture", combatTick: t, baseDamage: 0, attacks: [] });
+    if (remaining <= 0) continue; // tile claimed, no troops left to advance
+    if (o.route.length === 0) {
+      // Final target → the surviving column garrisons it.
+      const p2 = provinces.get(o.to) as Province;
+      provinces.set(o.to, {
+        ...p2,
+        occupants: [{ faction: o.faction, amount: remaining, arrivalTick: state.tick, isDefender: true }],
       });
-      if (left > 0) kept.add(orderKey(order)); // capture next tick
     } else {
-      spend(provinces, order.from, order.faction, 1);
-      const cur = provinces.get(order.to) as Province;
-      provinces.set(order.to, { ...cur, lastClaimedFaction: order.faction });
-      events.push({
-        from: order.from,
-        to: order.to,
-        kind: "capture",
-        combatTick: state.tick - order.startTick,
-        baseDamage: 0,
-        attacks: [],
+      // Intermediate → advance: re-spawn the column on the captured tile to
+      // keep conquering the route (the captured tile is left as empty claim).
+      newStacks.push({
+        id: `mstack:${nextMarchingId}`,
+        faction: o.faction,
+        count: remaining,
+        path: [o.to, ...o.route],
+        idx: 0,
+        dispatchedAtTick: state.tick,
       });
-      // capture complete → order drops (not re-kept)
+      nextMarchingId += 1;
     }
   }
 
-  const attackOrders = state.attackOrders.filter((o) => kept.has(orderKey(o)));
-  return { state: { ...state, provinces, attackOrders }, events };
+  return {
+    state: { ...state, provinces, attackOrders: kept, marchingStacks: newStacks, nextMarchingId },
+    events,
+  };
 }

@@ -92,53 +92,62 @@ function occ(
   return { faction, amount, arrivalTick, isDefender };
 }
 
-describe("findPath (v1.4 own-claimed-only passable)", () => {
+describe("findPath (v1.5: own target = own-only, non-own = shortest)", () => {
   it("returns null when source has no occupant of the dispatching faction", () => {
     const state = emptyState();
     expect(findPath(state, tileId(0, 0), tileId(1, 0), "TOKUGAWA")).toBeNull();
   });
 
-  it("[AC-V4-01] unclaimed empty intermediate blocks; claiming it opens the path", () => {
+  it("[AC-V4-01] own (reinforce) target needs an all-own path; unclaimed gap blocks", () => {
     let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
-    // (1,0) unclaimed empty; (2,0) the non-own target. No own route → null.
+    s = claim(s, 2, 0, "TOKUGAWA"); // make (2,0) an OWN target (reinforcement)
+    // (1,0) unclaimed gap → no own route → null.
     expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toBeNull();
-    // Claim (1,0) as ours → now passable as an intermediate.
     s = claim(s, 1, 0, "TOKUGAWA");
+    expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toEqual([
+      tileId(0, 0),
+      tileId(1, 0),
+      tileId(2, 0),
+    ]);
+  });
+
+  it("[AC-V5-02] non-own target → shortest path ignoring ownership (conquer-march)", () => {
+    let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
+    s = claim(s, 1, 0, "TAKEDA"); // enemy-claimed empty in the way
+    // Target (2,0) is non-own → the column will march straight through (1,0).
     const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
-    expect(path).not.toBeNull();
     expect(path).toEqual([tileId(0, 0), tileId(1, 0), tileId(2, 0)]);
   });
 
-  it("walks through own-occupant intermediates", () => {
+  it("[AC-V5-02] non-own target marches straight through an enemy garrison", () => {
+    let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
+    s = setOccupants(s, 1, 0, [occ("TAKEDA", 5, 0, true)]);
+    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
+    expect(path?.some((id) => id === tileId(1, 0))).toBe(true);
+  });
+
+  it("own (reinforce) target walks through own-occupant intermediates", () => {
     let s = setOccupants(emptyState(), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
-    s = setOccupants(s, 1, 0, [occ("TOKUGAWA", 5, 0, true)]);
+    s = setOccupants(s, 1, 0, [occ("TOKUGAWA", 5, 0, true)]); // own occupant
+    s = claim(s, 2, 0, "TOKUGAWA"); // own target
     const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
     expect(path?.[1]).toBe(tileId(1, 0));
   });
 
-  it("enemy-claimed empty intermediate is a wall", () => {
+  it("own (reinforce) target with an enemy garrison gap and no own detour → null", () => {
     let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
-    s = claim(s, 1, 0, "TAKEDA"); // enemy-claimed empty, the only route
+    s = setOccupants(s, 1, 0, [occ("TAKEDA", 5, 0, true)]); // enemy gap
+    s = claim(s, 2, 0, "TOKUGAWA"); // own target, no own route to it
     expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toBeNull();
   });
 
-  it("enemy-occupant intermediate is a wall (routes around when possible)", () => {
-    let s = setOccupants(emptyState(5), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
-    s = setOccupants(s, 1, 0, [occ("TAKEDA", 5, 0, true)]);
-    // Build an own-claimed detour 0,1 → 1,1 → 2,1 → 2,0.
-    s = claim(s, 0, 1, "TOKUGAWA");
-    s = claim(s, 1, 1, "TOKUGAWA");
-    s = claim(s, 2, 1, "TOKUGAWA");
-    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
-    expect(path).not.toBeNull();
-    expect(path?.some((id) => id === tileId(1, 0))).toBe(false);
-  });
-
-  it("target tile need not be own (enemy target reachable from own staging)", () => {
+  it("target tile need not be own (adjacent enemy target reachable)", () => {
     let s = setOccupants(emptyState(3), 0, 0, [occ("TOKUGAWA", 10, 0, true)]);
     s = setOccupants(s, 1, 0, [occ("TAKEDA", 5, 0, true)]);
-    const path = findPath(s, tileId(0, 0), tileId(1, 0), "TOKUGAWA");
-    expect(path).toEqual([tileId(0, 0), tileId(1, 0)]);
+    expect(findPath(s, tileId(0, 0), tileId(1, 0), "TOKUGAWA")).toEqual([
+      tileId(0, 0),
+      tileId(1, 0),
+    ]);
   });
 
   it("[AC-V4-08] no hop limit across own territory", () => {
@@ -261,7 +270,7 @@ describe("advanceMarching (v1.4 move-in / step / siege)", () => {
     expect(out.provinces.get(tileId(1, 0))?.occupants).toHaveLength(0);
   });
 
-  it("[AC-V4-02] terminus on enemy tile → siege: garrison staging, register AttackOrder", () => {
+  it("[AC-V4-02] terminus on enemy tile → siege: order carries the column's count (no staging garrison)", () => {
     let s = setOccupants(emptyState(3), 0, 0, []); // staging is own-claimed empty
     s = claim(s, 0, 0, "TOKUGAWA");
     s = setOccupants(s, 1, 0, [occ("TAKEDA", 6, 0, true)]); // enemy target
@@ -274,16 +283,17 @@ describe("advanceMarching (v1.4 move-in / step / siege)", () => {
       dispatchedAtTick: 0,
     };
     const out = advanceMarching({ ...s, marchingStacks: [stack], tick: 2 });
-    // Staging tile garrisoned, marching stack consumed.
-    const staging = out.provinces.get(tileId(0, 0));
-    expect(staging?.occupants.find((o) => o.faction === "TOKUGAWA")?.amount).toBe(4);
     expect(out.marchingStacks).toHaveLength(0);
-    // Order created; target untouched (no unit entered it).
+    // v1.5: the column's troops go into the order, NOT a staging garrison.
+    const staging = out.provinces.get(tileId(0, 0));
+    expect(staging?.occupants).toHaveLength(0);
     expect(out.attackOrders).toHaveLength(1);
     expect(out.attackOrders[0]).toMatchObject({
       from: tileId(0, 0),
       to: tileId(1, 0),
       faction: "TOKUGAWA",
+      count: 4,
+      route: [],
       startTick: 2,
     });
     const target = out.provinces.get(tileId(1, 0));
@@ -336,7 +346,7 @@ describe("advanceMarching (v1.4 move-in / step / siege)", () => {
     expect(out.marchingStacks).toHaveLength(0);
   });
 
-  it("does not double-create an order that already exists (keeps earliest startTick)", () => {
+  it("reinforces an existing siege order instead of duplicating it (keeps earliest startTick)", () => {
     let s = emptyState(3);
     s = claim(s, 0, 0, "TOKUGAWA");
     s = setOccupants(s, 1, 0, [occ("TAKEDA", 6, 0, true)]);
@@ -344,6 +354,8 @@ describe("advanceMarching (v1.4 move-in / step / siege)", () => {
       from: tileId(0, 0),
       to: tileId(1, 0),
       faction: "TOKUGAWA" as FactionId,
+      count: 2,
+      route: [] as string[],
       startTick: 1,
     };
     const stack: MarchingStack = {
@@ -362,6 +374,7 @@ describe("advanceMarching (v1.4 move-in / step / siege)", () => {
     });
     expect(out.attackOrders).toHaveLength(1);
     expect(out.attackOrders[0]?.startTick).toBe(1); // earliest kept
+    expect(out.attackOrders[0]?.count).toBe(6); // 2 + 4 reinforcement
   });
 });
 

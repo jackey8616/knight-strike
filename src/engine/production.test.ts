@@ -70,7 +70,7 @@ describe("produce (v1.3 self-replicate)", () => {
     expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(2);
   });
 
-  it("[AC-V2-29] tiles engaged in a siege (from / to of an AttackOrder) are frozen", () => {
+  it("[AC-V2-29] a besieged target (order.to) is frozen; the staging tile self-replicates", () => {
     const from = tileId(0, 0);
     const to = tileId(1, 0);
     const provinces = new Map([
@@ -82,10 +82,18 @@ describe("produce (v1.3 self-replicate)", () => {
         ]),
       ],
     ]);
-    const order: AttackOrder = { from, to, faction: "TOKUGAWA", startTick: 0 };
-    const state = makeState(provinces, 1, [order]);
-    const out = produce(state);
-    expect(out).toBe(state); // both tiles skipped → no change
+    const order: AttackOrder = {
+      from,
+      to,
+      faction: "TOKUGAWA",
+      count: 8,
+      route: [],
+      startTick: 0,
+    };
+    const out = produce(makeState(provinces, 1, [order]));
+    // Target frozen (defender can't out-regrow the assault); staging grows.
+    expect(out.provinces.get(to)?.occupants[0]?.amount).toBe(5);
+    expect(out.provinces.get(from)?.occupants[0]?.amount).toBe(6);
   });
 
   it("NEUTRAL bandit does not grow", () => {

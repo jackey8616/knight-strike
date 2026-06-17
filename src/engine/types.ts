@@ -37,16 +37,22 @@ export type MarchingStack = {
   readonly dispatchedAtTick: number;
 };
 
-// PRD §3.6' (v1.4): a cross-edge siege. `from` is an own-claimed staging tile
-// with a garrison; `to` is the adjacent (4-conn) target tile being attacked.
+// PRD §3.6' (v1.4) + conquer-march (v1.5): a cross-edge siege carried out by a
+// conquering column. `from` is the own-claimed tile the column stands on; `to`
+// is the adjacent (4-conn) target being attacked. `count` is the column's own
+// troops (v1.5: the order owns them — they are NOT a `from` occupant, so a
+// source garrison / castle reserve never gets mixed in). `route` is the
+// remaining tiles to conquer after `to` (empty = `to` is the final target).
 // startTick anchors the step-function combat tick (t = currentTick - startTick).
-// Created when a marching stack reaches a staging tile next to a non-own
-// target (§3.5.4'). Removed when the from-garrison is gone, the target is
-// captured, or the attacking faction is defeated.
+// On capture the column advances (re-spawns a marching stack on `to`, or
+// garrisons `to` when route is empty); the order is removed when the column is
+// wiped out, the target is captured, or the faction is defeated.
 export type AttackOrder = {
   readonly from: TileId;
   readonly to: TileId;
   readonly faction: FactionId;
+  readonly count: number;
+  readonly route: readonly TileId[];
   readonly startTick: number;
 };
 

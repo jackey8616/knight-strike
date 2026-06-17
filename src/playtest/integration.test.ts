@@ -123,9 +123,9 @@ describe("integration: runScenario invariants", () => {
   });
 });
 
-describe("integration: v1.4 dispatch → siege → capture → expand (AC-V4-08)", () => {
-  it("captures a neutral frontier in one step, then marches onward through it", () => {
-    // Row 0: TOK castle at (0,0); (1,0) and (2,0) are neutral empty frontier.
+describe("integration: v1.5 conquer-march (AC-V5)", () => {
+  it("[AC-V5-03] one drag conquers a line: intermediates left empty-claimed, destination garrisoned", () => {
+    // Row 0: TOK castle (0,0); (1,0)(2,0) neutral empty. Drag to (2,0).
     let s = blankBoard(5);
     s = setTile(s, {
       id: tileId(0, 0),
@@ -133,34 +133,35 @@ describe("integration: v1.4 dispatch → siege → capture → expand (AC-V4-08)
       y: 0,
       isCastle: true,
       castleOwner: "TOKUGAWA",
-      occupants: [{ faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true }],
+      occupants: [{ faction: "TOKUGAWA", amount: 20, arrivalTick: 0, isDefender: true }],
       lastClaimedFaction: "TOKUGAWA",
     });
 
-    // Can't yet path to (2,0): the (1,0) frontier isn't ours.
-    expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toBeNull();
+    // Non-own target → shortest path straight down the row.
+    expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toEqual([
+      tileId(0, 0),
+      tileId(1, 0),
+      tileId(2, 0),
+    ]);
 
-    // Dispatch at the adjacent neutral frontier (1,0): siege staging = castle.
-    const d = dispatch(s, { from: tileId(0, 0), to: tileId(1, 0), ratio: 1.0 });
+    const d = dispatch(s, { from: tileId(0, 0), to: tileId(2, 0), ratio: 1.0 });
     expect(d.ok).toBe(true);
     if (!d.ok) return;
     s = d.state;
 
-    // One tick: troops re-garrison the castle, the order captures the empty
-    // neutral tile (claim-only, spending 1).
-    s = step(s);
-    const frontier = s.provinces.get(tileId(1, 0)) as Province;
-    expect(frontier.occupants).toHaveLength(0);
-    expect(derivedOwner(frontier)).toBe("TOKUGAWA");
+    for (let i = 0; i < 5; i++) s = step(s);
+
+    const mid = s.provinces.get(tileId(1, 0)) as Province;
+    const dest = s.provinces.get(tileId(2, 0)) as Province;
+    expect(derivedOwner(mid)).toBe("TOKUGAWA");
+    expect(mid.occupants).toHaveLength(0); // intermediate passed through → empty claim
+    expect(dest.occupants[0]?.faction).toBe("TOKUGAWA"); // destination garrisoned
+    expect((dest.occupants[0]?.amount ?? 0) > 0).toBe(true);
     expect(s.attackOrders).toHaveLength(0);
     expect(s.marchingStacks).toHaveLength(0);
-
-    // The captured frontier is now own-claimed → a path through it opens up.
-    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
-    expect(path).toEqual([tileId(0, 0), tileId(1, 0), tileId(2, 0)]);
   });
 
-  it("grinds an enemy garrison then breaks→captures the emptied tile", () => {
+  it("grinds an enemy garrison then captures and garrisons the tile", () => {
     // TOK castle (0,0) strong; TAKEDA garrison on adjacent (1,0).
     let s = blankBoard(3);
     s = setTile(s, {
@@ -187,13 +188,13 @@ describe("integration: v1.4 dispatch → siege → capture → expand (AC-V4-08)
     if (!d.ok) return;
     s = d.state;
 
-    // Run enough ticks to grind 4 defenders, break, then capture.
+    // Grind 4 defenders, break the enemy claim, capture, then garrison.
     for (let i = 0; i < 12; i++) s = step(s);
 
     const target = s.provinces.get(tileId(1, 0)) as Province;
     expect(target.occupants.some((o) => o.faction === "TAKEDA")).toBe(false);
-    expect(derivedOwner(target)).toBe("TOKUGAWA"); // claim flipped to us
-    expect(target.occupants).toHaveLength(0); // claim-only
-    expect(s.attackOrders).toHaveLength(0); // siege complete
+    expect(derivedOwner(target)).toBe("TOKUGAWA");
+    expect(target.occupants[0]?.faction).toBe("TOKUGAWA"); // surviving column garrisons it
+    expect(s.attackOrders).toHaveLength(0);
   });
 });

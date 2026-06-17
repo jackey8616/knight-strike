@@ -47,6 +47,12 @@ export function findPath(
   // PRD §3.5.1: dispatch must originate from a fully-owned source tile.
   if (derivedOwner(source) !== faction) return null;
 
+  // PRD §3.5.2 (v1.5 conquer-march): an own target = pure reinforcement, so the
+  // whole path must stay on own claim (v1.4 rule). A non-own target = a
+  // conquering drag, so the route is the plain shortest path ignoring ownership
+  // — the column will siege every non-own tile it steps onto (§3.6').
+  const ownTarget = isOwnClaimed(target, faction);
+
   const parent = new Map<TileId, TileId>();
   const visited = new Set<TileId>([from]);
   const queue: TileId[] = [from];
@@ -75,9 +81,9 @@ export function findPath(
         path.reverse();
         return path;
       }
-      // Only own-claimed tiles continue the frontier (target is found above
-      // regardless of passability).
-      if (isPassableIntermediate(np, faction)) queue.push(nid);
+      // Own target → only own-claimed intermediates extend the frontier.
+      // Non-own target → all in-bounds tiles are walkable (conquer-march).
+      if (!ownTarget || isPassableIntermediate(np, faction)) queue.push(nid);
     }
   }
   return null;
@@ -371,7 +377,11 @@ export function advanceMarching(state: GameState): GameState {
           });
         }
       } else {
-        // Siege — sub-group by staging tile (different approaches stay distinct).
+        // Siege (PRD §3.6' / v1.5): the column's troops go into the order's
+        // `count` — NOT a staging-tile garrison — so a source castle reserve or
+        // a tile we passed never gets conscripted. Sub-group by staging tile so
+        // different approaches stay distinct; the order also carries the route
+        // beyond the target so the column keeps conquering after capture.
         const byStaging = new Map<TileId, AdvanceIntent[]>();
         for (const intent of factionIntents) {
           const list = byStaging.get(intent.currentTile);
@@ -380,17 +390,28 @@ export function advanceMarching(state: GameState): GameState {
         }
         for (const [staging, stagingIntents] of byStaging) {
           let count = 0;
-          for (const i of stagingIntents) count += i.stack.count;
-          const p = provinces.get(staging);
-          if (p !== undefined) {
-            provinces.set(staging, garrison(p, faction, count, state.tick));
+          let route: readonly TileId[] = [];
+          let bestRemaining = -1;
+          for (const i of stagingIntents) {
+            count += i.stack.count;
+            const remaining = i.stack.path.length - (i.nextIdx + 1);
+            if (remaining > bestRemaining) {
+              bestRemaining = remaining;
+              route = i.stack.path.slice(i.nextIdx + 1);
+            }
           }
           const key = orderKey(staging, nextTile, faction);
-          if (!orders.has(key)) {
+          const existing = orders.get(key);
+          if (existing !== undefined) {
+            // Reinforce an ongoing siege of the same target from the same tile.
+            orders.set(key, { ...existing, count: existing.count + count });
+          } else {
             orders.set(key, {
               from: staging,
               to: nextTile,
               faction,
+              count,
+              route,
               startTick: state.tick,
             });
           }

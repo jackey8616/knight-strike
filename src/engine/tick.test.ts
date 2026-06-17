@@ -86,30 +86,35 @@ describe("step (tick orchestrator)", () => {
     }
   });
 
-  it("[AC-V4-03] siege tiles are frozen + tick-0 gives the defender the only attack", () => {
+  it("[AC-V4-03] tick-0 gives the defender the only attack; besieged target is frozen", () => {
     const F = tileId(5, 5);
     const T = tileId(6, 5);
     const provinces = castles();
-    provinces.set(F, tile(F, [occ("TOKUGAWA", 5, 0, true)]));
+    provinces.set(F, tile(F, [], { lastClaimedFaction: "TOKUGAWA" })); // own empty staging
     provinces.set(T, tile(T, [occ("TAKEDA", 5, 0, true)]));
-    const order: AttackOrder = { from: F, to: T, faction: "TOKUGAWA", startTick: 1 };
+    const order: AttackOrder = {
+      from: F, to: T, faction: "TOKUGAWA", count: 5, route: [], startTick: 1,
+    };
     const out = step(makeState(provinces, 1, [order]));
-    // produce skipped F & T; combat t=0 → only TAKEDA fires at the attacker.
-    expect((out.provinces.get(F) as Province).occupants[0]?.amount).toBe(4);
+    // combat t=0 → only TAKEDA fires at the column (5 → 4); T frozen at 5.
+    expect(out.attackOrders[0]?.count).toBe(4);
     expect((out.provinces.get(T) as Province).occupants[0]?.amount).toBe(5);
   });
 
-  it("[AC-V4-05] step captures a neutral empty target in one tick (claim-only)", () => {
+  it("[AC-V4-05] step captures a neutral empty target in one tick (column garrisons it)", () => {
     const F = tileId(5, 5);
     const T = tileId(6, 5);
     const provinces = castles();
-    provinces.set(F, tile(F, [occ("TOKUGAWA", 5, 0, true)]));
+    provinces.set(F, tile(F, [], { lastClaimedFaction: "TOKUGAWA" }));
     provinces.set(T, tile(T, [], { lastClaimedFaction: null }));
-    const order: AttackOrder = { from: F, to: T, faction: "TOKUGAWA", startTick: 1 };
+    const order: AttackOrder = {
+      from: F, to: T, faction: "TOKUGAWA", count: 5, route: [], startTick: 1,
+    };
     const out = step(makeState(provinces, 1, [order]));
-    expect((out.provinces.get(F) as Province).occupants[0]?.amount).toBe(4); // spent 1
-    expect((out.provinces.get(T) as Province).lastClaimedFaction).toBe("TOKUGAWA");
-    expect((out.provinces.get(T) as Province).occupants).toHaveLength(0); // claim-only
+    const tT = out.provinces.get(T) as Province;
+    expect(tT.lastClaimedFaction).toBe("TOKUGAWA");
+    expect(tT.occupants[0]?.faction).toBe("TOKUGAWA");
+    expect(tT.occupants[0]?.amount).toBe(4); // 5 - 1 capture cost settles on T
     expect(out.attackOrders).toHaveLength(0);
   });
 });

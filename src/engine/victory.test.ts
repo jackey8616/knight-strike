@@ -190,8 +190,8 @@ describe("applyDefeats", () => {
       ],
     ]);
     const orders: AttackOrder[] = [
-      { from: tileId(1, 1), to: tileId(1, 2), faction: "TOKUGAWA", startTick: 0 },
-      { from: tileId(9, 0), to: tileId(8, 0), faction: "TAKEDA", startTick: 0 },
+      { from: tileId(1, 1), to: tileId(1, 2), faction: "TOKUGAWA", count: 5, route: [], startTick: 0 },
+      { from: tileId(9, 0), to: tileId(8, 0), faction: "TAKEDA", count: 5, route: [], startTick: 0 },
     ];
     const state = makeState(provinces, [], new Set(), orders);
     const out = applyDefeats(state);
