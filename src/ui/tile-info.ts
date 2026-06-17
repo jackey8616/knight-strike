@@ -3,8 +3,11 @@ import { deriveTier } from "@/engine/upgrade";
 
 const ROOT_STYLE = [
   "position: fixed",
+  // Bottom-centre, clear of the bottom-left faction panel and the bottom-right
+  // dispatch ratio bar (which previously shared this corner and overlapped).
   "bottom: 12px",
-  "right: 12px",
+  "left: 50%",
+  "transform: translateX(-50%)",
   "padding: 8px 12px",
   "background: rgba(0, 0, 0, 0.65)",
   "border: 1px solid #444",
