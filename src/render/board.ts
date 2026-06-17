@@ -624,10 +624,16 @@ export function createBoardRenderer(
   }
 
   function clampPan(): void {
-    // Keep the board reachable — never let the pan fling the origin more than
-    // half a viewport from its centred spot.
-    const maxX = viewW / 2;
-    const maxY = viewH / 2;
+    // Let any tile — edges and corners included — reach the centre of the
+    // viewport. The board's iso span is symmetric in x and (after baseCenterY
+    // recentres it) in y, so the pan needed to bring an extreme tile to centre
+    // is half the *scaled* board span per axis. Bounding by half the viewport
+    // instead pinned the origin near the middle, so once zoomed in the board's
+    // edges sat off to the side and could never be centred. At max pan an edge
+    // tile sits exactly at centre, so the board still can't fly fully off-screen.
+    const s = effectiveScale();
+    const maxX = (s * (boardSize - 1) * TILE_WIDTH) / 2;
+    const maxY = (s * (boardSize - 1) * TILE_HEIGHT) / 2;
     panX = Math.max(-maxX, Math.min(maxX, panX));
     panY = Math.max(-maxY, Math.min(maxY, panY));
   }
