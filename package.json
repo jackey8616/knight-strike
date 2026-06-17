@@ -1,6 +1,6 @@
 {
   "name": "knight-strike",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Knight Strike / 知識戰爭 — web remake of 国家大作戦 (lm_exp)",
   "private": true,
   "type": "module",
