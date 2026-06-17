@@ -62,18 +62,20 @@ function spriteScale(texture: Texture): number {
 
 // The marching layer renders above the units layer, so a column sharing a tile
 // with a garrison would sit right on top of it (two sprites + two count labels
-// overlapping). Lift every in-transit / besieging column off the tile centre,
-// and additionally lean a besieging column toward its target — so a siege
-// launched from a garrisoned tile (e.g. a castle that kept a reserve) reads as
-// a separate force pushing at the edge instead of stacking on the garrison.
+// overlapping). Only when a garrison actually shares the tile do we nudge the
+// column off-centre: lift it, and (for a besieger) lean toward its target so it
+// reads as a separate force at the edge. With no garrison to avoid, the column
+// stays centred on its tile like a normal unit.
 const COLUMN_LIFT = 7;
-const SIEGE_LEAN = 0.4;
+const SIEGE_LEAN = 0.32;
 
 function columnPos(
   curTile: TileId,
   leanToward: TileId | undefined,
+  offset: boolean,
 ): { x: number; y: number } {
   const c = tileCenter(curTile);
+  if (!offset) return { x: c.x, y: c.y };
   let x = c.x;
   let y = c.y - COLUMN_LIFT;
   if (leanToward !== undefined) {
@@ -82,6 +84,15 @@ function columnPos(
     y += (t.y - c.y) * SIEGE_LEAN;
   }
   return { x, y };
+}
+
+// A garrison (any occupant with troops) shares the given tile — the only case
+// where a column would visually overlap a stationary unit.
+function tileHasGarrison(state: GameState, id: TileId): boolean {
+  const p = state.provinces.get(id);
+  if (p === undefined) return false;
+  for (const o of p.occupants) if (o.amount > 0) return true;
+  return false;
 }
 
 export function createMarchingRenderer(
@@ -106,11 +117,12 @@ export function createMarchingRenderer(
     readonly animate: boolean; // false = static (a besieging siege column)
     readonly cancelId?: string; // only marching stacks are right-click cancellable
     readonly leanToward?: TileId; // besieging target — lean toward it
+    readonly offset: boolean; // nudge off-centre (a garrison shares the tile)
   };
 
   function createColumnGfx(v: ColumnView): MarchGfx {
     const node = new Container();
-    const c = columnPos(v.prevForNew, v.leanToward);
+    const c = columnPos(v.prevForNew, v.leanToward, v.offset);
     node.position.set(c.x, c.y);
     const { x: ix, y: iy } = parseTileId(v.prevForNew);
     node.zIndex = ix + iy + 0.25;
@@ -170,7 +182,7 @@ export function createMarchingRenderer(
       gfx.sprite.scale.set(spriteScale(tierTex));
     }
 
-    const target = columnPos(v.curTile, v.leanToward);
+    const target = columnPos(v.curTile, v.leanToward, v.offset);
     gsap.killTweensOf(gfx.node.position);
     if (!v.animate || gfx.prevTile === v.curTile) {
       gfx.node.position.set(target.x, target.y);
@@ -178,7 +190,7 @@ export function createMarchingRenderer(
       // Seed the start explicitly so a mid-flight tick-rate change doesn't
       // strand the sprite between tiles.
       if (isNew) {
-        const startC = columnPos(gfx.prevTile, v.leanToward);
+        const startC = columnPos(gfx.prevTile, v.leanToward, v.offset);
         gfx.node.position.set(startC.x, startC.y);
       }
       gsap.to(gfx.node.position, {
@@ -209,6 +221,7 @@ export function createMarchingRenderer(
           prevForNew,
           animate: true,
           cancelId: stack.id,
+          offset: tileHasGarrison(state, curTile),
         },
         tickIntervalMs,
       );
@@ -231,6 +244,7 @@ export function createMarchingRenderer(
           prevForNew: o.from,
           animate: false,
           leanToward: o.to,
+          offset: tileHasGarrison(state, o.from),
         },
         tickIntervalMs,
       );
