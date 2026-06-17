@@ -4,9 +4,9 @@ import { installResponsiveStyles } from "./responsive";
 
 const ROOT_STYLE = [
   "position: fixed",
-  // Bottom-centre, clear of the bottom-left faction panel and the bottom-right
-  // dispatch ratio bar (which previously shared this corner and overlapped).
-  "bottom: 12px",
+  // Top-centre (swapped with the HUD pace controls); clear of the top-right
+  // map-size panel.
+  "top: 8px",
   "left: 50%",
   "transform: translateX(-50%)",
   "padding: 8px 12px",

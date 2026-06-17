@@ -4,7 +4,7 @@
 // so they stop overlapping (inline styles win specificity, hence !important).
 //
 // Desktop layout packs three panels along the bottom edge (faction left,
-// tile-info centre, dispatch right) which collides on a phone. Mobile layout:
+// HUD centre, dispatch right) which collides on a phone. Mobile layout:
 //   HUD        → top-centre (shrunk)
 //   tile-info  → top-left, under the HUD
 //   faction    → bottom-left, compact (off the board; top-right covered it)
@@ -17,6 +17,9 @@ const CSS = `
 @media (max-width: 640px) {
   .ks-hud {
     top: 6px !important;
+    /* HUD's desktop inline style now anchors to bottom; keep it top-pinned on
+       mobile so it doesn't stretch between both edges. */
+    bottom: auto !important;
     padding: 4px 8px !important;
     gap: 6px !important;
     font-size: 11px !important;
