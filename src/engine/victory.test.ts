@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tileId } from "./state";
 import {
   AI_IDLE,
+  type AttackOrder,
   type FactionId,
   type GameState,
   type MarchingStack,
@@ -14,12 +15,14 @@ function makeState(
   provinces: ReadonlyMap<string, Province>,
   marchingStacks: readonly MarchingStack[] = [],
   defeated: ReadonlySet<FactionId> = new Set(),
+  attackOrders: readonly AttackOrder[] = [],
 ): GameState {
   return {
     boardSize: 11,
     tick: 1,
     provinces,
     marchingStacks,
+    attackOrders,
     aiConfig: {
       TOKUGAWA: AI_IDLE,
       TAKEDA: AI_IDLE,
@@ -45,8 +48,7 @@ function tile(
     isCastle: opts.isCastle ?? false,
     castleOwner: opts.castleOwner ?? null,
     occupants,
-    combatStartTick: null,
-    lastClaimedFaction: null,
+    lastClaimedFaction: occupants[0]?.faction ?? null,
   };
 }
 
@@ -150,6 +152,53 @@ describe("applyDefeats", () => {
     expect(remnant?.occupants[0]?.faction).toBe("NEUTRAL");
     // TOK marching stack dropped
     expect(out.marchingStacks).toHaveLength(0);
+  });
+
+  it("[AC-V4-11] defeated faction's AttackOrders are dropped", () => {
+    const provinces = new Map<string, Province>([
+      [
+        tileId(0, 0),
+        tile(
+          tileId(0, 0),
+          [{ faction: "TAKEDA", amount: 5, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TOKUGAWA" }, // TOK castle lost
+        ),
+      ],
+      [
+        tileId(10, 0),
+        tile(
+          tileId(10, 0),
+          [{ faction: "TAKEDA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "TAKEDA" },
+        ),
+      ],
+      [
+        tileId(0, 10),
+        tile(
+          tileId(0, 10),
+          [{ faction: "ODA", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "ODA" },
+        ),
+      ],
+      [
+        tileId(10, 10),
+        tile(
+          tileId(10, 10),
+          [{ faction: "UESUGI", amount: 3, arrivalTick: 0, isDefender: true }],
+          { isCastle: true, castleOwner: "UESUGI" },
+        ),
+      ],
+    ]);
+    const orders: AttackOrder[] = [
+      { from: tileId(1, 1), to: tileId(1, 2), faction: "TOKUGAWA", startTick: 0 },
+      { from: tileId(9, 0), to: tileId(8, 0), faction: "TAKEDA", startTick: 0 },
+    ];
+    const state = makeState(provinces, [], new Set(), orders);
+    const out = applyDefeats(state);
+    expect(out.defeated.has("TOKUGAWA")).toBe(true);
+    // TOK order gone, TAKEDA order kept.
+    expect(out.attackOrders).toHaveLength(1);
+    expect(out.attackOrders[0]?.faction).toBe("TAKEDA");
   });
 });
 

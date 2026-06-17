@@ -1,5 +1,5 @@
 import { stepAi } from "@/engine/ai";
-import { resolveSameTileCombat } from "@/engine/combat";
+import { resolveOrders } from "@/engine/combat";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
 import { produce } from "@/engine/production";
 import { derivedOwner, tileId } from "@/engine/state";
@@ -234,7 +234,6 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
         isCastle: false,
         castleOwner: null,
         occupants: [],
-        combatStartTick: null,
         lastClaimedFaction: null,
       });
     }
@@ -259,9 +258,9 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       isCastle: t.isCastle,
       castleOwner: t.isCastle ? t.owner : null,
       occupants,
-      combatStartTick: null,
       // Initial garrison's faction stamps the tile so derivedOwner reflects
-      // colour even if the occupant later dies before someone else claims.
+      // colour even if the occupant later dies before someone else claims
+      // (and so a wiped enemy castle still needs break→capture, §3.6').
       lastClaimedFaction: t.count > 0 ? t.owner : null,
     });
   }
@@ -277,6 +276,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
     tick: 0,
     provinces,
     marchingStacks: [],
+    attackOrders: [],
     aiConfig,
     defeated: new Set<FactionId>(),
     rngSeed: scenario.rngSeed >>> 0,
@@ -483,12 +483,12 @@ function stepWithEvents(state: GameState): {
     }
   }
 
-  const cr = resolveSameTileCombat(s);
+  const cr = resolveOrders(s);
   s = cr.state;
   for (const e of cr.events) {
     events.push({
       type: "combat",
-      tile: e.tile,
+      tile: e.to,
       combatTick: e.combatTick,
       baseDamage: e.baseDamage,
     });

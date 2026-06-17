@@ -88,8 +88,17 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
           `<div>${FACTION_LABEL[o.faction] ?? o.faction}${tag}: ${o.amount} (${TIER_LABEL[tier]})</div>`,
         );
       }
-      if (p.combatStartTick !== null) {
-        lines.push(`<div style='opacity:0.7'>Combat tick: ${p.combatStartTick}</div>`);
+    }
+    // PRD §3.6' (v1.4): surface cross-edge sieges touching this tile.
+    for (const o of state.attackOrders) {
+      if (o.from === id) {
+        lines.push(
+          `<div style='color:#ff8'>⚔ Besieging ${o.to} (${FACTION_LABEL[o.faction] ?? o.faction})</div>`,
+        );
+      } else if (o.to === id) {
+        lines.push(
+          `<div style='color:#f88'>⚔ Under siege by ${FACTION_LABEL[o.faction] ?? o.faction}</div>`,
+        );
       }
     }
     root.innerHTML = lines.join("");

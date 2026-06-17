@@ -31,9 +31,17 @@ export function derivedOwner(province: Province): FactionId | null {
   return null;
 }
 
-// Has any hostile (= different faction) occupant with amount > 0. Used by
-// BFS passable check (v1.3 relaxed: walkable as long as no hostile troops
-// stand in the way; own-faction occupants and lastClaimedFaction don't block).
+// PRD §3.5.2 (v1.4): a tile is "own-claimed" — and thus passable as a marching
+// intermediate — iff its derived owner is `faction`. That covers a tile with an
+// own garrison (any amount) and an empty tile trail-marked by walk-through
+// claim (lastClaimedFaction === faction). Neutral / unclaimed / enemy tiles are
+// walls; territory only expands one captured tile at a time.
+export function isOwnClaimed(province: Province, faction: FactionId): boolean {
+  return derivedOwner(province) === faction;
+}
+
+// Has any hostile (= different faction) occupant with amount > 0. Retained for
+// the (idle) rule AI; v1.4 BFS no longer uses it (passable is own-claimed only).
 export function hasHostileOccupant(
   province: Province,
   faction: FactionId,
@@ -50,17 +58,6 @@ export function totalAmount(province: Province): number {
   let sum = 0;
   for (const o of province.occupants) sum += o.amount;
   return sum;
-}
-
-// True when the tile has 2+ distinct faction occupants — the §3.6 combat
-// trigger condition.
-export function isContested(province: Province): boolean {
-  if (province.occupants.length < 2) return false;
-  const first = (province.occupants[0] as Occupant).faction;
-  for (let i = 1; i < province.occupants.length; i++) {
-    if ((province.occupants[i] as Occupant).faction !== first) return true;
-  }
-  return false;
 }
 
 export function findOccupant(

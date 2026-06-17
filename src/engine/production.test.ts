@@ -3,6 +3,7 @@ import { produce } from "./production";
 import { tileId } from "./state";
 import {
   AI_IDLE,
+  type AttackOrder,
   type FactionId,
   type GameState,
   type Occupant,
@@ -12,12 +13,14 @@ import {
 function makeState(
   provinces: ReadonlyMap<string, Province>,
   tick = 1,
+  attackOrders: readonly AttackOrder[] = [],
 ): GameState {
   return {
     boardSize: 3,
     tick,
     provinces,
     marchingStacks: [],
+    attackOrders,
     aiConfig: {
       TOKUGAWA: AI_IDLE,
       TAKEDA: AI_IDLE,
@@ -34,11 +37,7 @@ function makeState(
 function tile(
   id: string,
   occupants: readonly Occupant[],
-  opts: {
-    isCastle?: boolean;
-    castleOwner?: FactionId | null;
-    combatStartTick?: number | null;
-  } = {},
+  opts: { isCastle?: boolean; castleOwner?: FactionId | null } = {},
 ): Province {
   return {
     id,
@@ -47,58 +46,46 @@ function tile(
     isCastle: opts.isCastle ?? false,
     castleOwner: opts.castleOwner ?? null,
     occupants,
-    combatStartTick: opts.combatStartTick ?? null,
-    lastClaimedFaction: null,
+    lastClaimedFaction: occupants[0]?.faction ?? null,
   };
 }
 
+const tok = (amount: number): Occupant => ({
+  faction: "TOKUGAWA",
+  amount,
+  arrivalTick: 0,
+  isDefender: true,
+});
+
 describe("produce (v1.3 self-replicate)", () => {
-  it("[AC-V2-29] non-contested tile with amount ≥ 1 grows by 1", () => {
+  it("[AC-V2-29] non-engaged tile with amount ≥ 1 grows by 1", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
-        ]),
-      ],
-    ]);
-    const out = produce(makeState(provinces));
+    const out = produce(makeState(new Map([[id, tile(id, [tok(3)])]])));
     expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(4);
   });
 
   it("[AC-V2-29] amount = 1 also grows to 2 (lone survivor regenerates)", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          { faction: "TOKUGAWA", amount: 1, arrivalTick: 0, isDefender: true },
-        ]),
-      ],
-    ]);
-    const out = produce(makeState(provinces));
+    const out = produce(makeState(new Map([[id, tile(id, [tok(1)])]])));
     expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(2);
   });
 
-  it("[AC-V2-29] contested tile does not grow for any side", () => {
-    const id = tileId(0, 0);
+  it("[AC-V2-29] tiles engaged in a siege (from / to of an AttackOrder) are frozen", () => {
+    const from = tileId(0, 0);
+    const to = tileId(1, 0);
     const provinces = new Map([
+      [from, tile(from, [tok(5)])],
       [
-        id,
-        tile(
-          id,
-          [
-            { faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true },
-            { faction: "TAKEDA", amount: 5, arrivalTick: 1, isDefender: false },
-          ],
-          { combatStartTick: 0 },
-        ),
+        to,
+        tile(to, [
+          { faction: "TAKEDA", amount: 5, arrivalTick: 0, isDefender: true },
+        ]),
       ],
     ]);
-    const state = makeState(provinces);
+    const order: AttackOrder = { from, to, faction: "TOKUGAWA", startTick: 0 };
+    const state = makeState(provinces, 1, [order]);
     const out = produce(state);
-    expect(out).toBe(state);
+    expect(out).toBe(state); // both tiles skipped → no change
   });
 
   it("NEUTRAL bandit does not grow", () => {
@@ -112,64 +99,27 @@ describe("produce (v1.3 self-replicate)", () => {
       ],
     ]);
     const state = makeState(provinces);
-    const out = produce(state);
-    expect(out).toBe(state);
+    expect(produce(state)).toBe(state);
   });
 
   it("defeated faction does not grow", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          { faction: "TOKUGAWA", amount: 3, arrivalTick: 0, isDefender: true },
-        ]),
-      ],
-    ]);
     const state = {
-      ...makeState(provinces),
+      ...makeState(new Map([[id, tile(id, [tok(3)])]])),
       defeated: new Set<FactionId>(["TOKUGAWA"]),
     };
-    const out = produce(state);
-    expect(out).toBe(state);
+    expect(produce(state)).toBe(state);
   });
 
   it("amount caps at 100", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          {
-            faction: "TOKUGAWA",
-            amount: 100,
-            arrivalTick: 0,
-            isDefender: true,
-          },
-        ]),
-      ],
-    ]);
-    const state = makeState(provinces);
-    const out = produce(state);
-    expect(out).toBe(state);
+    const state = makeState(new Map([[id, tile(id, [tok(100)])]]));
+    expect(produce(state)).toBe(state);
   });
 
   it("amount=99 grows to 100 (boundary)", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          {
-            faction: "TOKUGAWA",
-            amount: 99,
-            arrivalTick: 0,
-            isDefender: true,
-          },
-        ]),
-      ],
-    ]);
-    const out = produce(makeState(provinces));
+    const out = produce(makeState(new Map([[id, tile(id, [tok(99)])]])));
     expect(out.provinces.get(id)?.occupants[0]?.amount).toBe(100);
   });
 
@@ -177,22 +127,8 @@ describe("produce (v1.3 self-replicate)", () => {
     const castleId = tileId(0, 0);
     const fieldId = tileId(1, 0);
     const provinces = new Map([
-      [
-        castleId,
-        tile(
-          castleId,
-          [
-            { faction: "TOKUGAWA", amount: 4, arrivalTick: 0, isDefender: true },
-          ],
-          { isCastle: true, castleOwner: "TOKUGAWA" },
-        ),
-      ],
-      [
-        fieldId,
-        tile(fieldId, [
-          { faction: "TOKUGAWA", amount: 4, arrivalTick: 0, isDefender: true },
-        ]),
-      ],
+      [castleId, tile(castleId, [tok(4)], { isCastle: true, castleOwner: "TOKUGAWA" })],
+      [fieldId, tile(fieldId, [tok(4)])],
     ]);
     const out = produce(makeState(provinces));
     expect(out.provinces.get(castleId)?.occupants[0]?.amount).toBe(5);
@@ -201,24 +137,13 @@ describe("produce (v1.3 self-replicate)", () => {
 
   it("skips at tick 0", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([
-      [
-        id,
-        tile(id, [
-          { faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true },
-        ]),
-      ],
-    ]);
-    const state = makeState(provinces, 0);
-    const out = produce(state);
-    expect(out).toBe(state);
+    const state = makeState(new Map([[id, tile(id, [tok(5)])]]), 0);
+    expect(produce(state)).toBe(state);
   });
 
   it("empty tile is left alone (no occupant to grow)", () => {
     const id = tileId(0, 0);
-    const provinces = new Map([[id, tile(id, [])]]);
-    const state = makeState(provinces);
-    const out = produce(state);
-    expect(out).toBe(state);
+    const state = makeState(new Map([[id, tile(id, [])]]));
+    expect(produce(state)).toBe(state);
   });
 });

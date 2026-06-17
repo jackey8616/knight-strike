@@ -1,8 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { tileId } from "@/engine/state";
+import { dispatch, findPath } from "@/engine/movement";
+import { derivedOwner, tileId } from "@/engine/state";
+import { step } from "@/engine/tick";
+import {
+  AI_IDLE,
+  type FactionId,
+  type GameState,
+  type Province,
+} from "@/engine/types";
 import { defaultScenario } from "@/scenarios/default";
 import { idleTargetScenario } from "@/scenarios/idle-target";
 import { buildInitialState, runScenario } from "./runner";
+
+function blankBoard(size: number): GameState {
+  const provinces = new Map<string, Province>();
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const id = tileId(x, y);
+      provinces.set(id, {
+        id,
+        x,
+        y,
+        isCastle: false,
+        castleOwner: null,
+        occupants: [],
+        lastClaimedFaction: null,
+      });
+    }
+  }
+  return {
+    boardSize: size,
+    tick: 0,
+    provinces,
+    marchingStacks: [],
+    attackOrders: [],
+    aiConfig: {
+      TOKUGAWA: AI_IDLE,
+      TAKEDA: AI_IDLE,
+      ODA: AI_IDLE,
+      UESUGI: AI_IDLE,
+      NEUTRAL: AI_IDLE,
+    },
+    defeated: new Set<FactionId>(),
+    rngSeed: 1,
+    nextMarchingId: 1,
+  };
+}
+
+function setTile(s: GameState, p: Province): GameState {
+  const next = new Map(s.provinces);
+  next.set(p.id, p);
+  return { ...s, provinces: next };
+}
 
 describe("integration: default scenario loader", () => {
   it("default scenario parses into a well-formed initial state", () => {
@@ -71,5 +120,80 @@ describe("integration: runScenario invariants", () => {
     expect(events.length).toBe(result.ticks);
     expect(events[0]?.tick).toBe(1);
     expect(events[events.length - 1]?.tick).toBe(result.ticks);
+  });
+});
+
+describe("integration: v1.4 dispatch → siege → capture → expand (AC-V4-08)", () => {
+  it("captures a neutral frontier in one step, then marches onward through it", () => {
+    // Row 0: TOK castle at (0,0); (1,0) and (2,0) are neutral empty frontier.
+    let s = blankBoard(5);
+    s = setTile(s, {
+      id: tileId(0, 0),
+      x: 0,
+      y: 0,
+      isCastle: true,
+      castleOwner: "TOKUGAWA",
+      occupants: [{ faction: "TOKUGAWA", amount: 5, arrivalTick: 0, isDefender: true }],
+      lastClaimedFaction: "TOKUGAWA",
+    });
+
+    // Can't yet path to (2,0): the (1,0) frontier isn't ours.
+    expect(findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA")).toBeNull();
+
+    // Dispatch at the adjacent neutral frontier (1,0): siege staging = castle.
+    const d = dispatch(s, { from: tileId(0, 0), to: tileId(1, 0), ratio: 1.0 });
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    s = d.state;
+
+    // One tick: troops re-garrison the castle, the order captures the empty
+    // neutral tile (claim-only, spending 1).
+    s = step(s);
+    const frontier = s.provinces.get(tileId(1, 0)) as Province;
+    expect(frontier.occupants).toHaveLength(0);
+    expect(derivedOwner(frontier)).toBe("TOKUGAWA");
+    expect(s.attackOrders).toHaveLength(0);
+    expect(s.marchingStacks).toHaveLength(0);
+
+    // The captured frontier is now own-claimed → a path through it opens up.
+    const path = findPath(s, tileId(0, 0), tileId(2, 0), "TOKUGAWA");
+    expect(path).toEqual([tileId(0, 0), tileId(1, 0), tileId(2, 0)]);
+  });
+
+  it("grinds an enemy garrison then breaks→captures the emptied tile", () => {
+    // TOK castle (0,0) strong; TAKEDA garrison on adjacent (1,0).
+    let s = blankBoard(3);
+    s = setTile(s, {
+      id: tileId(0, 0),
+      x: 0,
+      y: 0,
+      isCastle: true,
+      castleOwner: "TOKUGAWA",
+      occupants: [{ faction: "TOKUGAWA", amount: 40, arrivalTick: 0, isDefender: true }],
+      lastClaimedFaction: "TOKUGAWA",
+    });
+    s = setTile(s, {
+      id: tileId(1, 0),
+      x: 1,
+      y: 0,
+      isCastle: false,
+      castleOwner: null,
+      occupants: [{ faction: "TAKEDA", amount: 4, arrivalTick: 0, isDefender: true }],
+      lastClaimedFaction: "TAKEDA",
+    });
+
+    const d = dispatch(s, { from: tileId(0, 0), to: tileId(1, 0), ratio: 0.5 });
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    s = d.state;
+
+    // Run enough ticks to grind 4 defenders, break, then capture.
+    for (let i = 0; i < 12; i++) s = step(s);
+
+    const target = s.provinces.get(tileId(1, 0)) as Province;
+    expect(target.occupants.some((o) => o.faction === "TAKEDA")).toBe(false);
+    expect(derivedOwner(target)).toBe("TOKUGAWA"); // claim flipped to us
+    expect(target.occupants).toHaveLength(0); // claim-only
+    expect(s.attackOrders).toHaveLength(0); // siege complete
   });
 });

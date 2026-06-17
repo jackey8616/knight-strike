@@ -48,7 +48,6 @@ function mkState(opts: StateOpts): GameState {
         isCastle: false,
         castleOwner: null,
         occupants: [],
-        combatStartTick: null,
         lastClaimedFaction: null,
       });
     }
@@ -77,7 +76,6 @@ function mkState(opts: StateOpts): GameState {
       isCastle: t.isCastle ?? false,
       castleOwner,
       occupants,
-      combatStartTick: null,
       lastClaimedFaction: hasTroops ? (t.faction as FactionId) : null,
     });
   }
@@ -100,6 +98,7 @@ function mkState(opts: StateOpts): GameState {
     tick: opts.tick ?? 1,
     provinces,
     marchingStacks: [],
+    attackOrders: [],
     aiConfig,
     defeated: new Set<FactionId>(opts.defeated ?? []),
     rngSeed: (opts.seed ?? 1) >>> 0,
@@ -234,6 +233,9 @@ describe("ai: rule #1 defense", () => {
       ],
       aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
       tick: 1,
+      // v1.4: reinforcement marches through (0,1); own-only passability needs
+      // the lane claimed for the path to exist.
+      claimEmptiesFor: "TOKUGAWA",
     });
     const next = stepAi(s);
     expect(next.marchingStacks).toHaveLength(1);
