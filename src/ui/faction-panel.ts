@@ -1,5 +1,6 @@
 import { derivedOwner } from "@/engine/state";
 import type { FactionId, GameState } from "@/engine/types";
+import { installResponsiveStyles } from "./responsive";
 
 const FACTIONS: readonly Exclude<FactionId, "NEUTRAL">[] = [
   "TOKUGAWA",
@@ -114,8 +115,10 @@ export function createFactionPanel(
   parent: HTMLElement,
   playerFaction: FactionId,
 ): FactionPanel {
+  installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = ROOT_STYLE;
+  root.classList.add("ks-faction");
   parent.appendChild(root);
 
   const title = document.createElement("div");

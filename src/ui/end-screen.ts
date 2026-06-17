@@ -1,3 +1,5 @@
+import { installResponsiveStyles } from "./responsive";
+
 export type EndScreenStats = {
   readonly playerWon: boolean;
   readonly playerTiles: number;
@@ -44,8 +46,10 @@ export function createEndScreen(
   parent: HTMLElement,
   onRestart: () => void,
 ): EndScreen {
+  installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = OVERLAY_STYLE;
+  root.classList.add("ks-end");
 
   const title = document.createElement("div");
   root.appendChild(title);

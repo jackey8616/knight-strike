@@ -1,5 +1,6 @@
 import type { GameState, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
+import { installResponsiveStyles } from "./responsive";
 
 const ROOT_STYLE = [
   "position: fixed",
@@ -41,8 +42,10 @@ const TIER_LABEL = {
 } as const;
 
 export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
+  installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = ROOT_STYLE;
+  root.classList.add("ks-tile-info");
   parent.appendChild(root);
 
   function renderEmpty(): void {

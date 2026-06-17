@@ -7,6 +7,7 @@ import {
 } from "@/engine/movement";
 import { derivedOwner } from "@/engine/state";
 import type { FactionId, GameState, TileId } from "@/engine/types";
+import { installResponsiveStyles } from "@/ui/responsive";
 
 import type { PointerButton } from "./pointer";
 
@@ -164,8 +165,10 @@ export function createRatioPanel(
   initial: DispatchRatio,
   onChange: (r: DispatchRatio) => void,
 ): RatioPanel {
+  installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = PANEL_STYLE;
+  root.classList.add("ks-dispatch");
 
   const label = document.createElement("span");
   label.textContent = "Dispatch:";

@@ -1,3 +1,5 @@
+import { installResponsiveStyles } from "./responsive";
+
 export type HudSpeed = 1 | 2 | 3 | 4;
 
 const SPEEDS: readonly HudSpeed[] = [1, 2, 3, 4];
@@ -75,8 +77,10 @@ const BAR_INNER = [
 ].join(";");
 
 export function createHud(parent: HTMLElement, deps: HudDeps): Hud {
+  installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = ROOT_STYLE;
+  root.classList.add("ks-hud");
   parent.appendChild(root);
 
   const tickLabel = document.createElement("span");
@@ -85,6 +89,7 @@ export function createHud(parent: HTMLElement, deps: HudDeps): Hud {
 
   const barOuter = document.createElement("div");
   barOuter.style.cssText = BAR_OUTER;
+  barOuter.classList.add("ks-bar");
   const barInner = document.createElement("div");
   barInner.style.cssText = BAR_INNER;
   barOuter.appendChild(barInner);

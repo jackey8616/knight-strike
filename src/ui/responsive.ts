@@ -1,0 +1,73 @@
+// Mobile-friendly overrides for the DOM HUD panels. Each panel sets its base
+// look via inline `style.cssText` (desktop), and tags its root with a `ks-*`
+// class. On narrow screens this injected stylesheet repositions + shrinks them
+// so they stop overlapping (inline styles win specificity, hence !important).
+//
+// Desktop layout packs three panels along the bottom edge (faction left,
+// tile-info centre, dispatch right) which collides on a phone. Mobile layout:
+//   HUD        → top-centre (shrunk)
+//   tile-info  → top-left, under the HUD
+//   faction    → top-right, under the HUD
+//   dispatch   → bottom-centre (the one interactive control stays in thumb reach)
+
+const STYLE_ID = "ks-responsive";
+
+const CSS = `
+@media (max-width: 640px) {
+  .ks-hud {
+    top: 6px !important;
+    padding: 4px 8px !important;
+    gap: 6px !important;
+    font-size: 11px !important;
+    max-width: 96vw !important;
+  }
+  .ks-hud .ks-bar { width: 48px !important; }
+  .ks-hud button { padding: 2px 6px !important; }
+
+  .ks-tile-info {
+    top: 44px !important;
+    bottom: auto !important;
+    left: 8px !important;
+    right: auto !important;
+    transform: none !important;
+    padding: 5px 7px !important;
+    font-size: 10px !important;
+    min-width: 0 !important;
+    max-width: 46vw !important;
+  }
+
+  .ks-faction {
+    top: 44px !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: 8px !important;
+    padding: 4px 6px !important;
+    font-size: 9px !important;
+    max-width: 48vw !important;
+    line-height: 1.3 !important;
+  }
+
+  .ks-dispatch {
+    bottom: 10px !important;
+    right: auto !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    padding: 5px !important;
+    gap: 4px !important;
+    font-size: 11px !important;
+  }
+  .ks-dispatch button { padding: 6px 9px !important; }
+
+  .ks-end { font-size: 13px !important; }
+}
+`;
+
+// Idempotent — every panel calls this on creation; only the first injects.
+export function installResponsiveStyles(): void {
+  if (typeof document === "undefined") return;
+  if (document.getElementById(STYLE_ID) !== null) return;
+  const style = document.createElement("style");
+  style.id = STYLE_ID;
+  style.textContent = CSS;
+  document.head.appendChild(style);
+}
