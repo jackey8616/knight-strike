@@ -13,7 +13,14 @@ import { parseTileId } from "@/engine/state";
 import type { FactionId, GameState, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
-import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
+import {
+  FACTION_COLORS,
+  isoX,
+  isoY,
+  terrainElevation,
+  TILE_HEIGHT,
+  TILE_WIDTH,
+} from "./board";
 import type { TierTextures } from "./sprites";
 
 // PRD §5.1: marching sprite is the regular tile sprite shrunk to 0.7× so it
@@ -73,11 +80,14 @@ function columnPos(
   curTile: TileId,
   leanToward: TileId | undefined,
   offset: boolean,
+  terrainLift: number,
 ): { x: number; y: number } {
   const c = tileCenter(curTile);
-  if (!offset) return { x: c.x, y: c.y };
+  // Stand on the raised terrain top (PRD §3.9).
+  const baseY = c.y - terrainLift;
+  if (!offset) return { x: c.x, y: baseY };
   let x = c.x;
-  let y = c.y - COLUMN_LIFT;
+  let y = baseY - COLUMN_LIFT;
   if (leanToward !== undefined) {
     const t = tileCenter(leanToward);
     x += (t.x - c.x) * SIEGE_LEAN;
@@ -118,11 +128,12 @@ export function createMarchingRenderer(
     readonly cancelId?: string; // only marching stacks are right-click cancellable
     readonly leanToward?: TileId; // besieging target — lean toward it
     readonly offset: boolean; // nudge off-centre (a garrison shares the tile)
+    readonly terrainLift: number; // raised terrain top elevation (px)
   };
 
   function createColumnGfx(v: ColumnView): MarchGfx {
     const node = new Container();
-    const c = columnPos(v.prevForNew, v.leanToward, v.offset);
+    const c = columnPos(v.prevForNew, v.leanToward, v.offset, v.terrainLift);
     node.position.set(c.x, c.y);
     const { x: ix, y: iy } = parseTileId(v.prevForNew);
     node.zIndex = ix + iy + 0.25;
@@ -182,7 +193,7 @@ export function createMarchingRenderer(
       gfx.sprite.scale.set(spriteScale(tierTex));
     }
 
-    const target = columnPos(v.curTile, v.leanToward, v.offset);
+    const target = columnPos(v.curTile, v.leanToward, v.offset, v.terrainLift);
     gsap.killTweensOf(gfx.node.position);
     if (!v.animate || gfx.prevTile === v.curTile) {
       gfx.node.position.set(target.x, target.y);
@@ -190,7 +201,7 @@ export function createMarchingRenderer(
       // Seed the start explicitly so a mid-flight tick-rate change doesn't
       // strand the sprite between tiles.
       if (isNew) {
-        const startC = columnPos(gfx.prevTile, v.leanToward, v.offset);
+        const startC = columnPos(gfx.prevTile, v.leanToward, v.offset, v.terrainLift);
         gfx.node.position.set(startC.x, startC.y);
       }
       gsap.to(gfx.node.position, {
@@ -222,6 +233,7 @@ export function createMarchingRenderer(
           animate: true,
           cancelId: stack.id,
           offset: tileHasGarrison(state, curTile),
+          terrainLift: terrainElevation(state.provinces.get(curTile)?.terrain),
         },
         tickIntervalMs,
       );
@@ -245,6 +257,7 @@ export function createMarchingRenderer(
           animate: false,
           leanToward: o.to,
           offset: tileHasGarrison(state, o.from),
+          terrainLift: terrainElevation(state.provinces.get(o.from)?.terrain),
         },
         tickIntervalMs,
       );

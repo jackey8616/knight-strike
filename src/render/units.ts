@@ -7,10 +7,17 @@ import {
 } from "pixi.js";
 import { gsap } from "gsap";
 
-import type { FactionId, GameState, Tier, TileId } from "@/engine/types";
+import type { FactionId, GameState, Terrain, Tier, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
-import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
+import {
+  FACTION_COLORS,
+  isoX,
+  isoY,
+  terrainElevation,
+  TILE_HEIGHT,
+  TILE_WIDTH,
+} from "./board";
 import { playCombatBump } from "./combat";
 import type { TierTextures } from "./sprites";
 
@@ -74,11 +81,13 @@ function createUnitGfx(
   owner: FactionId,
   count: number,
   textures: TierTextures,
+  terrain: Terrain | undefined,
 ): UnitGfx {
   const tier = deriveTier(count);
   const texture = textures[tier];
   const node = new Container();
-  node.position.set(isoX(x, y), isoY(x, y));
+  // Stand on the raised terrain top (PRD §3.9) instead of sinking into it.
+  node.position.set(isoX(x, y), isoY(x, y) - terrainElevation(terrain));
   // §3.1 iso back-to-front order: deeper rows (larger x+y) draw later. Adding
   // 0.5 keeps unit gfx above its tile base but below same-row neighbours.
   node.zIndex = x + y + 0.5;
@@ -184,6 +193,7 @@ export function createUnitsRenderer(
           renderFaction,
           renderAmount,
           textures,
+          province.terrain,
         );
         container.addChild(gfx.node);
         units.set(province.id, gfx);

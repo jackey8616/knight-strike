@@ -41,6 +41,14 @@ const TIER_LABEL = {
   KING: "King",
 } as const;
 
+const TERRAIN_LABEL: Readonly<Record<string, string>> = {
+  PLAINS: "Plains",
+  HILL: "Hill · −50% dmg",
+  FOREST: "Forest · −25% dmg",
+  MOUNTAIN: "Mountain · impassable",
+  WATER: "Water · impassable",
+};
+
 export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
   installResponsiveStyles();
   const root = document.createElement("div");
@@ -66,6 +74,12 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
     lines.push(
       `<div style='font-weight:700'>(${p.x}, ${p.y})${p.isCastle ? " ★ Castle" : ""}</div>`,
     );
+    const terrain = p.terrain ?? "PLAINS";
+    if (terrain !== "PLAINS") {
+      lines.push(
+        `<div style='opacity:0.7'>${TERRAIN_LABEL[terrain] ?? terrain}</div>`,
+      );
+    }
     if (p.isCastle && p.castleOwner !== null) {
       lines.push(`<div>Castle of: ${FACTION_LABEL[p.castleOwner] ?? p.castleOwner}</div>`);
     }

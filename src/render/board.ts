@@ -6,7 +6,7 @@ import {
 } from "pixi.js";
 
 import { derivedOwner, tileId } from "@/engine/state";
-import type { FactionId, GameState, TileId } from "@/engine/types";
+import type { FactionId, GameState, Terrain, TileId } from "@/engine/types";
 
 export const TILE_WIDTH = 64;
 export const TILE_HEIGHT = 32;
@@ -29,8 +29,40 @@ export function isoY(x: number, y: number): number {
   return (x + y) * (TILE_HEIGHT / 2);
 }
 
-const EMPTY_TILE_COLOR = 0x2e2e2e;
 const TILE_OUTLINE_COLOR = 0x111111;
+
+// PRD §3.9 (v1.6): terrain top-face colours + screen-space elevation (px). The
+// faction/ownership colour is laid over the top face as a translucent tint, so
+// territory still reads while the terrain stays visible underneath.
+const TERRAIN_TOP: Readonly<Record<Terrain, number>> = {
+  PLAINS: 0x3f6b3a,
+  HILL: 0x8f7d44,
+  MOUNTAIN: 0x6f6f78,
+  WATER: 0x2f5aa0,
+  FOREST: 0x2f5530,
+};
+const TERRAIN_ELEVATION: Readonly<Record<Terrain, number>> = {
+  PLAINS: 0,
+  WATER: 0,
+  FOREST: 6,
+  HILL: 14,
+  MOUNTAIN: 26,
+};
+
+// Screen-space lift (px) a unit/column standing on this terrain gets so it sits
+// on the raised top face instead of sinking into the prism. Exported for the
+// unit + marching renderers.
+export function terrainElevation(t: Terrain | undefined): number {
+  return TERRAIN_ELEVATION[t ?? "PLAINS"];
+}
+
+function shade(color: number, f: number): number {
+  const r = Math.round(((color >> 16) & 0xff) * f);
+  const g = Math.round(((color >> 8) & 0xff) * f);
+  const b = Math.round((color & 0xff) * f);
+  return (r << 16) | (g << 8) | b;
+}
+
 const HOVER_COLOR = 0xffffff;
 const HOVER_ALPHA = 0.4;
 const SELECTION_COLOR = 0xffd700;
@@ -44,6 +76,8 @@ type TileGfx = {
   readonly base: Graphics;
   readonly hover: Graphics;
   readonly selection: Graphics;
+  readonly terrain: Terrain;
+  readonly elevation: number;
 };
 
 export type BoardEvents = {
@@ -65,20 +99,56 @@ export type BoardRenderer = {
   destroy(): void;
 };
 
-function diamondPath(g: Graphics): void {
-  g.moveTo(0, -TILE_HEIGHT / 2);
-  g.lineTo(TILE_WIDTH / 2, 0);
-  g.lineTo(0, TILE_HEIGHT / 2);
-  g.lineTo(-TILE_WIDTH / 2, 0);
+// Diamond face shifted up the screen by `lift` px (the raised terrain top).
+function diamondPathAt(g: Graphics, lift: number): void {
+  g.moveTo(0, -TILE_HEIGHT / 2 - lift);
+  g.lineTo(TILE_WIDTH / 2, -lift);
+  g.lineTo(0, TILE_HEIGHT / 2 - lift);
+  g.lineTo(-TILE_WIDTH / 2, -lift);
   g.closePath();
 }
 
-function drawTileBase(g: Graphics, fill: number): void {
+function quad(
+  g: Graphics,
+  x0: number, y0: number,
+  x1: number, y1: number,
+  x2: number, y2: number,
+  x3: number, y3: number,
+): void {
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.lineTo(x2, y2);
+  g.lineTo(x3, y3);
+  g.closePath();
+}
+
+// PRD §3.9 (v1.6): draw a tile as an iso prism — front-left/front-right side
+// walls under a raised top face — coloured by terrain, with the owner colour
+// tinted over the top. PLAINS/WATER have zero elevation (flat diamond).
+function drawTilePrism(
+  g: Graphics,
+  terrain: Terrain,
+  ownerColor: number | null,
+): void {
   g.clear();
-  diamondPath(g);
-  g.fill({ color: fill, alpha: 1 });
-  diamondPath(g);
+  const e = TERRAIN_ELEVATION[terrain];
+  const top = TERRAIN_TOP[terrain];
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  if (e > 0) {
+    quad(g, -hw, -e, 0, hh - e, 0, hh, -hw, 0);
+    g.fill({ color: shade(top, 0.55), alpha: 1 });
+    quad(g, 0, hh - e, hw, -e, hw, 0, 0, hh);
+    g.fill({ color: shade(top, 0.72), alpha: 1 });
+  }
+  diamondPathAt(g, e);
+  g.fill({ color: top, alpha: 1 });
+  diamondPathAt(g, e);
   g.stroke({ color: TILE_OUTLINE_COLOR, width: 1, alpha: 1 });
+  if (ownerColor !== null) {
+    diamondPathAt(g, e);
+    g.fill({ color: ownerColor, alpha: 0.45 });
+  }
 }
 
 // Castle marker is rendered as a stylised keep silhouette inset within the
@@ -121,6 +191,11 @@ function createDiamondHitArea(): Polygon {
   ]);
 }
 
+function hasUnit(state: GameState, x: number, y: number): boolean {
+  const p = state.provinces.get(tileId(x, y));
+  return p !== undefined && p.occupants.some((o) => o.amount > 0);
+}
+
 export function createBoardRenderer(
   initial: GameState,
   events: BoardEvents = {},
@@ -145,17 +220,22 @@ export function createBoardRenderer(
       node.cursor = "pointer";
       node.hitArea = createDiamondHitArea();
 
+      // Terrain is generated once at load and never changes, so the elevation
+      // (and the raised hover/selection overlays) can be fixed at creation.
+      const terrain = initial.provinces.get(id)?.terrain ?? "PLAINS";
+      const elevation = TERRAIN_ELEVATION[terrain];
+
       const base = new Graphics();
       node.addChild(base);
 
       const hover = new Graphics();
-      diamondPath(hover);
+      diamondPathAt(hover, elevation);
       hover.fill({ color: HOVER_COLOR, alpha: HOVER_ALPHA });
       hover.visible = false;
       node.addChild(hover);
 
       const selection = new Graphics();
-      diamondPath(selection);
+      diamondPathAt(selection, elevation);
       selection.stroke({
         color: SELECTION_COLOR,
         width: SELECTION_WIDTH,
@@ -188,7 +268,7 @@ export function createBoardRenderer(
       }
 
       board.addChild(node);
-      tiles.set(id, { id, node, base, hover, selection });
+      tiles.set(id, { id, node, base, hover, selection, terrain, elevation });
     }
   }
 
@@ -203,19 +283,28 @@ export function createBoardRenderer(
       // or null. Empty tiles get the neutral colour. Contested (multi-faction)
       // tiles fall back to the castle's original owner colour if it's a castle,
       // else the neutral tile colour so the player has *some* coherent cue.
+      // Owner colour is tinted over the terrain top face; unclaimed non-castle
+      // tiles get no tint so the raw terrain shows.
       const owner = derivedOwner(province);
-      let fill: number;
+      let ownerColor: number | null = null;
       if (owner !== null) {
-        fill = FACTION_COLORS[owner];
+        ownerColor = FACTION_COLORS[owner];
       } else if (province.isCastle && province.castleOwner !== null) {
-        fill = FACTION_COLORS[province.castleOwner];
-      } else {
-        fill = EMPTY_TILE_COLOR;
+        ownerColor = FACTION_COLORS[province.castleOwner];
       }
-      drawTileBase(t.base, fill);
+      drawTilePrism(t.base, t.terrain, ownerColor);
       if (province.isCastle) {
         drawCastleMarker(t.base);
       }
+      // PRD §3.9: a raised tile fades when a unit sits on a tile it occludes
+      // (the row behind/above it under the 45° camera), so vision isn't blocked.
+      t.base.alpha =
+        t.elevation > 0 &&
+        (hasUnit(state, province.x - 1, province.y - 1) ||
+          hasUnit(state, province.x - 1, province.y) ||
+          hasUnit(state, province.x, province.y - 1))
+          ? 0.4
+          : 1;
     }
   }
 
