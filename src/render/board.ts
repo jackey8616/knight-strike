@@ -41,6 +41,22 @@ const TERRAIN_TOP: Readonly<Record<Terrain, number>> = {
   FOREST: 0x2f5530,
 };
 
+// PRD §5.1: per-terrain pixel-art decorations drawn on the tile top face
+// — chunky little features (grass tufts, trees, ripples, snow-capped rock) that
+// match the pixel-art unit sprites. They're seeded per-tile so a given tile
+// always looks the same, and drawn once at load (terrain never changes).
+const DECOR = {
+  GRASS: 0x6fa256,
+  GRASS_DARK: 0x3c6b34,
+  TRUNK: 0x6b4423,
+  LEAF: 0x357a3c,
+  LEAF_HI: 0x4f9a52,
+  RIPPLE: 0x6fa0d8,
+  ROCK: 0x9a9aa2,
+  ROCK_DARK: 0x55555c,
+  SNOW: 0xeef2f6,
+} as const;
+
 // PRD §3.9 (v1.6): mountains render as stacked unit-cubes. A mountain tile's
 // height (in cube units) is its distance INTO the mountain mass — 1 at the edge
 // of the cluster, +1 per step inward (4-conn distance transform, board border
@@ -108,6 +124,108 @@ function shade(color: number, f: number): number {
   const g = Math.round(((color >> 8) & 0xff) * f);
   const b = Math.round((color & 0xff) * f);
   return (r << 16) | (g << 8) | b;
+}
+
+// Deterministic per-tile PRNG (LCG seeded by tile coords) — so decorations are
+// stable across redraws without storing them, and identical between runs.
+function tileRng(x: number, y: number): () => number {
+  let s = ((Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0) || 0x9e3779b9;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0x100000000;
+  };
+}
+
+// A random point inside the tile's (raised) top-face diamond, shrunk toward the
+// centre by `shrink` so decorations don't spill over the tile edge.
+function diamondPoint(
+  rng: () => number,
+  e: number,
+  shrink: number,
+): readonly [number, number] {
+  const hw = (TILE_WIDTH / 2) * shrink;
+  const hh = (TILE_HEIGHT / 2) * shrink;
+  const dx = (rng() * 2 - 1) * hw;
+  const maxDy = hh * (1 - Math.abs(dx) / hw);
+  const dy = (rng() * 2 - 1) * maxDy;
+  return [dx, -e + dy];
+}
+
+function drawTree(g: Graphics, cx: number, cy: number): void {
+  g.rect(cx - 0.6, cy, 1.2, 3);
+  g.fill({ color: DECOR.TRUNK });
+  g.moveTo(cx, cy - 6);
+  g.lineTo(cx - 3.2, cy + 0.5);
+  g.lineTo(cx + 3.2, cy + 0.5);
+  g.closePath();
+  g.fill({ color: DECOR.LEAF });
+  g.moveTo(cx - 0.6, cy - 4.5);
+  g.lineTo(cx - 2.4, cy + 0.2);
+  g.lineTo(cx + 1.2, cy + 0.2);
+  g.closePath();
+  g.fill({ color: DECOR.LEAF_HI });
+}
+
+function drawGrass(g: Graphics, cx: number, cy: number, rng: () => number): void {
+  for (let i = 0; i < 3; i++) {
+    const h = 2 + Math.floor(rng() * 2);
+    g.rect(cx + (i - 1) * 1.4, cy - h, 0.9, h);
+    g.fill({ color: i === 1 ? DECOR.GRASS : DECOR.GRASS_DARK });
+  }
+}
+
+function drawRipple(g: Graphics, cx: number, cy: number): void {
+  g.rect(cx - 2.5, cy, 5, 0.9);
+  g.fill({ color: DECOR.RIPPLE, alpha: 0.85 });
+  g.rect(cx - 1.2, cy + 1.6, 3, 0.9);
+  g.fill({ color: DECOR.RIPPLE, alpha: 0.6 });
+}
+
+// Snow cap (a smaller inset diamond on the peak) plus a couple of rock specks.
+function drawTerrainDecor(
+  g: Graphics,
+  terrain: Terrain,
+  e: number,
+  x: number,
+  y: number,
+): void {
+  const rng = tileRng(x, y);
+  if (terrain === "PLAINS") {
+    const n = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      const [dx, dy] = diamondPoint(rng, e, 0.66);
+      drawGrass(g, dx, dy, rng);
+    }
+  } else if (terrain === "FOREST") {
+    const n = 3 + Math.floor(rng() * 2);
+    const pts: Array<readonly [number, number]> = [];
+    for (let i = 0; i < n; i++) pts.push(diamondPoint(rng, e, 0.58));
+    pts.sort((a, b) => a[1] - b[1]); // back-to-front so nearer trees overlap
+    for (const [dx, dy] of pts) drawTree(g, dx, dy);
+  } else if (terrain === "WATER") {
+    const n = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      const [dx, dy] = diamondPoint(rng, e, 0.6);
+      drawRipple(g, dx, dy);
+    }
+  } else if (terrain === "MOUNTAIN") {
+    if (e >= MOUNTAIN_UNIT_PX * 2) {
+      const hw = (TILE_WIDTH / 2) * 0.5;
+      const hh = (TILE_HEIGHT / 2) * 0.5;
+      g.moveTo(0, -e - hh);
+      g.lineTo(hw, -e);
+      g.lineTo(0, -e + hh);
+      g.lineTo(-hw, -e);
+      g.closePath();
+      g.fill({ color: DECOR.SNOW, alpha: 0.92 });
+    }
+    const n = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < n; i++) {
+      const [dx, dy] = diamondPoint(rng, e, 0.55);
+      g.rect(dx, dy, 1.6, 1.2);
+      g.fill({ color: rng() < 0.5 ? DECOR.ROCK : DECOR.ROCK_DARK });
+    }
+  }
 }
 
 const HOVER_COLOR = 0xffffff;
@@ -277,12 +395,23 @@ export function createBoardRenderer(
 
       // Terrain is generated once at load and never changes, so the elevation
       // (and the raised hover/selection overlays) can be fixed at creation.
-      const terrain = initial.provinces.get(id)?.terrain ?? "PLAINS";
+      const province = initial.provinces.get(id);
+      const terrain = province?.terrain ?? "PLAINS";
       const elevation =
         terrain === "MOUNTAIN" ? (mountainPx.get(id) ?? MOUNTAIN_UNIT_PX) : 0;
 
       const base = new Graphics();
       node.addChild(base);
+
+      // Decorations live as a child of `base`: they survive base.clear() on
+      // every redraw, render above the terrain + owner tint, and inherit
+      // base.alpha so they fade with a peak that occludes a unit. Skipped on
+      // castle tiles so the keep marker stays clean.
+      if (province?.isCastle !== true) {
+        const decor = new Graphics();
+        drawTerrainDecor(decor, terrain, elevation, x, y);
+        base.addChild(decor);
+      }
 
       const hover = new Graphics();
       diamondPathAt(hover, elevation);
