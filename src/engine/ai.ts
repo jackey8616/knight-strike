@@ -1,13 +1,15 @@
 import { RULE_PROFILES, type RuleProfile } from "./ai-profile";
-import { dispatch, findPath } from "./movement";
+import { dispatch } from "./movement";
 import {
   derivedOwner,
   findOccupant,
   hasHostileOccupant,
+  isOwnClaimed,
   parseTileId,
   tileId,
   totalAmount,
 } from "./state";
+import { isImpassableTerrain } from "./terrain";
 import type { FactionId, GameState, Province, TileId } from "./types";
 import { KING_THRESHOLD, KNIGHT_THRESHOLD, QUEEN_THRESHOLD } from "./upgrade";
 import { createRng, type Rng } from "./util/rng";
@@ -97,6 +99,40 @@ function neighborsOf(state: GameState, id: TileId): Province[] {
   return list;
 }
 
+// Single BFS from `source`, returning the shortest hop-distance to every
+// reachable tile while only routing through tiles that pass `canTraverse`.
+// findPath is an undirected BFS over the same graph, so for any tile `t`,
+// dist.get(t) here equals findPath(t → source).length - 1. The AI previously
+// called findPath once per (source, target) pair; reading all distances from
+// ONE BFS turns that O(targets × ownTiles × board) blowup — the cause of the
+// multi-second freeze on AI-evaluation ticks once a faction owns many tiles —
+// into O(targets × board). A tile is recorded the moment it's discovered
+// (matching findPath's visited set) but only expanded when traversable, so a
+// non-traversable tile is a reachable endpoint that's never routed through.
+function bfsDistances(
+  state: GameState,
+  source: TileId,
+  canTraverse: (np: Province) => boolean,
+): Map<TileId, number> {
+  const dist = new Map<TileId, number>([[source, 0]]);
+  const queue: TileId[] = [source];
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++] as TileId;
+    const cd = dist.get(cur) as number;
+    const { x, y } = parseTileId(cur);
+    for (const offset of NEIGHBOR_OFFSETS) {
+      const nid = tileId(x + (offset[0] as number), y + (offset[1] as number));
+      if (dist.has(nid)) continue;
+      const np = state.provinces.get(nid);
+      if (np === undefined) continue;
+      dist.set(nid, cd + 1);
+      if (canTraverse(np)) queue.push(nid);
+    }
+  }
+  return dist;
+}
+
 function manhattan(a: TileId, b: TileId): number {
   const pa = parseTileId(a);
   const pb = parseTileId(b);
@@ -175,14 +211,18 @@ function tryDefense(
     return null;
   }
 
+  // §3.5.2: a defense march reinforces an own tile, so the route stays on own
+  // claim — one BFS from the castle over own-claimed tiles yields every source's
+  // distance (== findPath(source → castle).length - 1).
+  const dist = bfsDistances(state, castle.id, (np) => isOwnClaimed(np, faction));
   type Cand = { readonly source: Province; readonly dist: number };
   const candidates: Cand[] = [];
   for (const own of findOwnTiles(state, faction)) {
     if (own.isCastle) continue;
     if (ownAmount(own, faction) <= 0) continue;
-    const path = findPath(state, own.id, castle.id, faction);
-    if (path === null) continue;
-    candidates.push({ source: own, dist: path.length - 1 });
+    const d = dist.get(own.id);
+    if (d === undefined) continue;
+    candidates.push({ source: own, dist: d });
   }
   if (candidates.length === 0) return null;
 
@@ -424,14 +464,22 @@ function tryAssault(
     if (!approachable) continue;
 
     const defender = totalAmount(target);
+    // §3.5.2 conquer-march: a non-own target routes by shortest path ignoring
+    // ownership (only impassable terrain blocks). One BFS from the target gives
+    // every source's hop-distance (== findPath(source → target).length - 1).
+    const dist = bfsDistances(
+      state,
+      target.id,
+      (np) => !isImpassableTerrain(np.terrain),
+    );
     const srcs: Src[] = [];
     for (const own of ownTiles) {
       if (own.isCastle) continue; // keep the home castle garrisoned
       const count = ownAmount(own, faction);
       if (count < ASSAULT_MIN_SOURCE) continue;
-      const path = findPath(state, own.id, target.id, faction);
-      if (path === null) continue;
-      if (path.length - 1 > profile.attackHops) continue;
+      const d = dist.get(own.id);
+      if (d === undefined) continue;
+      if (d > profile.attackHops) continue;
       srcs.push({ tile: own, send: count - 1 });
     }
     if (srcs.length === 0) continue;
