@@ -24,7 +24,9 @@ export type Hud = {
 
 const ROOT_STYLE = [
   "position: fixed",
-  "top: 8px",
+  // Bottom-centre (swapped with the tile-info panel); stays clear of the
+  // bottom-left faction panel and bottom-right dispatch bar at the edges.
+  "bottom: 12px",
   "left: 50%",
   "transform: translateX(-50%)",
   "padding: 8px 14px",
