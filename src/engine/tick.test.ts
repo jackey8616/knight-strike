@@ -101,7 +101,7 @@ describe("step (tick orchestrator)", () => {
     expect((out.provinces.get(T) as Province).occupants[0]?.amount).toBe(5);
   });
 
-  it("[AC-V4-05] step captures a neutral empty target in one tick (column garrisons it)", () => {
+  it("[AC-V4-05] step captures a neutral empty target, then the column settles onto it", () => {
     const F = tileId(5, 5);
     const T = tileId(6, 5);
     const provinces = castles();
@@ -110,11 +110,16 @@ describe("step (tick orchestrator)", () => {
     const order: AttackOrder = {
       from: F, to: T, faction: "TOKUGAWA", count: 5, route: [], startTick: 1,
     };
-    const out = step(makeState(provinces, 1, [order]));
-    const tT = out.provinces.get(T) as Province;
-    expect(tT.lastClaimedFaction).toBe("TOKUGAWA");
-    expect(tT.occupants[0]?.faction).toBe("TOKUGAWA");
-    expect(tT.occupants[0]?.amount).toBe(4); // 5 - 1 capture cost settles on T
+    // Tick 1: capture → claim flips, column advances onto T as a marcher.
+    let out = step(makeState(provinces, 1, [order]));
+    expect((out.provinces.get(T) as Province).lastClaimedFaction).toBe("TOKUGAWA");
     expect(out.attackOrders).toHaveLength(0);
+    expect(out.marchingStacks).toHaveLength(1);
+    // Tick 2: the arrived column settles into a garrison on T.
+    out = step(out);
+    const tT = out.provinces.get(T) as Province;
+    expect(tT.occupants[0]?.faction).toBe("TOKUGAWA");
+    expect(tT.occupants[0]?.amount ?? 0).toBeGreaterThanOrEqual(4);
+    expect(out.marchingStacks).toHaveLength(0);
   });
 });

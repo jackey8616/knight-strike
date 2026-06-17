@@ -319,10 +319,25 @@ function orderKey(from: TileId, to: TileId, faction: FactionId): string {
 export function advanceMarching(state: GameState): GameState {
   if (state.marchingStacks.length === 0) return state;
 
+  const provinces = new Map<TileId, Province>(state.provinces);
+  const continuing: MarchingStack[] = [];
+  const orders = new Map<string, AttackOrder>();
+  for (const o of state.attackOrders) orders.set(orderKey(o.from, o.to, o.faction), o);
+
   const intents: AdvanceIntent[] = [];
   for (const stack of state.marchingStacks) {
     const nextIdx = stack.idx + 1;
-    if (nextIdx >= stack.path.length) continue; // overran terminus → drop
+    if (nextIdx >= stack.path.length) {
+      // Reached the end of its path → settle: garrison the current tile. This
+      // is how a conquer column finishes its last leg (it advanced onto the
+      // captured destination as a marcher, and now becomes the garrison).
+      const tile = stack.path[stack.idx] as TileId;
+      const p = provinces.get(tile);
+      if (p !== undefined) {
+        provinces.set(tile, garrison(p, stack.faction, stack.count, state.tick));
+      }
+      continue;
+    }
     intents.push({
       stack,
       nextIdx,
@@ -331,12 +346,6 @@ export function advanceMarching(state: GameState): GameState {
       isTerminus: nextIdx === stack.path.length - 1,
     });
   }
-  if (intents.length === 0) return { ...state, marchingStacks: [] };
-
-  const provinces = new Map<TileId, Province>(state.provinces);
-  const continuing: MarchingStack[] = [];
-  const orders = new Map<string, AttackOrder>();
-  for (const o of state.attackOrders) orders.set(orderKey(o.from, o.to, o.faction), o);
 
   // Group by (nextTile, faction); ownership of nextTile is uniform per group.
   const byTile = new Map<TileId, AdvanceIntent[]>();

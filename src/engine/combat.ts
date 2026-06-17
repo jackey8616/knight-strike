@@ -151,30 +151,21 @@ export function resolveOrders(state: GameState): CombatResult {
     provinces.set(o.to, { ...toP, lastClaimedFaction: o.faction });
     events.push({ from: o.from, to: o.to, kind: "capture", combatTick: t, baseDamage: 0, attacks: [] });
     if (remaining <= 0) continue; // tile claimed, no troops left to advance
-    if (o.route.length === 0) {
-      // Final target → the surviving column garrisons it.
-      const p2 = provinces.get(o.to) as Province;
-      provinces.set(o.to, {
-        ...p2,
-        occupants: [{ faction: o.faction, amount: remaining, arrivalTick: state.tick, isDefender: true }],
-      });
-    } else {
-      // Intermediate → advance: re-spawn the column on the captured tile to
-      // keep conquering the route (the captured tile is left as empty claim).
-      // The path keeps `from` as path[0] with idx=1 so it stays the column's
-      // current tile (`to`) while the renderer interpolates the move out of
-      // `from` — otherwise a fresh idx=0 stack pops onto `to` with no tween,
-      // which reads as the unit "jumping" a tile mid-march.
-      newStacks.push({
-        id: `mstack:${nextMarchingId}`,
-        faction: o.faction,
-        count: remaining,
-        path: [o.from, o.to, ...o.route],
-        idx: 1,
-        dispatchedAtTick: state.tick,
-      });
-      nextMarchingId += 1;
-    }
+    // Advance onto the captured tile as a marching column. `from` stays at
+    // path[0] with idx=1 (current tile = `to`) so the renderer slides the
+    // column out of the staging tile instead of popping. route non-empty → it
+    // keeps conquering; route empty → it has reached its destination and
+    // advanceMarching settles it into a garrison next tick — a smooth
+    // slide-then-settle rather than an instant garrison appearing on `to`.
+    newStacks.push({
+      id: `mstack:${nextMarchingId}`,
+      faction: o.faction,
+      count: remaining,
+      path: [o.from, o.to, ...o.route],
+      idx: 1,
+      dispatchedAtTick: state.tick,
+    });
+    nextMarchingId += 1;
   }
 
   return {

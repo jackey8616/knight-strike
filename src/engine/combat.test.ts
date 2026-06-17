@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveOrders, stageDamage } from "./combat";
+import { advanceMarching } from "./movement";
 import { derivedOwner, tileId } from "./state";
 import {
   AI_IDLE,
@@ -101,7 +102,7 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
       expect([colCount(r.state, F, T), amountOf(r.state, T, "TAKEDA")]).toEqual([col, def]);
       state = { ...r.state, tick: state.tick + 1 };
     }
-    // t10: break (enemy claim → neutral); t11: capture + garrison.
+    // t10: break (enemy claim → neutral); t11: capture → column advances onto T.
     state = { ...resolveOrders(state).state, tick: 11 };
     expect((state.provinces.get(T) as Province).lastClaimedFaction).toBeNull(); // broke to neutral
     expect(colCount(state, F, T)).toBe(18);
@@ -109,11 +110,17 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     const r11 = resolveOrders(state);
     const tT = r11.state.provinces.get(T) as Province;
     expect(tT.lastClaimedFaction).toBe("TOKUGAWA");
-    expect(amountOf(r11.state, T, "TOKUGAWA")).toBe(17); // surviving column garrisons it
     expect(r11.state.attackOrders).toHaveLength(0);
+    // Surviving column advances onto T as a marcher (settles into a garrison
+    // on the next advanceMarching) instead of popping into an instant garrison.
+    expect(r11.state.marchingStacks).toHaveLength(1);
+    const ms = r11.state.marchingStacks[0] as MarchingStack;
+    expect(ms.path).toEqual([F, T]);
+    expect(ms.idx).toBe(1);
+    expect(ms.count).toBe(17);
   });
 
-  it("[AC-V4-05] final neutral target: one-step capture garrisons the column", () => {
+  it("[AC-V4-05] final target capture: column advances onto the tile (slide-then-settle)", () => {
     const state = makeState(
       new Map([
         [F, tile(F, [], "TOKUGAWA")],
@@ -125,8 +132,18 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     const r = resolveOrders(state);
     const tT = r.state.provinces.get(T) as Province;
     expect(tT.lastClaimedFaction).toBe("TOKUGAWA");
-    expect(amountOf(r.state, T, "TOKUGAWA")).toBe(4); // 5 - 1 capture cost, settles on T
+    expect(tT.occupants).toHaveLength(0); // not an instant garrison
     expect(r.state.attackOrders).toHaveLength(0);
+    // The column advances onto T (path[0]=from for a smooth slide), garrisoning
+    // next tick via advanceMarching.
+    const ms = r.state.marchingStacks[0] as MarchingStack;
+    expect(ms.path).toEqual([F, T]);
+    expect(ms.idx).toBe(1);
+    expect(ms.count).toBe(4); // 5 - 1 capture cost
+    // Next advanceMarching settles the arrived column into a garrison on T.
+    const settled = advanceMarching(r.state);
+    expect(amountOf(settled, T, "TOKUGAWA")).toBe(4);
+    expect(settled.marchingStacks).toHaveLength(0);
   });
 
   it("[AC-V5-01] intermediate capture advances: re-spawns the column on the captured tile", () => {
