@@ -24,6 +24,10 @@ export type DispatchControllerDeps = {
   readonly onClearPath: () => void;
   readonly onCommit: (cmd: DispatchCommand, result: DispatchResult) => void;
   readonly onRatioChange?: (ratio: DispatchRatio) => void;
+  // When the drag's source tile is the currently-selected unit, return the
+  // exact troop count chosen on the manual slider; otherwise undefined (fall
+  // back to the ratio). Lets the player dispatch a precise number.
+  readonly getForceCount?: (from: TileId) => number | undefined;
 };
 
 export type DispatchController = {
@@ -89,7 +93,11 @@ export function createDispatchController(
     activeFrom = null;
     deps.onClearPath();
     if (currentId === null || currentId === from) return;
-    const cmd: DispatchCommand = { from, to: currentId, ratio };
+    const forceCount = deps.getForceCount?.(from);
+    const cmd: DispatchCommand =
+      forceCount !== undefined
+        ? { from, to: currentId, ratio, forceCount }
+        : { from, to: currentId, ratio };
     const state = deps.getState();
     const result = dispatch(state, cmd);
     deps.onCommit(cmd, result);
@@ -118,9 +126,18 @@ export function createDispatchController(
   };
 }
 
+export type RatioPanelHandlers = {
+  readonly onRatio: (r: DispatchRatio) => void;
+  readonly onCount: (n: number) => void;
+};
+
 export type RatioPanel = {
   readonly element: HTMLElement;
   setRatio(r: DispatchRatio): void;
+  // Reveal the manual troop slider for a selected unit (1..max), seeded at
+  // `value`. The ratio buttons then act as quick presets on this range.
+  showCount(max: number, value: number): void;
+  hideCount(): void;
   destroy(): void;
 };
 
@@ -133,7 +150,10 @@ const PANEL_STYLE = [
   "border: 1px solid #444",
   "border-radius: 6px",
   "display: flex",
+  "flex-direction: column",
+  "align-items: stretch",
   "gap: 4px",
+  "min-width: 96px",
   "font-family: ui-monospace, SFMono-Regular, Menlo, monospace",
   "font-size: 12px",
   "color: #eee",
@@ -163,7 +183,7 @@ const BTN_ACTIVE_STYLE = [
 export function createRatioPanel(
   parent: HTMLElement,
   initial: DispatchRatio,
-  onChange: (r: DispatchRatio) => void,
+  handlers: RatioPanelHandlers,
 ): RatioPanel {
   installResponsiveStyles();
   const root = document.createElement("div");
@@ -171,32 +191,78 @@ export function createRatioPanel(
   root.classList.add("ks-dispatch");
 
   const label = document.createElement("span");
-  label.textContent = "Dispatch:";
-  label.style.cssText = "padding: 4px 4px; align-self: center;";
+  label.textContent = "Dispatch";
+  label.style.cssText = "font-weight: 700; text-align: center;";
   root.appendChild(label);
 
-  const buttons = new Map<DispatchRatio, HTMLButtonElement>();
-  for (const r of RATIOS) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = `${Math.round(r * 100)}%`;
-    btn.style.cssText = BTN_BASE_STYLE;
-    btn.addEventListener("click", () => onChange(r));
-    buttons.set(r, btn);
-    root.appendChild(btn);
+  // Manual troop selector — hidden until a unit is selected.
+  let maxSend = 1;
+  const countWrap = document.createElement("div");
+  countWrap.style.cssText =
+    "display: none; flex-direction: column; gap: 2px; padding: 2px 0;";
+  const countLabel = document.createElement("span");
+  countLabel.style.cssText = "text-align: center; opacity: 0.9;";
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.min = "1";
+  slider.max = "1";
+  slider.value = "1";
+  slider.style.cssText = "width: 100%; accent-color: #c94545; margin: 0;";
+  function setCountLabel(v: number): void {
+    countLabel.textContent = `Send ${v} / ${maxSend}`;
   }
-  parent.appendChild(root);
+  slider.addEventListener("input", () => {
+    const v = Number(slider.value);
+    setCountLabel(v);
+    handlers.onCount(v);
+  });
+  countWrap.appendChild(countLabel);
+  countWrap.appendChild(slider);
+  root.appendChild(countWrap);
 
+  const buttons = new Map<DispatchRatio, HTMLButtonElement>();
   function setRatio(r: DispatchRatio): void {
     for (const [k, btn] of buttons) {
       btn.style.cssText = k === r ? BTN_ACTIVE_STYLE : BTN_BASE_STYLE;
     }
   }
+  for (const r of RATIOS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = `${Math.round(r * 100)}%`;
+    btn.style.cssText = BTN_BASE_STYLE;
+    btn.addEventListener("click", () => {
+      setRatio(r);
+      handlers.onRatio(r);
+      // When a unit is selected, presets snap the manual slider too.
+      if (countWrap.style.display !== "none") {
+        const v = Math.max(1, Math.min(maxSend, Math.floor(maxSend * r)));
+        slider.value = String(v);
+        setCountLabel(v);
+        handlers.onCount(v);
+      }
+    });
+    buttons.set(r, btn);
+    root.appendChild(btn);
+  }
+  parent.appendChild(root);
   setRatio(initial);
+
+  function showCount(max: number, value: number): void {
+    maxSend = Math.max(1, Math.floor(max));
+    slider.max = String(maxSend);
+    const v = Math.max(1, Math.min(maxSend, Math.floor(value)));
+    slider.value = String(v);
+    setCountLabel(v);
+    countWrap.style.display = "flex";
+  }
+  function hideCount(): void {
+    countWrap.style.display = "none";
+  }
 
   function destroy(): void {
     root.remove();
   }
 
-  return { element: root, setRatio, destroy };
+  return { element: root, setRatio, showCount, hideCount, destroy };
 }

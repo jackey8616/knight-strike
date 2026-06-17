@@ -47,13 +47,21 @@ async function bootstrap(): Promise<void> {
   let state: GameState = initialState;
   let ended = false;
 
-  let paused = false;
   let speed: Speed = 1;
-  // True when the current pause was driven by an in-flight pointer interaction
-  // (auto-pause-on-press, PRD §5.3 v1.1 amendment). Cleared whenever the user
-  // manually toggles pause via Space / HUD / keyboard so a deliberate pause
-  // isn't unpaused on pointer-up.
-  let autoPausedByPress = false;
+  // The clock runs only when nothing is holding it: not ended, not manually
+  // paused, not mid-pointer-press (auto-pause, PRD §5.3), and no unit selected
+  // (selection freezes the clock until you unselect / dispatch).
+  let manualPaused = false;
+  let pressFreeze = false;
+  let selectionFreeze = false;
+  // The player-owned tile currently selected for dispatch, with the max troops
+  // it can send (castle keeps 1), plus the exact count chosen on the slider.
+  let selectedUnit: { readonly id: TileId; readonly max: number } | null = null;
+  let manualCount: number | null = null;
+
+  function isRunning(): boolean {
+    return !ended && !manualPaused && !pressFreeze && !selectionFreeze;
+  }
 
   function intervalForSpeed(s: Speed): number {
     return TICK_INTERVAL_MS / s;
@@ -91,7 +99,7 @@ async function bootstrap(): Promise<void> {
   board.container.addChild(paths.container);
 
   const hud = createHud(document.body, {
-    onTogglePause: () => setPaused(!paused),
+    onTogglePause: () => setPaused(!manualPaused),
     onSpeed: (s) => setSpeed(s),
   });
   const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
@@ -100,10 +108,17 @@ async function bootstrap(): Promise<void> {
   function pushHudStatus(): void {
     hud.setStatus({
       tick: state.tick,
-      paused,
+      paused: manualPaused,
       speed,
       intervalMs: intervalForSpeed(speed),
     });
+  }
+
+  // Start/stop the clock to match isRunning(); call after any flag changes.
+  function syncRun(): void {
+    if (isRunning()) startTicker();
+    else stopTicker();
+    pushHudStatus();
   }
 
   function renderAll(): void {
@@ -123,9 +138,13 @@ async function bootstrap(): Promise<void> {
     onCommit: (_cmd, result) => {
       if (!result.ok) return;
       state = result.state;
-      board.setSelection(null);
+      deselect();
       renderAll();
     },
+    getForceCount: (from) =>
+      selectedUnit !== null && selectedUnit.id === from && manualCount !== null
+        ? manualCount
+        : undefined,
   });
 
   const pointer = createPointerController(render.app.canvas, {
@@ -135,45 +154,77 @@ async function bootstrap(): Promise<void> {
     },
     onTileClick: (id, button) => {
       if (button !== "left") return;
-      board.setSelection(id);
+      selectTile(id);
     },
     onDragStart: (id, button) => dispatchCtrl.handleDragStart(id, button),
     onDragMove: (id, button) => dispatchCtrl.handleDragMove(id, button),
     onDragEnd: (id, button) => dispatchCtrl.handleDragEnd(id, button),
     onDragCancel: (button) => dispatchCtrl.handleDragCancel(button),
     onPressStart: () => {
-      // PRD §5.3 v1.1 amendment: pause while the player is interacting. Skip
-      // if the game has already ended (end screen up) or is paused manually.
-      if (ended || paused) return;
-      autoPausedByPress = true;
-      paused = true;
-      stopTicker();
-      pushHudStatus();
+      // PRD §5.3 v1.1 amendment: freeze the clock while the player is dragging.
+      pressFreeze = true;
+      syncRun();
     },
     onPressEnd: () => {
-      if (!autoPausedByPress) return;
-      autoPausedByPress = false;
-      paused = false;
-      startTicker();
-      pushHudStatus();
+      pressFreeze = false;
+      syncRun();
     },
   });
 
-  const ratioPanel = createRatioPanel(
-    document.body,
-    dispatchCtrl.getRatio(),
-    (r) => {
-      dispatchCtrl.setRatio(r);
-      ratioPanel.setRatio(r);
+  const ratioPanel = createRatioPanel(document.body, dispatchCtrl.getRatio(), {
+    onRatio: (r) => dispatchCtrl.setRatio(r),
+    onCount: (n) => {
+      manualCount = n;
     },
-  );
+  });
+
+  // PRD §5.3 (this revision): selecting your own unit freezes the clock and
+  // opens the manual troop slider; selecting anything else (or deselecting)
+  // resumes it. The selected tile drives forceCount on the next drag-dispatch.
+  function unitMaxSend(id: TileId): number {
+    const p = state.provinces.get(id);
+    if (p === undefined || derivedOwner(p) !== PLAYER_FACTION) return 0;
+    const occ = p.occupants[0];
+    if (occ === undefined || occ.faction !== PLAYER_FACTION || occ.amount <= 0) {
+      return 0;
+    }
+    return p.isCastle ? Math.max(0, occ.amount - 1) : occ.amount;
+  }
+
+  function selectTile(id: TileId): void {
+    board.setSelection(id);
+    const max = unitMaxSend(id);
+    if (max >= 1) {
+      const value = Math.max(1, Math.min(max, Math.floor(max * dispatchCtrl.getRatio())));
+      selectedUnit = { id, max };
+      manualCount = value;
+      ratioPanel.showCount(max, value);
+      selectionFreeze = true;
+    } else {
+      selectedUnit = null;
+      manualCount = null;
+      ratioPanel.hideCount();
+      selectionFreeze = false;
+    }
+    syncRun();
+  }
+
+  function deselect(): void {
+    board.setSelection(null);
+    selectedUnit = null;
+    manualCount = null;
+    ratioPanel.hideCount();
+    selectionFreeze = false;
+    syncRun();
+  }
 
   const endScreen = createEndScreen(document.body, () => {
     state = initialState;
     ended = false;
+    deselect();
     endScreen.hide();
     renderAll();
-    if (!paused) startTicker();
+    syncRun();
   });
 
   const cameraGestures = createCameraGestures(render.app.canvas, {
@@ -200,8 +251,8 @@ async function bootstrap(): Promise<void> {
   }
 
   function startTicker(): void {
-    stopTicker();
-    if (ended) return;
+    if (tickHandle !== null) return; // already running — don't reset the timer
+    if (!isRunning()) return;
     tickHandle = window.setInterval(tickOnce, intervalForSpeed(speed));
   }
 
@@ -227,26 +278,21 @@ async function bootstrap(): Promise<void> {
   }
 
   function setPaused(v: boolean): void {
-    // Manual toggle wins over the auto-pause latch: if the player explicitly
-    // pauses or resumes mid-press, the auto-pause-on-release shouldn't
-    // second-guess the next pointer-up.
-    autoPausedByPress = false;
-    if (v === paused) return;
-    paused = v;
-    if (paused) stopTicker();
-    else startTicker();
-    pushHudStatus();
+    if (v === manualPaused) return;
+    manualPaused = v;
+    syncRun();
   }
 
   function setSpeed(s: Speed): void {
     if (s === speed) return;
     speed = s;
-    if (!paused) startTicker();
-    pushHudStatus();
+    // Restart the interval so the new rate takes effect immediately.
+    stopTicker();
+    syncRun();
   }
 
   renderAll();
-  startTicker();
+  syncRun();
 
   // DEV-only hook so headless verification can drive the engine through its
   // public `dispatch` API without the synthetic-pointer-event-into-Pixi dance
@@ -270,7 +316,7 @@ async function bootstrap(): Promise<void> {
     };
     w.__ks = {
       getState: () => state,
-      getTickInfo: () => ({ tick: state.tick, paused, speed }),
+      getTickInfo: () => ({ tick: state.tick, paused: manualPaused, speed }),
       playerDispatch: (fromX, fromY, toX, toY, ratio) => {
         const res = engineDispatch(state, {
           from: makeTileId(fromX, fromY),
@@ -289,11 +335,16 @@ async function bootstrap(): Promise<void> {
   }
 
   const keyboard = createKeyboardController({
-    isPaused: () => paused,
+    isPaused: () => manualPaused,
     setPaused,
     getSpeed: () => speed,
     setSpeed,
-    cancelDrag: () => pointer.cancelActiveDrag(),
+    // Esc cancels an in-flight drag and clears any unit selection (unfreezing
+    // the clock).
+    cancelDrag: () => {
+      pointer.cancelActiveDrag();
+      deselect();
+    },
     panBy: (dx, dy) => board.panBy(dx, dy),
     resetCamera: () => board.resetCamera(),
   });
