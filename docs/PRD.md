@@ -1,7 +1,7 @@
 # 知識戰爭 / Knight Strike — Product Requirements Document
 
-**Version**: v1.4
-**Status**: 鄰邊（cross-edge）戰鬥 + 兩階段 claim（break→capture）；同格 multi-occupant 模型廢除
+**Version**: v1.5
+**Status**: 鄰邊戰鬥 + 兩階段 claim + **拖曳征服行軍（conquer-march：最短路徑沿線逐格攻佔、佔領後前進）**
 **Changelog**:
 - v0.1 — 初稿（9x9、即時 tick、Three.js）
 - v0.2 — 棋盤改 11x11、技術棧改 Pixi.js、操作方案重設、戰鬥公式重做、新增 §10 Headless Playtest
@@ -61,6 +61,17 @@
   - **§3.2 step order**：`movement（移入 or 建立 order）→ produce → combat（resolveOrders）→ defeats（清掉敗北 faction 的 order）→ victory`。
   - **廢除**：同 tile 同格戰鬥（resolveSameTileCombat）、force-join（§3.5.4 #2(e)）、同格抽 defender（#3）、同歸於盡（同格）、`combatStartTick`、`assignDefender`。對應 AC-V2-08/10/11/16/17/24/26/28 作廢；新增 AC-V4-01..10（見 §7.2）。
   - 設計意圖：(a)「攻擊 = 對相鄰敵格開火」比同格疊圖更貼近 RTS 直覺，且邊界戰線視覺成立。(b) 兩階段 claim + 兵力消耗讓「奪取領土」有真實成本與節奏，配合 self-replicate 形成推進 / 補給的拉鋸。(c) AI 維持 deferred（idle），本版只動 engine 機制 + 玩家派遣。
+- v1.5 — **拖曳征服行軍（conquer-march）**：放寬 v1.4「只能在己方領土行軍」的拖曳體感 —— 拖到**任一非己方格**時不再要求整條路線都是己方，而是用**最短路徑**（BFS 忽略所有權）畫一條線，行軍縱隊沿線**逐格攻佔**，佔領一格後**自動前進**攻下一格，直到抵達終點。底層每格仍走 v1.4 §3.6' 的 siege（殲滅守軍 → break → capture）與成本（每次 claim 花 1 兵、戰鬥傷亡）。
+  - **findPath（§3.5.2 改）**：目標格 `derivedOwner === faction`（己方）→ 維持 v1.4 own-only BFS（純補給移動）；目標格非己方 → **最短路徑 BFS，忽略所有權**（4-conn，所有 in-bounds 格皆可作中間格）。
+  - **AttackOrder 擴充**：新增 `count`（圍攻縱隊自身兵力，**不再**寄生於 `from` 格的 occupant —— 與 v1.4 不同）與 `route`（`to` 之後尚待攻佔的剩餘格）。攻方傷害 / break / capture 的花費都從 `order.count` 扣。
+  - **佔領後前進（取代 v1.4 claim-only stay）**：capture 成功當下，縱隊**前進到剛佔下的格** ——
+    - 中繼格：以剩餘 `count` 在 `to` 上 re-spawn 一條 marching stack（path = `[to, ...route]`），下 tick 繼續攻下一格；`to` 本身留為空己方 claim（縱隊只是路過）。
+    - 終點格（route 為空）：以剩餘 `count` **駐紮 `to`**（成為 occupant）。縱隊抵達目的地、落地成軍。
+    - 兵力耗盡（`count ≤ 0`）：order 作廢，行軍中止，已攻下的格維持己方 claim。
+  - **空格節奏**：無守軍的非己方格（中立 / 無主 / 敵方空 claim）在當 tick 的 combat phase 直接 capture（t=0），再生縱隊次 tick 接著攻 —— 約 1 tick / 格；有守軍的格照 §3.6' step-function 磨。
+  - **§3.2 step order**：combat phase 的 `resolveOrders` 現在除了結算 siege，還會在 capture 時**生成 / 推進 marching stack**（回寫 `marchingStacks` 與 `nextMarchingId`）。
+  - **production freeze**：被圍攻的目標格（任一 order 的 `to`）暫停 self-replicate（縱隊兵力 `order.count` 本就不是 occupant，不另外 freeze `from`）。
+  - 設計意圖：玩家一次拖曳即可下達「沿這條線打過去」的征服指令，免去 v1.4 逐格手動派遣的繁瑣；同時保留每格 siege 的成本與節奏，長線征服會自然因兵力耗盡而停。AI 仍 deferred。
 
 ## 1. 願景與背景
 
@@ -166,7 +177,9 @@
 
 #### 3.5.2 路徑規則
 
-- 路徑用 BFS 搜尋。**Passable（中間經過格）的定義（v1.4 己方限定版）**：
+> **v1.5 conquer-march override**：下列 v1.4 own-only passable **只在「目標格為己方（補給移動）」時適用**。**目標格為非己方時改用最短路徑 BFS（忽略所有權）**，行軍縱隊沿線逐格 siege 攻佔、佔領後前進（見 changelog v1.5 與 §3.6'）。
+
+- 路徑用 BFS 搜尋。**Passable（中間經過格）的定義（v1.4 己方限定版；v1.5 僅用於己方目標）**：
   - 中間經過格可通行 iff `derivedOwner(tile) === faction`。等價於以下任一：
     - 該格有自家 occupant（任何 amount）。
     - 該格 0 occupant 且 `lastClaimedFaction === faction`（walk-through 染色的「空己方格」）。
@@ -311,7 +324,7 @@ if A.amount <= 0 → from occupant 消滅（攻佔同 tick 已生效）
 
 **重點規則**：
 
-- **claim-only**（D2 / capture-result）：攻佔不移入部隊。`to` 變「空己方格」（occupants=[]、lastClaimedFaction=攻方），之後可被行軍通過 / 移入；攻方駐軍留在 `from`。
+- **佔領後前進（v1.5，取代 v1.4 claim-only）**：capture 成功時縱隊**前進** —— route 非空（中繼格）→ 以剩餘兵在 `to` re-spawn marching stack 續攻，`to` 留為空己方 claim；route 為空（終點）→ 以剩餘兵**駐紮 `to`**。`order.count` 為攻方自身兵力（不寄生 `from` occupant）。（v1.4 原為 claim-only：攻佔不移入、部隊留 `from`、`to` 留空 claim —— 已被 v1.5 取代。）
 - **永久消耗**（D1）：break −1、capture −1，皆自 `from` 駐軍扣。拿敵方空 claim 格共燒 **2 兵**；中立 / 無主格 **1 兵**；有駐軍的敵格 = 戰鬥傷亡 +（破壞 1 + 攻佔 1）。
 - **tick-0 駐紮優勢**（D3）：攻堅首 tick 攻方不輸出、只挨打 —— 攻方需兵力優勢才打得下守軍。
 - **多 order 同打一 `to`**（D4）：階段一各自對 `to` 造成 `min(base, attacker.amount)`、各自吃 `to` 還擊 `min(base, to.amount)`（沿用 §3.6 v1.2 multi-party 獨立計算）。`to` 駐軍歸零後，同 tick 由處理順序最前（`from` tile id 字典序最小）的 order 推進 claim；其餘 order 看更新後狀態（已中立 → 攻佔；已被佔 / 變己方 → 作廢）。
