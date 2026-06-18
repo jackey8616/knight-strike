@@ -3,7 +3,7 @@ import { resolveOrders } from "@/engine/combat";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
 import { produce } from "@/engine/production";
 import { derivedOwner, tileId } from "@/engine/state";
-import { generateTerrain } from "@/engine/terrain";
+import { coastOceanMask, generateTerrain } from "@/engine/terrain";
 import { deriveTier } from "@/engine/upgrade";
 import type {
   AiMode,
@@ -37,6 +37,13 @@ export type ScenarioAiConfig = Readonly<
   Record<Exclude<FactionId, "NEUTRAL">, AiMode>
 >;
 
+// PRD §6.1: the whole-map silhouette. "plateau" (default) = full square land as
+// a raised slab; "island" = the same land ringed by a decorative sea (render
+// only); "coast" = a seeded symmetric perimeter sea carved into WATER (engine).
+export type MapShape = "plateau" | "island" | "coast";
+export const MAP_SHAPES: readonly MapShape[] = ["plateau", "island", "coast"];
+export const DEFAULT_MAP_SHAPE: MapShape = "plateau";
+
 export type ScenarioInput = {
   readonly name?: string;
   readonly boardSize: number;
@@ -44,6 +51,7 @@ export type ScenarioInput = {
   readonly aiConfig: ScenarioAiConfig;
   readonly scriptedCommands?: readonly ScriptedCommand[];
   readonly rngSeed: number;
+  readonly mapShape?: MapShape;
 };
 
 const FACTION_IDS: readonly FactionId[] = [
@@ -208,6 +216,19 @@ export function parseScenario(raw: unknown): ScenarioInput {
 
   const name = typeof root.name === "string" ? root.name : undefined;
 
+  let mapShape: MapShape | undefined;
+  if (root.mapShape !== undefined) {
+    if (
+      typeof root.mapShape !== "string" ||
+      !(MAP_SHAPES as readonly string[]).includes(root.mapShape)
+    ) {
+      throw new Error(
+        `scenario.mapShape: invalid shape "${String(root.mapShape)}"`,
+      );
+    }
+    mapShape = root.mapShape as MapShape;
+  }
+
   return {
     ...(name !== undefined ? { name } : {}),
     boardSize,
@@ -215,6 +236,7 @@ export function parseScenario(raw: unknown): ScenarioInput {
     aiConfig,
     ...(scripted !== undefined ? { scriptedCommands: scripted } : {}),
     rngSeed,
+    ...(mapShape !== undefined ? { mapShape } : {}),
   };
 }
 
@@ -273,10 +295,17 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       fixedPlains.add(id);
     }
   }
+  // PRD §4.7: the "coast" shape carves a seeded symmetric perimeter sea; other
+  // shapes (plateau/island) leave terrain generation unchanged.
+  const oceanMask =
+    scenario.mapShape === "coast"
+      ? coastOceanMask(scenario.boardSize, scenario.rngSeed >>> 0, fixedPlains)
+      : undefined;
   const terrain = generateTerrain(
     scenario.boardSize,
     scenario.rngSeed >>> 0,
     fixedPlains,
+    oceanMask,
   );
   for (const [id, p] of provinces) {
     provinces.set(id, { ...p, terrain: terrain.get(id) ?? "PLAINS" });

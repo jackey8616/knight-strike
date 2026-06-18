@@ -4,6 +4,7 @@ import { parseTileId } from "@/engine/state";
 import type { FactionId, TileId } from "@/engine/types";
 
 import { FACTION_COLORS, isoX, isoY } from "./board";
+import { groundLiftPx } from "./terrain-height";
 
 const VALID_ALPHA = 0.85;
 const INVALID_COLOR = 0xff4040;
@@ -23,7 +24,8 @@ export type PathRenderer = {
 
 function tileCenter(id: TileId): { x: number; y: number } {
   const { x, y } = parseTileId(id);
-  return { x: isoX(x, y), y: isoY(x, y) };
+  // Match the rolling ground (PRD §6.1) so the drag-path hugs the surface.
+  return { x: isoX(x, y), y: isoY(x, y) - groundLiftPx(x, y) };
 }
 
 function drawDashedSegment(

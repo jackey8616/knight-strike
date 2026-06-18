@@ -9,7 +9,7 @@ Web remake of the 2005 free Japanese title _国家大作戦_ (lm_exp): a 45° is
 - **Engine** — shipped (`src/engine/**`, full unit + integration tests).
 - **Rendering / input / UI** — shipped (Pixi.js v8 + GSAP).
 - **AI** — shipped: three-tier rule AI (`easy` / `normal` / `hard`); the default game runs `normal` opponents.
-- **Terrain** — shipped (seeded plains / mountain / water / forest, programmatic pixel-art textured tiles).
+- **Terrain** — shipped (seeded plains / mountain / water / forest, programmatic pixel-art textured tiles, selectable map shapes: Plateau / Island / Coast).
 - **Deploy** — `pnpm build:pages` produces a GitHub Pages dist; CI gate + deploy workflows under `.github/workflows/`.
 
 ## Requirements

@@ -46,15 +46,20 @@ export const GROUND = {
   FOREST_DARK: 0x223f24,
 } as const;
 
-// Cosmetic raised lip on flat tiles (PRD §6.1): a few px of shaded side wall so
-// tiles read as little raised earth blocks like the lm_exp ground. This is
-// purely visual and is kept DISTINCT from a mountain's logical `elevation`
-// (which drives the occlusion fade) — flat tiles keep elevation 0 and never
-// fade. Water gets a smaller lip so it reads as sitting lower than the land.
-export const EDGE_PX = 3;
-export const WATER_EDGE_PX = 1;
-export const EDGE_SHADE_SW = 0.58;
-export const EDGE_SHADE_SE = 0.76;
+// PRD §6.1: the whole-map silhouette. Land tiles whose camera-facing edge meets
+// the void or the sea drop a tall earth/rock CLIFF to a dark base, so the board
+// reads as one solid raised landmass (a slab / island) rather than a flat sheet
+// of tiles. Island/Coast also get a decorative SEA ring around the slab.
+export const CLIFF_PX = 16;
+export const CLIFF_TOP = 0x6b5536; // earth/dirt cliff face base colour
+export const CLIFF_SHADE_SW = 0.6; // front-left face (shaded)
+export const CLIFF_SHADE_SE = 0.82; // front-right face (lit)
+export const CLIFF_STRATA = 0.46; // horizontal rock-stratum line shade
+export const BASE_COLOR = 0x14130f; // dark underside the slab sits on
+
+export const SEA = 0x274d8c; // ring ocean (deeper than tile WATER)
+export const SEA_DEEP = 0x1d3b6e;
+export const SEA_RIPPLE = 0x4f7bc0;
 
 export function shade(color: number, f: number): number {
   const r = Math.round(((color >> 16) & 0xff) * f);

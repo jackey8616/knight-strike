@@ -20,6 +20,7 @@ import { deriveTier } from "@/engine/upgrade";
 
 import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
 import type { TierTextures } from "./sprites";
+import { groundLiftPx } from "./terrain-height";
 
 // PRD §5.1: marching sprite is the regular tile sprite shrunk to 0.7× so it
 // reads as in-transit vs. garrisoned.
@@ -58,7 +59,9 @@ const HIT_HALF_H = 22;
 
 function tileCenter(id: TileId): { x: number; y: number } {
   const { x, y } = parseTileId(id);
-  return { x: isoX(x, y), y: isoY(x, y) };
+  // Follow the rolling ground (PRD §6.1); interpolating between two tile centres
+  // lerps the height too, so marching columns ride the hills.
+  return { x: isoX(x, y), y: isoY(x, y) - groundLiftPx(x, y) };
 }
 
 function spriteScale(texture: Texture): number {

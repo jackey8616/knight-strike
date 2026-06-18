@@ -53,6 +53,7 @@ export function generateTerrain(
   boardSize: number,
   seed: number,
   fixedPlains: ReadonlySet<TileId>,
+  oceanMask?: ReadonlySet<TileId>,
 ): Map<TileId, Terrain> {
   const rng = createRng((seed ^ 0x9e3779b9) >>> 0);
   const grid = new Map<TileId, Terrain>();
@@ -79,6 +80,13 @@ export function generateTerrain(
         if (rng() < 0.7) grid.set(tileId(x, y), kind);
       }
     }
+  }
+
+  // PRD §4.7: the "coast" map shape carves a perimeter sea (passed as
+  // `oceanMask`) into WATER here — before the fixed-tile and connectivity passes,
+  // so castles still get a cleared deployment ring and stay mutually reachable.
+  if (oceanMask !== undefined) {
+    for (const id of oceanMask) grid.set(id, "WATER");
   }
 
   // Force fixed tiles to PLAINS and clear any impassable terrain ringing them
@@ -133,6 +141,60 @@ function carveLPath(grid: Map<TileId, Terrain>, from: TileId, to: TileId): void 
   const stepY = a.y < b.y ? 1 : -1;
   for (let y = a.y; y !== b.y; y += stepY) grid.set(tileId(b.x, y), "PLAINS");
   grid.set(to, "PLAINS");
+}
+
+// PRD §4.7 / §6.1: the "coast" map shape. A deterministic, dihedral-symmetric
+// set of perimeter tiles to force to WATER, so the island silhouette is
+// irregular while every corner (and its castle) stays a land peninsula. The sea
+// bites deepest at each edge midpoint and tapers to nothing toward the corners;
+// the symmetry keeps the four factions' starts fair (so the AI-balance gate is
+// unaffected). `protect` tiles (castles + camps) are never carved, and
+// generateTerrain's connectivity pass still guarantees the map stays winnable.
+export function coastOceanMask(
+  boardSize: number,
+  seed: number,
+  protect: ReadonlySet<TileId> = new Set<TileId>(),
+): Set<TileId> {
+  const mask = new Set<TileId>();
+  if (boardSize < 5) return mask;
+  const max = boardSize - 1;
+  const half = Math.floor(boardSize / 2);
+  const rng = createRng((seed ^ 0x00c0a575) >>> 0);
+  const maxDepth = Math.max(2, Math.floor(boardSize * 0.2));
+  const cornerKeep = Math.max(1, Math.floor(boardSize * 0.18));
+
+  // profile[k] = ocean depth at distance k from a corner along an edge: 0 inside
+  // the corner-keep zone, ramping to ~maxDepth at the edge midpoint with a
+  // seeded wobble for an organic coastline. Indexed by the symmetric coordinate
+  // min(coord, max-coord), so the whole carve is dihedral-symmetric.
+  const profile: number[] = [];
+  for (let k = 0; k <= half; k++) {
+    if (k < cornerKeep) {
+      profile.push(0);
+      continue;
+    }
+    const t = (k - cornerKeep) / Math.max(1, half - cornerKeep);
+    const wobble = Math.floor(rng() * 2);
+    profile.push(Math.min(maxDepth, Math.round(t * maxDepth) + wobble));
+  }
+  const depthAt = (k: number): number => profile[Math.min(k, half)] ?? 0;
+
+  for (let y = 0; y <= max; y++) {
+    for (let x = 0; x <= max; x++) {
+      const sx = Math.min(x, max - x);
+      const sy = Math.min(y, max - y);
+      const ocean =
+        y < depthAt(sx) || // top edge
+        max - y < depthAt(sx) || // bottom edge
+        x < depthAt(sy) || // left edge
+        max - x < depthAt(sy); // right edge
+      if (!ocean) continue;
+      const id = tileId(x, y);
+      if (protect.has(id)) continue;
+      mask.add(id);
+    }
+  }
+  return mask;
 }
 
 // Ensure every fixed tile is connected to the first one over passable terrain;
