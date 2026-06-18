@@ -252,6 +252,7 @@ PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 | `pnpm test:coverage`                | 出 coverage 報告；milestone 完成前跑、檢查 engine ≥ 90%             |
 | `pnpm playtest <scenario.json>`     | 跑單場 headless；scenario 路徑必填、無預設                          |
 | `pnpm playtest <s.json> --runs 100` | balance / 回歸測試                                                  |
+| `pnpm balance`                      | AI 平衡守門：固定 4-AI 批次，失衡即 fail（CI gate 一步）            |
 | `pnpm lint`                         | ESLint + Prettier check（**不**自動 fix）；PR 前必跑                |
 | `pnpm format`                       | Prettier write；commit 前手動跑或 lefthook 代勞                    |
 | `pnpm typecheck`                    | `tsc --noEmit`；milestone 完成前必跑                                |

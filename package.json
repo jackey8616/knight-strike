@@ -19,6 +19,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage --passWithNoTests",
     "playtest": "tsx src/playtest/cli.ts",
+    "balance": "tsx src/playtest/balance-check.ts",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
