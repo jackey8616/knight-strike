@@ -92,7 +92,7 @@ function createGame(
     return TICK_INTERVAL_MS / s;
   }
 
-  const board = createBoardRenderer(state, {
+  const board = createBoardRenderer(render.app, state, {
     onPointerOver: (id: TileId) => {
       pointer.onTileOver(id);
     },

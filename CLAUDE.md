@@ -54,7 +54,9 @@ knight-strike/
 │   │   └── util/             # rng (seedable)、helpers
 │   ├── render/               # 【Pixi 渲染層】
 │   │   ├── app.ts            # Pixi Application 初始化 / resize
-│   │   ├── board.ts          # 格子 + iso 投影 + 地形 + 山堆疊 + 高亮
+│   │   ├── board.ts          # 格子 + iso 投影 + 地形紋理頂面 + 山堆疊 + 領地罩染 + 高亮
+│   │   ├── terrain-theme.ts  # 地形調色盤 + shade()（board / terrain-texture 共用真相，無 Pixi）
+│   │   ├── terrain-texture.ts # 地形頂面 dithered 菱形貼圖生成（PRD §6.1）
 │   │   ├── units.ts          # 駐紮 stack 渲染 + 升級動畫
 │   │   ├── marching.ts       # 行軍 stack 插值動畫
 │   │   ├── combat.ts         # bump + tint flash

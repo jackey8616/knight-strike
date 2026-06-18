@@ -57,7 +57,7 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 
 | 層   | 模組                                                                      | 職責                                                                                                                                        | 涵蓋 AC    |
 | ---- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 渲染 | `render/app` `board` `units` `marching` `combat` `paths` `sprites`        | iso 投影（64×32 菱形）、地形 prism、山堆疊方塊 + 遮擋淡化、tier sprite、行軍插值、GSAP bump / tint、拖曳虛線                                | AC-01      |
+| 渲染 | `render/app` `board` `terrain-theme` `terrain-texture` `units` `marching` `combat` `paths` `sprites` | iso 投影（64×32 菱形）、地形像素紋理頂面 + 抬升邊緣 + 岸線（PRD §6.1）、山堆疊方塊 + 遮擋淡化、領地罩染、tier sprite、行軍插值、GSAP bump / tint、拖曳虛線 | AC-01      |
 | 輸入 | `input/pointer` `keyboard` `camera` `dispatch`                            | click vs drag（>5px）、左右鍵分流、按壓 auto-pause、wheel + 觸控 pinch / pan、鍵盤（Space / 1–4 / R / Esc / WASD）、拖曳派遣手勢 + 比例滑桿 | AC-06 / 24 |
 | UI   | `ui/hud` `faction-panel` `tile-info` `end-screen` `start-menu` `responsive` | tick bar + 速度、勢力統計、hover 格資訊、勝負畫面（Restart + Main Menu）、開場 Start Menu（玩法說明 + AI 難度 + 棋盤尺寸）、自適應佈局        | AC-02 / 23 / 25 / 26 |
 | 入口 | `main.ts`                                                                 | 建 engine + renderer、wire UI、tick loop、auto-pause、cancel 接線（點行軍 sprite 取消，AC-15 UI 端）、Start Menu → 開局 → End Screen 導航     | AC-15 / 25 / 26 |
