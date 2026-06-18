@@ -107,7 +107,17 @@ async function bootstrap(): Promise<void> {
   board.container.addChild(paths.container);
 
   const hud = createHud(document.body, {
-    onTogglePause: () => setPaused(!manualPaused),
+    onTogglePause: () => {
+      // Issue #11: a selected unit freezes the game and the pause button shows
+      // "Resume"; clicking it then deselects to resume (manual pause toggles
+      // normally otherwise).
+      if (selectionFreeze) {
+        deselect();
+        if (manualPaused) setPaused(false);
+      } else {
+        setPaused(!manualPaused);
+      }
+    },
     onSpeed: (s) => setSpeed(s),
   });
   const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
@@ -122,7 +132,9 @@ async function bootstrap(): Promise<void> {
   function pushHudStatus(): void {
     hud.setStatus({
       tick: state.tick,
-      paused: manualPaused,
+      // Issue #11: surface the selection freeze too, so selecting a unit shows
+      // the game as paused (button + countdown), not just manual pause.
+      paused: manualPaused || selectionFreeze,
       speed,
       intervalMs: intervalForSpeed(speed),
     });
