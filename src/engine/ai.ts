@@ -28,7 +28,7 @@ import { NON_NEUTRAL_FACTIONS } from "./victory";
 //   - "tile owned by f" → derivedOwner(p) === f (single own occupant, or an
 //     empty tile this faction last walked through).
 //   - "f's troop count on a tile" → that occupant's amount (ownAmount).
-//   - tilePower(count) → raw count: §3.6 combat is now a count-only ramp, so
+//   - tilePower(count) → raw count: §4.6 combat is now a count-only ramp, so
 //     "power" collapses to the stack size.
 // stepAi only acts for factions whose aiConfig is a "rule" mode; idle /
 // scripted factions are driven elsewhere, so the engine pipeline (tick.ts /
@@ -52,7 +52,7 @@ export function shouldEvaluate(
 }
 
 // Distinct per-faction salts so mixSeed never collides across factions when
-// rngSeed and tick line up — keeps §4.2 determinism without aliasing.
+// rngSeed and tick line up — keeps §5.1 determinism without aliasing.
 const FACTION_SEED_KEY: Readonly<Record<FactionId, number>> = {
   TOKUGAWA: 0x1d4e1bd1,
   TAKEDA: 0x2b1a3f4e,
@@ -182,7 +182,7 @@ function liveEnemyCastles(state: GameState, faction: FactionId): Province[] {
   return out;
 }
 
-// §4.1 rule #1: any tile within `defenseRadius` manhattan of the castle that
+// §5.2 rule #1: any tile within `defenseRadius` manhattan of the castle that
 // holds a hostile occupant (enemy garrison or NEUTRAL bandit) counts as a
 // threat. manhattan 0 is included, so an enemy standing on the castle itself
 // (contested) is detected too.
@@ -211,7 +211,7 @@ function tryDefense(
     return null;
   }
 
-  // §3.5.2: a defense march reinforces an own tile, so the route stays on own
+  // §4.5.2: a defense march reinforces an own tile, so the route stays on own
   // claim — one BFS from the castle over own-claimed tiles yields every source's
   // distance (== findPath(source → castle).length - 1).
   const dist = bfsDistances(state, castle.id, (np) => isOwnClaimed(np, faction));
@@ -246,7 +246,7 @@ const EXPAND_MIN_STACK = KNIGHT_THRESHOLD;
 const KNIGHT_RESERVE = KNIGHT_THRESHOLD;
 const QUEEN_RESERVE = QUEEN_THRESHOLD;
 
-// §4.1 rule #2: count to dispatch from `source`, or null when the source is
+// §5.2 rule #2: count to dispatch from `source`, or null when the source is
 // ineligible (tier-protection or insufficient surplus). The castle reserve
 // gating keeps a castle from being drained below the next tier floor — Soldier
 // and King bands stay static, only the Queen band scales with the profile.
@@ -275,7 +275,7 @@ function expandSendCount(
   return Math.max(1, Math.floor(c * 0.5));
 }
 
-// §4.1 rule #2: source = any own tile passing expandSendCount; target = any
+// §5.2 rule #2: source = any own tile passing expandSendCount; target = any
 // empty tile adjacent to own territory. Source need not neighbour the target —
 // a BFS path through the own corridor is enough.
 function tryExpand(
@@ -339,7 +339,7 @@ function tryExpand(
   return null;
 }
 
-// §4.1 rule #2.5 (rally): pick the strongest non-castle frontline tile, then
+// §5.2 rule #2.5 (rally): pick the strongest non-castle frontline tile, then
 // ship 50% (capped at count-1) from every adjacent own non-castle tile toward
 // it. Castle excluded as a source to preserve rule #2's castle-tier reserve.
 function tryRally(
@@ -423,23 +423,23 @@ function nearestEnemyCastleDist(
   return best;
 }
 
-// §4.1 rule #3 (v1.3 assault rewrite): the offensive. The old single-tile gate
+// §5.2 rule #3 (v1.3 assault rewrite): the offensive. The old single-tile gate
 // (count - 1 ≥ defender × ratio) was unreachable — tiles cap at PRODUCTION_CAP
 // (100) yet a healthy castle self-replicates to ~100, so ratio 1.5 × 100 = 150
 // can never be met by one tile. Worse, an enemy castle deep in enemy land is
-// unroutable: findPath (§3.5.2) walks through empty / own tiles but treats any
+// unroutable: findPath (§4.5.2) walks through empty / own tiles but treats any
 // hostile occupant as a wall, so the only hostile tiles a faction can reach are
 // its own frontier. Both together meant the AI never attacked anything and
 // every game stalemated.
 //
 // Fix: pick a reachable hostile *boundary* tile and converge MULTIPLE source
-// tiles' surplus on it. Power is raw count (§3.6 count-only). A contested tile
-// stops self-replicating (§3.3) and the AI only defends tiles near its castle,
+// tiles' surplus on it. Power is raw count (§4.6 count-only). A contested tile
+// stops self-replicating (§4.3) and the AI only defends tiles near its castle,
 // so undefended frontier tiles fall to enough aggregate force; same-faction
-// stacks merge on arrival (§3.5.4). Targets are ranked: capture an enemy castle
+// stacks merge on arrival (§4.5.3). Targets are ranked: capture an enemy castle
 // outright if one is reachable, else push the frontier tile closest to an enemy
 // castle so the advance heads toward a win condition. Deterministic (no RNG) →
-// §4.2 determinism holds. Each striker keeps 1 troop home (§3.5.1).
+// §5.1 determinism holds. Each striker keeps 1 troop home (§4.5.1).
 function tryAssault(
   state: GameState,
   faction: FactionId,
@@ -479,7 +479,7 @@ function tryAssault(
     if (!approachable) continue;
 
     const defender = totalAmount(target);
-    // §3.5.2 conquer-march: a non-own target routes by shortest path ignoring
+    // §4.5.2 conquer-march: a non-own target routes by shortest path ignoring
     // ownership (only impassable terrain blocks). One BFS from the target gives
     // every source's hop-distance (== findPath(source → target).length - 1).
     const dist = bfsDistances(
@@ -552,7 +552,7 @@ function tryAssault(
   return null;
 }
 
-// §4.1 priority order: threat → assault → expand → rally. Assault sits above
+// §5.2 priority order: threat → assault → expand → rally. Assault sits above
 // expand so a faction strong enough to break an enemy castle commits to it
 // instead of expanding into empty tiles forever (the v1.3 stalemate cause).
 // Assault self-gates on aggregate force, so early game it declines and the

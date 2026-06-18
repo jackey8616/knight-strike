@@ -2,7 +2,7 @@ import { parseTileId, tileId } from "./state";
 import type { Terrain, TileId } from "./types";
 import { createRng } from "./util/rng";
 
-// PRD §3.9 (v1.6) terrain rules.
+// PRD §4.7 (v1.6) terrain rules.
 //   MOUNTAIN / WATER → impassable (can't enter, claim, or path through).
 //   FOREST → the unit on it takes 75% incoming combat damage.
 //   PLAINS → neutral.
@@ -45,7 +45,7 @@ const NEIGHBORS: readonly (readonly [number, number])[] = [
   [0, -1],
 ];
 
-// PRD §3.9 (v1.6): deterministic terrain layout from a seed. Castles + neutral
+// PRD §4.7 (v1.6): deterministic terrain layout from a seed. Castles + neutral
 // points (passed as `fixedPlains`) stay PLAINS with a clear ring around them,
 // and a connectivity pass guarantees every fixed tile is reachable from every
 // other across passable terrain (so no castle is ever walled in).

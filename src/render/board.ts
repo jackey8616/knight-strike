@@ -36,7 +36,7 @@ export const TILE_WIDTH = 64;
 export const TILE_HEIGHT = 32;
 
 // PRD §5.1: 4 faction colours + neutral grey. Tokugawa is the player faction
-// (PRD §3.1) — assigning it red keeps "the red corner is yours" obvious.
+// (PRD §4.1) — assigning it red keeps "the red corner is yours" obvious.
 export const FACTION_COLORS: Readonly<Record<FactionId, number>> = {
   TOKUGAWA: 0xc94545,
   TAKEDA: 0x4575c9,
@@ -53,7 +53,7 @@ export function isoY(x: number, y: number): number {
   return (x + y) * (TILE_HEIGHT / 2);
 }
 
-// PRD §3.9 (v1.6): mountains render as stacked unit-cubes. A mountain tile's
+// PRD §4.7 (v1.6): mountains render as stacked unit-cubes. A mountain tile's
 // height (in cube units) is its distance INTO the mountain mass — 1 at the edge
 // of the cluster, +1 per step inward (4-conn distance transform, board border
 // counts as edge). So a blob steps up toward its centre into a curved peak, and
@@ -401,7 +401,7 @@ function tri(
   g.closePath();
 }
 
-// PRD §3.9: cap a mountain's cube tower with a pyramidal peak — two shaded
+// PRD §4.7: cap a mountain's cube tower with a pyramidal peak — two shaded
 // front faces (left darker, right lit) meeting at an apex above the tile,
 // topped with a snow cap — so mountains read as pointed peaks rather than
 // flat-topped cubes. Taller (more interior) tiles get a higher apex, so the
@@ -862,7 +862,7 @@ export function createBoardRenderer(
     for (const province of state.provinces.values()) {
       const t = tiles.get(province.id);
       if (t === undefined) continue;
-      // PRD §3.4 v1.2 multi-occupant: derived owner = single-occupant faction
+      // PRD §3 v1.2 multi-occupant: derived owner = single-occupant faction
       // or null. Empty tiles get the neutral colour. Contested (multi-faction)
       // tiles fall back to the castle's original owner colour if it's a castle,
       // else the neutral tile colour so the player has *some* coherent cue.
@@ -890,7 +890,7 @@ export function createBoardRenderer(
         t.painted = true;
         t.paintedColor = ownerColor;
       }
-      // PRD §3.9: a raised tile fades when a unit sits on a tile it occludes
+      // PRD §4.7: a raised tile fades when a unit sits on a tile it occludes
       // (the row behind/above it under the 45° camera), so vision isn't blocked.
       const alpha =
         t.elevation > 0 &&

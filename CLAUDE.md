@@ -2,7 +2,7 @@
 
 ## 1. 專案概要
 
-Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.1）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.5）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
 
 ## 2. 技術棧與版本
 
@@ -34,7 +34,7 @@ Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 we
 ```
 knight-strike/
 ├── docs/
-│   ├── PRD.md                # 規格單一真相來源（v2.0）
+│   ├── PRD.md                # 規格單一真相來源（v2.5）
 │   └── MILESTONES.md         # 交付 milestone × AC 對照
 ├── public/
 │   └── knight.png            # sprite 資源
@@ -62,7 +62,8 @@ knight-strike/
 │   │   ├── marching.ts       # 行軍 stack 插值動畫
 │   │   ├── combat.ts         # bump + tint flash
 │   │   ├── paths.ts          # 拖曳預覽虛線
-│   │   └── sprites.ts        # tier texture 生成
+│   │   ├── sprites.ts        # tier texture 生成
+│   │   └── unit-bitmap.ts    # 像素單位點陣源（sprites / start-menu demo 共用）
 │   ├── input/                # 【輸入層】
 │   │   ├── pointer.ts        # hit-test、click vs drag、左右鍵分流、按壓 auto-pause
 │   │   ├── keyboard.ts       # Space / 1-4 / R / Esc / WASD
@@ -78,6 +79,7 @@ knight-strike/
 │   ├── playtest/             # 【Headless 測試層】跑在 Node
 │   │   ├── cli.ts            # pnpm playtest 入口
 │   │   ├── runner.ts         # scenario → result
+│   │   ├── balance-check.ts  # pnpm balance：固定 4-AI 批次勝率守門（CI gate）
 │   │   └── integration.test.ts
 │   ├── scenarios/            # 場景 JSON / TS（default / idle-target / spectator-4ai…）
 │   │   └── sized.ts          # 程序產生預設可玩開局（11/15/19/27 × 難度，Start Menu 用）

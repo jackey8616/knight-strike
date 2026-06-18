@@ -5,7 +5,7 @@ import { produce } from "./production";
 import type { GameState } from "./types";
 import { applyDefeats } from "./victory";
 
-// PRD §3.2 v1.4 step order:
+// PRD §4.2 v1.4 step order:
 //   1. movement (advanceMarching: stacks step forward; arrivals move into an
 //      own tile or register an AttackOrder against a non-own target)
 //   2. production (castle / garrison +1; tiles engaged in a siege are frozen)

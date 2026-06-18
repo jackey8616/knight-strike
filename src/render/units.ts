@@ -84,7 +84,7 @@ function createUnitGfx(
   const node = new Container();
   // Sit on the rolling ground surface (PRD §6.1) so units ride the hills.
   node.position.set(isoX(x, y), isoY(x, y) - groundLiftPx(x, y));
-  // §3.1 iso back-to-front order: deeper rows (larger x+y) draw later. Adding
+  // §6.1 iso back-to-front order: deeper rows (larger x+y) draw later. Adding
   // 0.5 keeps unit gfx above its tile base but below same-row neighbours.
   node.zIndex = x + y + 0.5;
 
@@ -150,7 +150,7 @@ export function createUnitsRenderer(
   const units = new Map<TileId, UnitGfx>();
 
   function update(state: GameState): void {
-    // §3.5.1 dispatch happens within the same tick as the resulting count
+    // §4.5.1 dispatch happens within the same tick as the resulting count
     // drop on the source tile, so we suppress combat fx for the slice of the
     // drop that's accounted for by freshly-dispatched stacks.
     // step() increments state.tick at the end, so stacks born this tick carry
@@ -184,7 +184,7 @@ export function createUnitsRenderer(
     for (const o of state.attackOrders) addColumn(o.from, o.faction, o.count);
 
     for (const province of state.provinces.values()) {
-      // PRD §3.4 v1.2: pick the dominant occupant for rendering. Contested
+      // PRD §3 v1.2: pick the dominant occupant for rendering. Contested
       // tiles will visually appear as the largest faction (with the actual
       // multi-occupant breakdown surfaced via tile-info hover instead).
       let display: { faction: FactionId; amount: number } | null = null;

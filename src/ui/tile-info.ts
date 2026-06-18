@@ -107,7 +107,7 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
         );
       }
     }
-    // PRD §3.6' (v1.4): surface cross-edge sieges touching this tile.
+    // PRD §4.6 (v1.4): surface cross-edge sieges touching this tile.
     for (const o of state.attackOrders) {
       if (o.from === id) {
         lines.push(

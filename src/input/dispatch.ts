@@ -56,7 +56,7 @@ export function createDispatchController(
     if (button !== "left") return;
     const state = deps.getState();
     const src = state.provinces.get(id);
-    // PRD §3.5.1 v1.2: dispatch must originate from a tile uniquely owned by
+    // PRD §4.5.1 v1.2: dispatch must originate from a tile uniquely owned by
     // the player (single own-faction occupant). UI rejects non-player /
     // contested origins early; engine `dispatch()` double-checks.
     if (src === undefined) return;

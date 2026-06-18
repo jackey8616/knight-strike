@@ -79,7 +79,7 @@ function computeStats(
     out.set(f, { tiles: 0, total: 0, hasCastle: false });
   }
   for (const p of state.provinces.values()) {
-    // §3.4 v1.2: tile "owned" by a faction = exactly one occupant of that
+    // §3 v1.2: tile "owned" by a faction = exactly one occupant of that
     // faction. Counts (panel "total" column) are per-faction occupant sum
     // even on contested tiles. Castle ownership tracks the castleOwner only
     // when they have an occupant there.

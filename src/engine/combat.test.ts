@@ -72,7 +72,7 @@ function amountOf(state: GameState, id: string, faction: FactionId): number {
 }
 
 describe("stageDamage", () => {
-  it("matches PRD §3.6' step function", () => {
+  it("matches PRD §4.6 step function", () => {
     expect([0, 1, 2, 3, 4, 7, 8, 15, 16].map(stageDamage)).toEqual([1, 1, 2, 2, 4, 4, 8, 8, 16]);
   });
 });

@@ -28,7 +28,7 @@ pnpm install
 | ------------------------------- | ---------------------------------------------------- |
 | `pnpm dev`                      | Local dev server on http://localhost:5173 with HMR   |
 | `pnpm build`                    | Production build to `dist/` (base path `/`)          |
-| `pnpm build:pages`              | Same, base path `/knight-strike/` for GitHub Pages   |
+| `pnpm build:pages`              | Build for the GitHub Pages deploy; base `/` for the custom domain (`public/CNAME`), override via `VITE_BASE_PATH` |
 | `pnpm preview`                  | Serve `dist/` locally to verify the production build |
 | `pnpm test`                     | Vitest in watch mode                                 |
 | `pnpm test:run`                 | Run vitest once (CI mode)                            |
@@ -41,12 +41,13 @@ pnpm install
 
 ## Playing
 
+- On load, the **Start Menu** lets you pick AI difficulty (Easy / Normal / Hard), board size (11 / 15 / 19 / 27), and map shape (Plateau / Island / Coast); press **Start** to begin. The End Screen offers **Restart** (same settings) and **Main Menu** (back to the Start Menu).
 - The player faction is fixed to **Tokugawa** (top-left corner of the iso board).
 - **Left-click + drag** from one of your tiles to a target to dispatch troops along the shortest path (highlighted; a red line means no valid route). Dragging to an enemy / neutral tile starts a **conquer-march** that sieges the line tile-by-tile.
 - The dispatch ratio (25 / 50 / 75 / 100 %) sets how much of the source garrison ships out; castles always keep at least 1 troop.
-- **Click a marching column** to cancel it — its troops drop onto the tile it's standing on.
+- **Right-click a marching column** to cancel it — its troops drop onto the tile it's standing on.
 - **Space** pause/resume, **1–4** speed, **R** recentre camera, **Esc** cancel an in-flight drag, **WASD / arrow keys** pan. **Right-drag / wheel / two-finger** pan and zoom.
-- The HUD (tick + countdown + speed) sits bottom-centre; the faction panel (tile count / troops / castle status) bottom-left; hover any tile for ownership / tier / count in the top-centre; the map-size selector (11 / 15 / 19 / 27) is top-right.
+- The HUD (tick + countdown + speed) sits bottom-centre; the faction panel (tile count / troops / castle status) bottom-left; hover any tile for ownership / tier / count in the top-centre.
 
 Rules in detail: PRD §4 (gameplay), §5 (AI), §7 (win/lose).
 
@@ -72,7 +73,7 @@ Scenario JSON format and AI modes: see [`CLAUDE.md`](CLAUDE.md) (§5 / §6) and 
 - `src/engine/` — pure logic; **no Pixi / DOM / GSAP** allowed (ESLint-enforced).
 - `src/render/` — Pixi.js v8 board / units / marching / combat / paths.
 - `src/input/` — pointer, keyboard, camera, dispatch gesture state machine.
-- `src/ui/` — HUD, faction panel, tile info, map-size, end screen (vanilla DOM).
+- `src/ui/` — HUD, faction panel, tile info, start menu, end screen, responsive layout (vanilla DOM).
 - `src/scenarios/` — JSON scenario configs + their TypeScript wrappers.
 - `src/playtest/` — headless CLI + scenario runner + integration tests.
 - `docs/PRD.md` — product spec (rules, numbers, ACs).

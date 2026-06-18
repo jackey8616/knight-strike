@@ -1,11 +1,11 @@
 import type { GameState, Occupant, Province, TileId } from "./types";
 
-// PRD §3.3 v1.3 self-replicate: any tile not engaged in combat with a
+// PRD §4.3 v1.3 self-replicate: any tile not engaged in combat with a
 // non-NEUTRAL, non-defeated occupant grows that occupant +1 per tick (capped at
 // 100). Any amount ≥ 1 qualifies — even a lone 1-troop survivor regenerates,
 // matching the v1.1 "garrison breeds" feel the player relies on.
 //
-// PRD §3.6' (v1.5): a besieged target (`to` of any AttackOrder) is frozen so a
+// PRD §4.6 (v1.5): a besieged target (`to` of any AttackOrder) is frozen so a
 // defender can't out-regrow the assault. The column's troops live in
 // `order.count` (not a `from` occupant), so `from` self-replicates normally.
 export const PRODUCTION_CAP = 100;

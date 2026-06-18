@@ -23,7 +23,7 @@ const NEIGHBOR_OFFSETS: readonly (readonly [number, number])[] = [
   [0, -1],
 ];
 
-// PRD §3.5.2 (v1.4): only own-claimed tiles are passable as intermediates —
+// PRD §4.5.2 (v1.4): only own-claimed tiles are passable as intermediates —
 // a tile with an own garrison or an empty tile trail-marked as ours. Neutral,
 // unclaimed, and enemy tiles are walls. The BFS target itself is exempt (you
 // may aim a dispatch at a non-own tile to attack / capture it).
@@ -45,16 +45,16 @@ export function findPath(
   const source = state.provinces.get(from);
   const target = state.provinces.get(to);
   if (source === undefined || target === undefined) return null;
-  // PRD §3.5.1: dispatch must originate from a fully-owned source tile.
+  // PRD §4.5.1: dispatch must originate from a fully-owned source tile.
   if (derivedOwner(source) !== faction) return null;
-  // PRD §3.9 (v1.6): impassable terrain (mountain / water) can't be entered or
+  // PRD §4.7 (v1.6): impassable terrain (mountain / water) can't be entered or
   // captured, so it's never a valid target.
   if (isImpassableTerrain(target.terrain)) return null;
 
-  // PRD §3.5.2 (v1.5 conquer-march): an own target = pure reinforcement, so the
+  // PRD §4.5.2 (v1.5 conquer-march): an own target = pure reinforcement, so the
   // whole path must stay on own claim (v1.4 rule). A non-own target = a
   // conquering drag, so the route is the plain shortest path ignoring ownership
-  // — the column will siege every non-own tile it steps onto (§3.6').
+  // — the column will siege every non-own tile it steps onto (§4.6).
   const ownTarget = isOwnClaimed(target, faction);
 
   const parent = new Map<TileId, TileId>();
@@ -226,7 +226,7 @@ export function cancelMarchingStack(
 
 // Add `amount` troops of `faction` onto a tile (merge with an existing same-
 // faction occupant, else create one) and stamp lastClaimedFaction = faction
-// (PRD §3.6' invariant). Used for both move-in (own target) and siege staging.
+// (PRD §4.6 invariant). Used for both move-in (own target) and siege staging.
 function garrison(
   province: Province,
   faction: FactionId,
@@ -264,7 +264,7 @@ type FactionArrival = {
   readonly chosenId: string;
 };
 
-// PRD §3.5.4' #1: same-faction stacks reaching one tile this tick merge into a
+// PRD §4.5.3 #1: same-faction stacks reaching one tile this tick merge into a
 // single arrival — counts sum, the continuing path is the one with the fewest
 // remaining steps (terminus wins outright), tiebroken by earliest dispatch then
 // id.
@@ -313,7 +313,7 @@ function orderKey(from: TileId, to: TileId, faction: FactionId): string {
   return `${from}|${to}|${faction}`;
 }
 
-// PRD §3.5.4' (v1.4): advance every marching stack one step. Ownership of the
+// PRD §4.5.3 (v1.4): advance every marching stack one step. Ownership of the
 // next tile is read against the start-of-phase snapshot so same-tick arrivals
 // are independent.
 //   • next tile own + terminus → move in (garrison).
@@ -391,7 +391,7 @@ export function advanceMarching(state: GameState): GameState {
           });
         }
       } else {
-        // Siege (PRD §3.6' / v1.5): the column's troops go into the order's
+        // Siege (PRD §4.6 / v1.5): the column's troops go into the order's
         // `count` — NOT a staging-tile garrison — so a source castle reserve or
         // a tile we passed never gets conscripted. Sub-group by staging tile so
         // different approaches stay distinct; the order also carries the route

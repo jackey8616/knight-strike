@@ -240,7 +240,7 @@ export function parseScenario(raw: unknown): ScenarioInput {
   };
 }
 
-// PRD §3.4 v1.2: scenario JSON keeps the legacy (owner, count) per-tile
+// PRD §3 v1.2: scenario JSON keeps the legacy (owner, count) per-tile
 // shorthand. Each non-empty entry becomes a single starting occupant
 // (`arrivalTick: 0`, `isDefender: true`). Castles carry `castleOwner` so
 // v1.2 victory checks have the stable original-faction reference even after
@@ -283,11 +283,11 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       occupants,
       // Initial garrison's faction stamps the tile so derivedOwner reflects
       // colour even if the occupant later dies before someone else claims
-      // (and so a wiped enemy castle still needs break→capture, §3.6').
+      // (and so a wiped enemy castle still needs break→capture, §4.6).
       lastClaimedFaction: t.count > 0 ? t.owner : null,
     });
   }
-  // PRD §3.9 (v1.6): generate seeded terrain. Castles + neutral camps stay on
+  // PRD §4.7 (v1.6): generate seeded terrain. Castles + neutral camps stay on
   // flat ground (and get a clear ring), and connectivity is guaranteed.
   const fixedPlains = new Set<TileId>();
   for (const [id, p] of provinces) {

@@ -65,7 +65,7 @@ function setOccupants(
   next.set(id, {
     ...prov,
     occupants,
-    // Mirror the §3.6' invariant: a garrison stamps the tile's claim.
+    // Mirror the §4.6 invariant: a garrison stamps the tile's claim.
     lastClaimedFaction: occupants[0]?.faction ?? prov.lastClaimedFaction,
     isCastle: opts.isCastle ?? prov.isCastle,
     castleOwner: opts.castleOwner ?? prov.castleOwner,

@@ -2,7 +2,7 @@
 
 本文件把 [`PRD.md`](PRD.md) 切成交付 milestone，給 `/goal` 與 PR 計劃用。**規格不在此重述**——所有玩法 / 數值 / 規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收、狀態」。工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
-> **PRD 同步基準：v2.0（實作對齊整併版）**。AC 編號用 PRD §8 的 `AC-01`..`AC-24`（已隨 v2.0 整併把舊的 AC-01..39 / AC-V2 / AC-V4 / AC-V6 版號表退場）。設計演進史（v0.x–v1.6 逐版、被取代的同 tile multi-occupant 戰鬥 / stalemate drain / castle overflow 等）見 PRD changelog 指向的 git 標籤 `archive/prd-v0.12` 與 git log。
+> **PRD 同步基準：v2.5**。AC 編號用 PRD §8 的 `AC-01`..`AC-26`（v2.0 整併把舊的 AC-01..39 / AC-V2 / AC-V4 / AC-V6 版號表退場；v2.2 起新增 AC-25 / AC-26 涵蓋 Start Menu 與 End Screen 導航）。設計演進史（v0.x–v1.6 逐版、被取代的同 tile multi-occupant 戰鬥 / stalemate drain / castle overflow 等）見 PRD changelog 指向的 git 標籤 `archive/prd-v0.12` 與 git log。
 
 ---
 
@@ -14,7 +14,7 @@
 - Milestone 完成判定基準（CLAUDE.md §6）：`pnpm test:run` + `pnpm typecheck` + `pnpm lint` + `pnpm playtest <scenario> --runs N` 全綠。
 - Future scope（PRD §9）不在任何 milestone。
 
-**整體狀態**：PRD v2.0 描述的玩法、AI、地形、UI 皆已實作並通過測試（99 tests 綠）。下列 milestone 均為 **shipped**；本文件現主要作為「milestone × 模組 × AC」對照與回歸基準。
+**整體狀態**：PRD v2.5 描述的玩法、AI、地形、UI 皆已實作並通過測試（測試全綠）。下列 milestone 均為 **shipped**；本文件現主要作為「milestone × 模組 × AC」對照與回歸基準。
 
 ---
 
@@ -95,7 +95,7 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 
 **對應 PRD**：§6.1（sprite）；技術棧 / build 細節見 CLAUDE.md §2、§6。
 
-- `vite.config.ts` + `build:pages`（`VITE_BASE_PATH=/knight-strike/`）；`.github/workflows/deploy.yml` 自動部署。
+- `vite.config.ts` 的 base 預設 `/`（自訂網域 `knight-strike.clo5de.info`，見 `public/CNAME`；`VITE_BASE_PATH` 可覆寫為子路徑）+ `build:pages`；`.github/workflows/deploy.yml` 於 CI 通過後自動部署。
 - 資產：`public/knight.png` + tint / scale 區分 tier。
 - `README.md`：`pnpm dev` / `test` / `playtest` / `build` 摘要，玩法連結回 PRD。
 
@@ -107,7 +107,7 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 
 ## 對照表（AC × milestone）
 
-> AC 編號 = PRD v2.0 §8。Engine 行為以 vitest headless 驗，UI 行為以 `pnpm dev` 瀏覽器驗。
+> AC 編號 = PRD v2.5 §8。Engine 行為以 vitest headless 驗，UI 行為以 `pnpm dev` 瀏覽器驗。
 
 | AC    | 描述（簡）                                  | M1 engine | M2 UI | M3 playtest |
 | ----- | ------------------------------------------- | :-------: | :---: | :---------: |

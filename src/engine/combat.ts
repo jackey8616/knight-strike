@@ -9,7 +9,7 @@ import type {
   TileId,
 } from "./types";
 
-// PRD §3.6' (v1.4): step-function ramp, unchanged from v1.2.
+// PRD §4.6 (v1.4): step-function ramp, unchanged from v1.2.
 // stageDamage(t) = 2^floor(log2(max(t, 1))). t=0..1 → 1; t=2..3 → 2; t=4..7 → 4…
 export function stageDamage(t: number): number {
   const clamped = Math.max(t, 1);
@@ -54,7 +54,7 @@ function hostileOccupant(
   return undefined;
 }
 
-// PRD §3.6' (v1.4) + conquer-march (v1.5): resolve every AttackOrder.
+// PRD §4.6 (v1.4) + conquer-march (v1.5): resolve every AttackOrder.
 //   • target has a hostile garrison → cross-edge step-function combat: the
 //     defender hits the column (order.count), the column hits the defender from
 //     t≥1, NEUTRAL never fires back.
@@ -94,7 +94,7 @@ export function resolveOrders(state: GameState): CombatResult {
     const base = stageDamage(t);
     const attacks: Attack[] = [];
     if (defender.faction !== "NEUTRAL") {
-      // Return fire is reduced by the attacking column's own terrain (§3.9).
+      // Return fire is reduced by the attacking column's own terrain (§4.7).
       const dmg = applyTerrainDefense(Math.min(base, defender.amount), fromP?.terrain);
       columnDamage.set(orderKey(o), (columnDamage.get(orderKey(o)) ?? 0) + dmg);
       attacks.push({ attacker: defender.faction, defender: o.faction, damage: dmg });

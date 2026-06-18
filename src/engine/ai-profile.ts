@@ -21,7 +21,7 @@ export type RuleProfile = {
   // Fraction of a non-castle source's stack to ship out on expand.
   readonly expandRatio: number;
   // Fraction of a Queen-band castle (count 15..29) to siphon on expand. Only
-  // the Queen band — Soldier and King bands stay static per §4.1.
+  // the Queen band — Soldier and King bands stay static per §5.2.
   readonly castleQueenSendRatio: number;
 };
 

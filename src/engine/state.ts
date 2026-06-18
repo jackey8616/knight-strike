@@ -14,7 +14,7 @@ export function parseTileId(id: TileId): { readonly x: number; readonly y: numbe
   return { x: Number(m[1]), y: Number(m[2]) };
 }
 
-// PRD §3.4 / §3.5.4 (v1.3): tile ownership precedence —
+// PRD §3 / §4.5.3 (v1.3): tile ownership precedence —
 //   1 occupant     → that occupant's faction
 //   0 occupants    → lastClaimedFaction (walk-through trail; may be null)
 //   2+ occupants   → null (contested)
@@ -31,7 +31,7 @@ export function derivedOwner(province: Province): FactionId | null {
   return null;
 }
 
-// PRD §3.5.2 (v1.4): a tile is "own-claimed" — and thus passable as a marching
+// PRD §4.5.2 (v1.4): a tile is "own-claimed" — and thus passable as a marching
 // intermediate — iff its derived owner is `faction`. That covers a tile with an
 // own garrison (any amount) and an empty tile trail-marked by walk-through
 // claim (lastClaimedFaction === faction). Neutral / unclaimed / enemy tiles are

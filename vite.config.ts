@@ -4,10 +4,10 @@ import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// PRD §9.4 / M4.2: pages now deploys to a custom domain
-// (knight-strike.clo5de.info, see public/CNAME) which serves from the root, so
-// base is `/`. Kept env-driven so the same dist/ can still target a sub-path
-// Pages URL (e.g. `/knight-strike/`) if the custom domain is ever dropped.
+// Pages deploys to a custom domain (knight-strike.clo5de.info, see public/CNAME)
+// which serves from the root, so base is `/`. Kept env-driven so the same dist/
+// can still target a sub-path Pages URL (e.g. `/knight-strike/`) if the custom
+// domain is ever dropped. Build/deploy details: MILESTONES M4 / CLAUDE.md §9.
 const base = process.env.VITE_BASE_PATH ?? "/";
 
 export default defineConfig({

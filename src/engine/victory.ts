@@ -100,7 +100,7 @@ export function applyDefeats(state: GameState): GameState {
     newStacks.push(stack);
   }
 
-  // PRD §3.6' / step order step 4: a defeated faction's sieges drop with it.
+  // PRD §4.6 / step order step 4: a defeated faction's sieges drop with it.
   let ordersChanged = false;
   const newOrders = state.attackOrders.filter((o) => {
     if (newlySet.has(o.faction)) {

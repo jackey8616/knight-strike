@@ -2,11 +2,12 @@ export type FactionId = "TOKUGAWA" | "TAKEDA" | "ODA" | "UESUGI" | "NEUTRAL";
 
 export type Tier = "SOLDIER" | "KNIGHT" | "QUEEN" | "KING";
 
-// PRD §3.9 (v1.6): per-tile terrain. PLAINS is the neutral baseline. MOUNTAIN
-// and WATER are impassable (can't be entered / claimed / pathed through). FOREST
-// gives the unit standing on it a defensive damage reduction. Only MOUNTAIN is
-// rendered with height (a continuous wave); the rest are flat, told apart by
-// colour.
+// PRD §4.7: per-tile terrain. PLAINS is the neutral baseline. MOUNTAIN and
+// WATER are impassable (can't be entered / claimed / pathed through). FOREST
+// gives the unit standing on it a defensive damage reduction (×0.75). Terrain
+// here is gameplay-only; rendering (stacked-block mountains, procedural
+// pixel-art tops for plains / water / forest, the rolling height field) lives
+// in the render layer (PRD §6.1).
 export type Terrain = "PLAINS" | "MOUNTAIN" | "WATER" | "FOREST";
 
 export type TileId = string;
@@ -24,14 +25,14 @@ export type Province = {
   readonly y: number;
   readonly isCastle: boolean;
   readonly castleOwner: FactionId | null;
-  // PRD §3.9 (v1.6): tile terrain. Optional in the type so existing fixtures
+  // PRD §4.7 (v1.6): tile terrain. Optional in the type so existing fixtures
   // omit it; engine helpers treat absent as PLAINS. Generated per game (seeded)
   // and assigned at scenario load.
   readonly terrain?: Terrain;
-  // PRD §3.6' (v1.4): invariant — at most one faction present at a time.
+  // PRD §4.6 (v1.4): invariant — at most one faction present at a time.
   // Units never share a tile with the enemy (combat is cross-edge).
   readonly occupants: readonly Occupant[];
-  // PRD §3.5.4 v1.3 walk-through claim + §3.6' (v1.4) break/capture state.
+  // PRD §4.5.3 v1.3 walk-through claim + §4.6 (v1.4) break/capture state.
   // Set to the occupant's faction whenever a tile gains a garrison, and kept
   // when that garrison is wiped out — so a freshly-emptied enemy tile still
   // reads as "enemy-claimed" and must be broken to NEUTRAL before capture.
@@ -48,7 +49,7 @@ export type MarchingStack = {
   readonly dispatchedAtTick: number;
 };
 
-// PRD §3.6' (v1.4) + conquer-march (v1.5): a cross-edge siege carried out by a
+// PRD §4.6 (v1.4) + conquer-march (v1.5): a cross-edge siege carried out by a
 // conquering column. `from` is the own-claimed tile the column stands on; `to`
 // is the adjacent (4-conn) target being attacked. `count` is the column's own
 // troops (v1.5: the order owns them — they are NOT a `from` occupant, so a
