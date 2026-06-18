@@ -110,4 +110,13 @@ export const ev = {
     from,
     to,
   }),
+  houseDestroyed: (houseId: string, owner: FactionId): GameEvent => ({
+    kind: "house.destroyed",
+    houseId,
+    owner,
+  }),
+  constructionStarted: (taskId: string): GameEvent => ({ kind: "construction.started", taskId }),
+  constructionCompleted: (taskId: string): GameEvent => ({ kind: "construction.completed", taskId }),
+  constructionAborted: (taskId: string): GameEvent => ({ kind: "construction.aborted", taskId }),
+  buildingDestroyed: (buildingId: string): GameEvent => ({ kind: "building.destroyed", buildingId }),
 };

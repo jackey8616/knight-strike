@@ -160,6 +160,9 @@ export type Province = {
   readonly terrain: Terrain;
   readonly isCastle: boolean;
   readonly castleOwner: FactionId | null;
+  // PRD §4.9 — castle HP (default CASTLE_DURABILITY when undefined). Reaching 0
+  // via destruction = the king is down (M8 sets it; M10 acts on it).
+  readonly castleDurability?: number;
 };
 
 export type GameState = {

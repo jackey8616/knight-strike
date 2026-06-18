@@ -1,20 +1,14 @@
 import { type StepResult } from "./events";
 import { parseTileId, vonNeumannNeighbors } from "./state";
+import { isPassable } from "./terrain";
 import type { GameState, MarchOrder, TileId, Unit } from "./types";
 
-// PRD §4.7 / §4.11 — M7 passability: only PLAINS/FOREST are walkable. WATER/LAVA
-// need a bridge and MOUNTAIN is impassable; bridge/fence handling arrives in M8
-// (this gets replaced by an entity-aware isPassable then).
-export function isWalkableTerrain(state: GameState, tile: TileId): boolean {
-  const terrain = state.provinces.get(tile)?.terrain ?? "PLAINS";
-  return terrain === "PLAINS" || terrain === "FOREST";
-}
-
-// BFS shortest path (4-connected) over walkable terrain. Returns the full tile
-// list including both endpoints, or null if unreachable.
+// BFS shortest path (4-connected) over passable tiles (bridge/fence-aware via
+// terrain.isPassable). Returns the full tile list including both endpoints, or
+// null if unreachable.
 export function findPath(state: GameState, from: TileId, to: TileId): TileId[] | null {
   if (from === to) return [from];
-  if (!isWalkableTerrain(state, to)) return null;
+  if (!isPassable(state, to)) return null;
 
   const visited = new Set<TileId>([from]);
   const prev = new Map<TileId, TileId>();
@@ -24,7 +18,7 @@ export function findPath(state: GameState, from: TileId, to: TileId): TileId[] |
     if (cur === undefined) break;
     const { x, y } = parseTileId(cur);
     for (const nbr of vonNeumannNeighbors(x, y, state.boardSize)) {
-      if (visited.has(nbr) || !isWalkableTerrain(state, nbr)) continue;
+      if (visited.has(nbr) || !isPassable(state, nbr)) continue;
       visited.add(nbr);
       prev.set(nbr, cur);
       if (nbr === to) {
@@ -75,7 +69,7 @@ export function advanceMarch(state: GameState): StepResult {
     const nextIdx = order.idx + 1;
     const nextTile = order.path[nextIdx];
     if (nextTile === undefined) continue; // already at the end → drop
-    if (!isWalkableTerrain(state, nextTile) || enemyAt(nextTile, u.owner)) continue; // blocked → stop
+    if (!isPassable(state, nextTile) || enemyAt(nextTile, u.owner)) continue; // blocked → stop
     moved.set(order.unitId, nextTile);
     if (nextIdx < order.path.length - 1) remaining.push({ ...order, idx: nextIdx });
   }
