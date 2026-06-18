@@ -2,7 +2,7 @@
 
 ## 1. 專案概要
 
-Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，主城產兵 → 派駐升級 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v1.2）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.0）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
 
 ## 2. 技術棧與版本
 
@@ -24,52 +24,60 @@ Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 we
 - **不用 lodash / underscore / moment / dayjs / date-fns 等大型 utility 庫**。需要的小工具自己在 `src/engine/util/` 寫。
 - **不用 jQuery**。
 - **不用 Immer**（state 不可變靠手動 spread / structural copy；理由：headless playtest 跑 100 場時 proxy 成本非零，且 engine 模組 surface 已切細，手寫成本可控）。
-- **不用 localStorage / IndexedDB / cookie**（存檔列入 PRD §8 future scope，MVP 不做）。
+- **不用 localStorage / IndexedDB / cookie**（存檔列入 PRD §9 future scope，MVP 不做）。
 - **不引入大型 state 管理庫**（Redux / Zustand / MobX）。Engine 層自己管，UI 層用 props / 直接讀 engine state snapshot。
 
-## 3. 檔案結構（與 PRD §9 對齊）
+## 3. 檔案結構與實作對應（工程細節單一真相）
+
+> 本節是**工程細節的單一真相**：檔案結構、模組職責、與「PRD 規格 → 模組 / 函式」對應（見樹狀註解的 `PRD §x` 標註）。PRD 只描述產品設計（玩法 / 規則 / 數值），不重述實作；spec 數值改動時這裡只引用 PRD 章節、不複製數字。
 
 ```
 knight-strike/
 ├── docs/
-│   └── PRD.md                # 規格單一真相來源
+│   ├── PRD.md                # 規格單一真相來源（v2.0）
+│   └── MILESTONES.md         # 交付 milestone × AC 對照
 ├── public/
-│   └── *.png                 # sprite 資源
+│   └── knight.png            # sprite 資源
 ├── src/
 │   ├── engine/               # 【純邏輯層】無 Pixi / DOM / GSAP 依賴
-│   │   ├── types.ts          # Faction / Tier / Province / MarchingStack
-│   │   ├── state.ts          # GameState、行軍佇列
-│   │   ├── tick.ts           # step(state) → state'
-│   │   ├── upgrade.ts        # deriveTier(count)
-│   │   ├── combat.ts         # computeLoss + adjacency 結算 + stalemate counter
-│   │   ├── movement.ts       # BFS 路徑 + marching stack 推進 + 碰撞解析
-│   │   ├── production.ts     # 主城產兵
-│   │   ├── ai.ts             # AI 狀態機 + RNG shuffle
-│   │   ├── victory.ts        # 勝負判定
+│   │   ├── types.ts          # FactionId / Tier / Terrain / Province / Occupant / MarchingStack / AttackOrder / AiMode / GameState
+│   │   ├── state.ts          # derivedOwner / isOwnClaimed / findOccupant
+│   │   ├── tick.ts           # step()：每 tick 結算順序（PRD §4.2）
+│   │   ├── upgrade.ts        # deriveTier()：兵力→tier（PRD §4.4）
+│   │   ├── production.ts     # produce()：self-replicate（PRD §4.3）
+│   │   ├── combat.ts         # resolveOrders()：cross-edge 戰鬥 + break→capture（PRD §4.6）
+│   │   ├── movement.ts       # findPath / dispatch / advanceMarching / cancelMarchingStack（PRD §4.5）
+│   │   ├── terrain.ts        # generateTerrain / 不可通行 / 減傷（PRD §4.7）
+│   │   ├── ai.ts             # stepAi()：規則狀態機（PRD §5）
+│   │   ├── ai-profile.ts     # RULE_PROFILES：難度旋鈕（PRD §5.3）
+│   │   ├── victory.ts        # applyDefeats / evaluateOutcome（PRD §7）
 │   │   └── util/             # rng (seedable)、helpers
 │   ├── render/               # 【Pixi 渲染層】
 │   │   ├── app.ts            # Pixi Application 初始化 / resize
-│   │   ├── board.ts          # 格子 sprite + iso 投影 + 高亮
+│   │   ├── board.ts          # 格子 + iso 投影 + 地形 + 山堆疊 + 高亮
 │   │   ├── units.ts          # 駐紮 stack 渲染 + 升級動畫
 │   │   ├── marching.ts       # 行軍 stack 插值動畫
 │   │   ├── combat.ts         # bump + tint flash
-│   │   └── paths.ts          # 拖曳預覽虛線
+│   │   ├── paths.ts          # 拖曳預覽虛線
+│   │   └── sprites.ts        # tier texture 生成
 │   ├── input/                # 【輸入層】
-│   │   ├── pointer.ts        # hit-test、click vs drag、左右鍵分流
-│   │   ├── keyboard.ts       # Space / 1 / 2 / R / Esc / WASD
-│   │   └── dispatch.ts       # 拖曳派遣手勢狀態機
-│   ├── ui/                   # 【UI 面板層】原生 DOM 或 Pixi text
+│   │   ├── pointer.ts        # hit-test、click vs drag、左右鍵分流、按壓 auto-pause
+│   │   ├── keyboard.ts       # Space / 1-4 / R / Esc / WASD
+│   │   ├── camera.ts         # wheel zoom + 觸控 pinch / pan
+│   │   └── dispatch.ts       # 拖曳派遣手勢狀態機 + 比例滑桿
+│   ├── ui/                   # 【UI 面板層】原生 DOM
 │   │   ├── hud.ts            # tick bar + 速度
 │   │   ├── faction-panel.ts
 │   │   ├── tile-info.ts
-│   │   └── end-screen.ts
+│   │   ├── map-size.ts       # 棋盤尺寸選單
+│   │   ├── end-screen.ts
+│   │   └── responsive.ts     # 窄螢幕重排
 │   ├── playtest/             # 【Headless 測試層】跑在 Node
 │   │   ├── cli.ts            # pnpm playtest 入口
 │   │   ├── runner.ts         # scenario → result
 │   │   └── integration.test.ts
-│   ├── scenarios/            # 預設場景 JSON / TS
-│   │   └── default.ts        # 11x11 預設開局
-│   ├── assets/               # sprite 索引
+│   ├── scenarios/            # 場景 JSON / TS（default / idle-target / spectator-4ai…）
+│   │   └── sized.ts          # 程序產生預設可玩開局（11/15/19/27）
 │   └── main.ts               # 入口：建 engine + renderer + 接 UI
 ├── CLAUDE.md
 ├── package.json
@@ -77,12 +85,12 @@ knight-strike/
 ├── tsconfig.json
 ├── vite.config.ts
 ├── vitest.config.ts
-├── biome.json (不用)         # 用 ESLint + Prettier 取代
-├── .eslintrc.cjs
+├── eslint.config.js
 ├── .prettierrc.json
 ├── lefthook.yml
 ├── .nvmrc
-└── index.html
+├── index.html
+└── .github/workflows/        # ci.yml（CI gate）+ deploy.yml（Pages）
 ```
 
 ### 🚨 架構鐵則（違反 = 拒絕該 PR）
@@ -97,7 +105,7 @@ knight-strike/
 **理由**：engine 必須能在 Node headless 跑（`pnpm playtest`、vitest 整合測試、CI balance run）。一旦 engine 沾到 Pixi 或 DOM，headless 測試就死。
 
 **強制機制**：
-- ESLint rule `no-restricted-imports` 設定 engine 目錄禁止以上 import patterns（見 `.eslintrc.cjs`）。
+- ESLint rule `no-restricted-imports` 設定 engine 目錄禁止以上 import patterns（見 `eslint.config.js`）。
 - PR review 時用 `rg "from ['\"](pixi|gsap)" src/engine/` 必須無命中。
 
 ## 4. Coding Conventions
@@ -132,7 +140,7 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
   ```ts
   export function step(state: GameState): GameState { ... }
-  export function dispatch(state: GameState, cmd: DispatchCommand): GameState { ... }
+  export function produce(state: GameState): GameState { ... }
   export function deriveTier(count: number): Tier { ... }
   ```
 
@@ -141,9 +149,10 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
   ```ts
   type Province = {
     readonly id: TileId;
-    readonly owner: FactionId;
-    readonly count: number;
     readonly isCastle: boolean;
+    readonly castleOwner: FactionId | null;
+    readonly occupants: readonly Occupant[];
+    readonly lastClaimedFaction: FactionId | null;
   };
   ```
 
@@ -162,7 +171,7 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 | 對象             | 規則                | 範例                                   |
 | ---------------- | ------------------- | -------------------------------------- |
-| function / var   | camelCase           | `deriveTier`、`computeLoss`            |
+| function / var   | camelCase           | `deriveTier`、`stageDamage`            |
 | type / interface | PascalCase          | `GameState`、`MarchingStack`           |
 | **真**常數       | UPPER_SNAKE         | `TICK_INTERVAL_MS = 2000`              |
 | 變數值常數       | camelCase           | `defaultBoardSize = 11`                |
@@ -179,7 +188,7 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 - **預設不寫註解**。命名清楚的程式碼自說明。
 - **只寫 why**（為何這樣設計、隱含限制、踩過的雷）；**不寫 what**（程式碼自己會說）。
-- 不寫「`// TODO: 之後加 X 功能`」這類腐爛註解。要做的事開 issue 或寫進 PRD §8。
+- 不寫「`// TODO: 之後加 X 功能`」這類腐爛註解。要做的事開 issue 或寫進 PRD §9。
 - 不寫「`// 本函數由 Claude 生成`」「`// 修 issue #42`」這類 metadata — PR description / git log 才是它們的家。
 
 ## 5. 測試規範
@@ -199,20 +208,22 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 ### 5.2 AC 對應
 
-下列 AC **必須**各對應至少一個 vitest case，`it()` 描述以 `[AC-XX]` 開頭：
+PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 
-| AC     | 對應模組          | 範例                                                          |
-| ------ | ----------------- | ------------------------------------------------------------- |
-| AC-04  | upgrade           | `it("[AC-04] count=5 → KNIGHT, 15 → QUEEN, 30 → KING", ...)` |
-| AC-05  | upgrade           | `it("[AC-05] count drops below threshold → tier downgrades")` |
-| AC-08  | combat            | `it("[AC-08] 10 Soldier vs 5 Knight: loss=4 vs 1, tier→Soldier")` |
-| AC-15  | ai (integration)  | `it("[AC-15] each AI captures ≥1 adjacent tile within 30 ticks")` |
-| AC-17  | movement          | `it("[AC-17] enemy marching head-on uses §3.6 formula")`       |
-| AC-18  | movement          | `it("[AC-18] path cut: marching halts adjacent, fights next tick")` |
-| AC-19  | combat (stalemate) | `it("[AC-19] 3v3 stalemate drains from tick 5")`              |
-| AC-20  | movement          | `it("[AC-20] same-faction merge: shorter remaining path wins")` |
-| AC-21  | movement          | `it("[AC-21] enemy head-on non-terminus: survivor continues")` |
-| AC-22  | ai                | `it("[AC-22] same seed → deterministic; different seed → diverges")` |
+- **每條 engine AC** → 對應模組至少一個 `it("[AC-XX] …")` vitest case（與模組同目錄）。
+- **UI AC** → §8 工作流的 manual smoke 驗。
+- 不在此重列各 AC 內容，避免與 PRD 漂移。
+
+模組 → AC 對照（AC 內容查 PRD §8）：
+
+- `production`（PRD §4.3）→ AC-03
+- `upgrade`（§4.4）→ AC-04
+- `movement`（§4.5）→ AC-05 / 07 / 08 / 09 / 14 / 15
+- `combat`（§4.6）→ AC-10 / 11 / 12 / 13
+- `terrain`（§4.7）→ AC-16 / 17
+- `ai`（§5）→ AC-18 / 19 / 20 / 21
+- `victory`（§7）→ AC-22
+- render / input / ui → AC-01 / 02 / 06 / 23 / 24
 
 ### 5.3 整合測試
 
@@ -245,7 +256,7 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 | `pnpm format`                       | Prettier write；commit 前手動跑或 lefthook 代勞                    |
 | `pnpm typecheck`                    | `tsc --noEmit`；milestone 完成前必跑                                |
 
-**milestone 完成的判定 = `pnpm test:run` + `pnpm typecheck` + `pnpm playtest src/scenarios/default.json --runs 10` 三條全綠**。
+**milestone 完成的判定 = `pnpm typecheck` + `pnpm lint` + `pnpm test:run` + `pnpm playtest src/scenarios/default.json --runs 10` 全綠（與 `.github/workflows/ci.yml` CI gate 一致）**。
 
 ## 7. Git 規範
 
@@ -253,18 +264,16 @@ Vite 端 `vite.config.ts` 與 vitest 端 `vitest.config.ts` 都要設一致的 `
 
 格式：`feature/<milestone>-<short-desc>`
 
-Milestone 列表（與 PRD §9 分層對齊）：
+Milestone 列表（與 [`MILESTONES.md`](docs/MILESTONES.md) 對齊）：
 
-| Milestone           | 範圍                                                       |
-| ------------------- | ---------------------------------------------------------- |
-| `M1-engine-core`    | engine 全層（state / tick / combat / upgrade / movement / production / victory / ai）+ 單元測試 |
-| `M2-pixi-render`    | Pixi app + board + units 渲染；移除 Three.js 相依          |
-| `M3-input-dispatch` | pointer / keyboard / dispatch 手勢                         |
-| `M4-ai`             | AI 整合進 engine（含 RNG shuffle）+ AC-15 / AC-22          |
-| `M5-ui-endscreen`   | HUD / faction panel / tile info / end screen               |
-| `M6-headless-playtest` | playtest CLI + scenario JSON loader + balance script    |
+| Milestone              | 範圍                                                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `M1-engine-core`       | engine 全層（types / state / tick / upgrade / production / combat / movement / terrain / victory / ai）+ 單元測試 |
+| `M2-render-ui`         | render + input + ui（board / units / marching、pointer / keyboard / camera / dispatch、HUD / panels / end screen） |
+| `M3-headless-playtest` | playtest CLI + scenario loader + 整合測試                                                                        |
+| `M4-build-deploy`      | sprite 資產 + `pnpm build` + GitHub Pages（CI gate）                                                             |
 
-範例 branch：`feature/M1-engine-core-combat-formula`、`feature/M3-input-dispatch-drag-gesture`。
+範例 branch：`feature/M1-engine-core-combat-formula`、`feature/M2-render-ui-dispatch-gesture`。
 
 ### 7.2 Commit Message
 
@@ -288,18 +297,19 @@ Milestone 列表（與 PRD §9 分層對齊）：
 ### 7.3 PR
 
 - **一個 milestone 一個 PR**（不准在 `M1` 的 PR 裡偷塞 `M2` 的東西）。
+- **合併 PR 一律用 squash merge**（`gh pr merge --squash`）：一個 PR 收斂成 `main` 上的單一 commit，保持線性歷史。不要用 merge commit 或 rebase merge。
 - PR description 必含：
   1. **對應 milestone**（M1 / M2 / ...）
   2. **覆蓋的 AC 編號列表**（例：`AC-04, AC-05, AC-08, AC-19, AC-20, AC-21`）
   3. **Manual 驗證步驟**（步驟條列，含預期結果；§5.4 提到的 render/UI 測試也寫這裡）
-  4. **已知遺留**（PRD §8 future scope 中本 PR 沒做的）
+  4. **已知遺留**（PRD §9 future scope 中本 PR 沒做的）
 
 ## 8. 開發工作流（給未來的 Claude Code session 看）
 
 ### 8.1 動工前
 
 1. **讀 `docs/PRD.md` 對應章節**。本文件不重述規格，只列規範。
-2. 確認當前 branch 是 `feature/M<N>-...`。若在 `master` 直接動 = 退回切 branch。
+2. 確認當前 branch 是 `feature/M<N>-...`。若在 `main` 直接動 = 退回切 branch。
 3. `pnpm install` + `pnpm test` 跑起來確認基準綠。
 
 ### 8.2 改 Engine 層 = TDD
@@ -326,35 +336,12 @@ Milestone 列表（與 PRD §9 分層對齊）：
 
 PRD 沒寫的設計決策（命名、檔案切分粒度、特定 edge case 行為）**不要自己編**。用 `AskUserQuestion` 問清楚，問完寫入 PRD 或本文件對應段落。
 
-## 9. 已知技術債 / 注意事項
+## 9. 注意事項（環境 / 流程須知）
 
-### 9.1 既有 scaffolding 將被重寫
+> 重製主體已完成、無遺留技術債；以下純為環境與流程須知。被取代的舊設計（scaffolding、Three.js、舊戰鬥 / AI 模型）見 git log 與 PRD changelog 指向的 `archive/*` 標籤。
 
-下列既有檔案會在 M1 / M2 完整重寫，但**型別概念保留**（`Faction` / `FactionId` / `Province` 等遷入 `src/engine/types.ts`）：
-
-```
-src/main.ts
-src/game/state.ts, faction.ts, province.ts
-src/map/index.ts, block.ts
-src/unit/index.ts, knight.ts
-src/manager/scene.ts, unit.ts, input.ts, asset.ts
-src/event/*.ts
-src/namedMap/first.ts
-```
-
-不要花時間「修」這些檔案 — 直接照新結構（§3）重寫。
-
-### 9.2 Three.js 移除時機
-
-- **Three.js 與 `@types/three` 在 M2 早期移除**（隨 Pixi.js 接管渲染層）。
-- 移除前不要動既有 Three.js 相關 import — 留到一次性清掉，避免 cherry-pick 衝突。
-- 移除步驟：(a) 確認 `src/render/**` 完整接手；(b) 刪 `src/manager/*.ts`；(c) `pnpm remove three @types/three`；(d) 一次 commit。
-
-### 9.3 Node 18 → 22 遷移
-
-- 開發機目前可能跑 Node 18（PRD 撰寫時環境為 v18.20.8）。
-- M1 開工前必須切到 Node 22（`nvm use` 會讀 `.nvmrc`）。
-- Vite 8 在 Node 18 直接會 fail，沒救濟空間。
+- **Node 版本**：`.nvmrc` / `engines.node` 鎖 Node 22；`pnpm build`（Vite 8）在 Node 18 會 fail。`typecheck` / `test` / `lint` 在 Node 18 仍可跑，但發布前務必 `nvm use` 切 22。
+- **CI gate**：`.github/workflows/ci.yml` 在 PR 跑 typecheck / lint / test / build；`deploy.yml`（GitHub Pages）依賴 CI 通過後才推。
 
 ## 10. Skills 與工具
 
