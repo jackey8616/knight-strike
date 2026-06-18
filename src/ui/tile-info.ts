@@ -4,8 +4,7 @@ import { installResponsiveStyles } from "./responsive";
 
 const ROOT_STYLE = [
   "position: fixed",
-  // Top-centre (swapped with the HUD pace controls); clear of the top-right
-  // map-size panel.
+  // Top-centre (swapped with the HUD pace controls).
   "top: 8px",
   "left: 50%",
   "transform: translateX(-50%)",

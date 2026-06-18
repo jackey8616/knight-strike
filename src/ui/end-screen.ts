@@ -12,6 +12,13 @@ export type EndScreen = {
   destroy(): void;
 };
 
+export type EndScreenActions = {
+  // Replay with the same map size + difficulty (PRD §6.2.2).
+  readonly onRestart: () => void;
+  // Return to the Start Menu to re-pick size + difficulty (PRD §6.2.2).
+  readonly onMainMenu: () => void;
+};
+
 const OVERLAY_STYLE = [
   "position: fixed",
   "inset: 0",
@@ -42,9 +49,22 @@ const BTN_STYLE = [
   "font-size: 16px",
 ].join(";");
 
+const BTN_SECONDARY_STYLE = [
+  "padding: 8px 24px",
+  "background: #222",
+  "color: #ddd",
+  "border: 1px solid #555",
+  "border-radius: 6px",
+  "cursor: pointer",
+  "font: inherit",
+  "font-size: 16px",
+].join(";");
+
+const BTN_ROW_STYLE = "display: flex; gap: 12px; flex-wrap: wrap;";
+
 export function createEndScreen(
   parent: HTMLElement,
-  onRestart: () => void,
+  actions: EndScreenActions,
 ): EndScreen {
   installResponsiveStyles();
   const root = document.createElement("div");
@@ -58,12 +78,24 @@ export function createEndScreen(
   stats.style.cssText = STATS_STYLE;
   root.appendChild(stats);
 
-  const button = document.createElement("button");
-  button.type = "button";
-  button.style.cssText = BTN_STYLE;
-  button.textContent = "Restart";
-  button.addEventListener("click", () => onRestart());
-  root.appendChild(button);
+  const buttonRow = document.createElement("div");
+  buttonRow.style.cssText = BTN_ROW_STYLE;
+
+  const restartButton = document.createElement("button");
+  restartButton.type = "button";
+  restartButton.style.cssText = BTN_STYLE;
+  restartButton.textContent = "Restart";
+  restartButton.addEventListener("click", () => actions.onRestart());
+  buttonRow.appendChild(restartButton);
+
+  const menuButton = document.createElement("button");
+  menuButton.type = "button";
+  menuButton.style.cssText = BTN_SECONDARY_STYLE;
+  menuButton.textContent = "Main Menu";
+  menuButton.addEventListener("click", () => actions.onMainMenu());
+  buttonRow.appendChild(menuButton);
+
+  root.appendChild(buttonRow);
 
   parent.appendChild(root);
 

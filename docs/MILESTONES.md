@@ -59,10 +59,10 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 | ---- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | 渲染 | `render/app` `board` `units` `marching` `combat` `paths` `sprites`        | iso 投影（64×32 菱形）、地形 prism、山堆疊方塊 + 遮擋淡化、tier sprite、行軍插值、GSAP bump / tint、拖曳虛線                                | AC-01      |
 | 輸入 | `input/pointer` `keyboard` `camera` `dispatch`                            | click vs drag（>5px）、左右鍵分流、按壓 auto-pause、wheel + 觸控 pinch / pan、鍵盤（Space / 1–4 / R / Esc / WASD）、拖曳派遣手勢 + 比例滑桿 | AC-06 / 24 |
-| UI   | `ui/hud` `faction-panel` `tile-info` `end-screen` `map-size` `responsive` | tick bar + 速度、勢力統計、hover 格資訊、勝負畫面、棋盤尺寸選單（11 / 15 / 19 / 27）、自適應佈局                                            | AC-02 / 23 |
-| 入口 | `main.ts`                                                                 | 建 engine + renderer、wire UI、tick loop、auto-pause、cancel 接線（點行軍 sprite 取消，AC-15 UI 端）                                        | AC-15      |
+| UI   | `ui/hud` `faction-panel` `tile-info` `end-screen` `start-menu` `responsive` | tick bar + 速度、勢力統計、hover 格資訊、勝負畫面（Restart + Main Menu）、開場 Start Menu（玩法說明 + AI 難度 + 棋盤尺寸）、自適應佈局        | AC-02 / 23 / 25 / 26 |
+| 入口 | `main.ts`                                                                 | 建 engine + renderer、wire UI、tick loop、auto-pause、cancel 接線（點行軍 sprite 取消，AC-15 UI 端）、Start Menu → 開局 → End Screen 導航     | AC-15 / 25 / 26 |
 
-> 預設可玩場景由 `scenarios/sized.ts` `makeScenario` 程序產生（19×19、玩家 Tokugawa = idle、其餘三家 = **normal** 規則 AI），故開局即有 AI 對手。
+> 預設可玩場景由 `scenarios/sized.ts` `makeScenario(size, difficulty)` 程序產生（玩家 Tokugawa = idle、其餘三家 = 玩家於 Start Menu 選定的難度，預設 19×19 / **normal**），故開局即有 AI 對手。棋盤尺寸與 AI 難度由 `ui/start-menu` 選定（取代舊版頂部右側 in-game Map Size 切換器）。
 
 **退出條件**：
 
@@ -135,3 +135,5 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 | AC-22 | 敗北處置（NEUTRAL 化 + 清 stack / order）   |    ✅     |       |             |
 | AC-23 | 勝利 / 敗北畫面                             |           |  ✅   |             |
 | AC-24 | 暫停 / 按壓 auto-pause                      |           |  ✅   |             |
+| AC-25 | Start Menu（玩法 + AI 難度 + 棋盤尺寸）     |           |  ✅   |             |
+| AC-26 | End Screen 導航（Restart / Main Menu）      |           |  ✅   |             |
