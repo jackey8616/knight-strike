@@ -336,11 +336,13 @@ function drawMountainPeak(
     g.fill({ color: ownerColor, alpha: 0.3 });
   }
 
+  // Issue #7: outline only the upper silhouette ridges (left rim → apex → right
+  // rim), not the base rim. The base line ran across the mountain where the peak
+  // meets the cube tower, making taller peaks look like a block with a separate
+  // pyramid stacked on top; dropping it lets the peak flow into the tower.
   g.moveTo(wx, wy);
   g.lineTo(ax, ay);
   g.lineTo(ex, ey);
-  g.lineTo(sx, sy);
-  g.closePath();
   g.stroke({ color: TILE_OUTLINE_COLOR, width: 1, alpha: 1 });
   g.moveTo(ax, ay);
   g.lineTo(sx, sy);
