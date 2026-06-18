@@ -9,6 +9,9 @@ Node 22 built-ins (`WebSocket` + `fetch`).
 Mirrors PR #21's manual verification, end to end:
 
 1. Start Menu renders (title + Move/Attack demo box + buttons).
+1b. **Mobile guard** (issue #26): under an emulated phone viewport +
+   `prefers-reduced-motion: reduce` (iOS Low Power Mode / Android battery
+   saver), the menu demo must still animate — not freeze on `animation: none`.
 2. Pick difficulty + map size → **Start** builds a game with **no page reload**.
 3. Ticks advance at max speed.
 4. Game plays to a natural end → **End screen**.

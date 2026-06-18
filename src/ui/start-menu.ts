@@ -151,7 +151,14 @@ const DIFFICULTY_LABELS: Readonly<Record<Difficulty, string>> = {
 // the dashed path and garrisons the far tile. "Attack": it advances onto the
 // adjacent tile and lunges twice at the enemy-held tile, which flashes on each
 // hit (cross-edge combat). Both fade out before snapping back so the reset is
-// never seen, and both honour prefers-reduced-motion.
+// never seen.
+//
+// Under prefers-reduced-motion the units don't slide: each cross-fades out at
+// its source tile and fades back in at the destination (opacity only — no large
+// translational motion that could trigger vestibular discomfort), so the demo
+// still conveys the gesture. This matters on mobile, where iOS Low Power Mode
+// and Android battery saver both report prefers-reduced-motion: reduce; the old
+// `animation: none` fallback left a frozen knight that read as broken.
 const DEMO_PLAYER: FactionId = "TOKUGAWA";
 const DEMO_ENEMY: FactionId = "TAKEDA";
 
@@ -243,11 +250,52 @@ const DEMO_CSS = `
   41%     { transform: scale(1.5);  opacity: 0; }
   100%    { transform: scale(1.5);  opacity: 0; }
 }
+/* Reduced-motion variants: teleport via opacity instead of sliding. The
+   transform jump always happens while opacity is 0, so no motion is ever seen —
+   only a cross-fade between the source and destination tiles. */
+@keyframes ks-demo-move-rm {
+  0%   { transform: translate(0, 0);                       opacity: 0; }
+  8%   { transform: translate(0, 0);                       opacity: 1; }
+  42%  { transform: translate(0, 0);                       opacity: 1; }
+  48%  { transform: translate(0, 0);                       opacity: 0; }
+  49%  { transform: translate(${MOVE_DX}px, ${MOVE_DY}px); opacity: 0; }
+  55%  { transform: translate(${MOVE_DX}px, ${MOVE_DY}px); opacity: 1; }
+  90%  { transform: translate(${MOVE_DX}px, ${MOVE_DY}px); opacity: 1; }
+  96%  { transform: translate(${MOVE_DX}px, ${MOVE_DY}px); opacity: 0; }
+  97%  { transform: translate(0, 0);                       opacity: 0; }
+  100% { transform: translate(0, 0);                       opacity: 0; }
+}
+@keyframes ks-demo-atk-rm {
+  0%   { transform: translate(0, 0);                     opacity: 0; }
+  8%   { transform: translate(0, 0);                     opacity: 1; }
+  38%  { transform: translate(0, 0);                     opacity: 1; }
+  44%  { transform: translate(0, 0);                     opacity: 0; }
+  45%  { transform: translate(${ADJ_DX}px, ${ADJ_DY}px); opacity: 0; }
+  51%  { transform: translate(${ADJ_DX}px, ${ADJ_DY}px); opacity: 1; }
+  90%  { transform: translate(${ADJ_DX}px, ${ADJ_DY}px); opacity: 1; }
+  96%  { transform: translate(${ADJ_DX}px, ${ADJ_DY}px); opacity: 0; }
+  97%  { transform: translate(0, 0);                     opacity: 0; }
+  100% { transform: translate(0, 0);                     opacity: 0; }
+}
+@keyframes ks-demo-enemy-rm {
+  0%, 52% { filter: none; }
+  58%     { filter: brightness(2.4); }
+  64%     { filter: none; }
+  70%     { filter: brightness(2.4); }
+  76%     { filter: none; }
+  100%    { filter: none; }
+}
+@keyframes ks-demo-tap-rm {
+  0%, 6% { opacity: 0; }
+  10%    { opacity: 0.85; }
+  30%    { opacity: 0; }
+  100%   { opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .ks-demo-unit-move { animation: none; transform: translate(${MOVE_DX}px, ${MOVE_DY}px); }
-  .ks-demo-unit-atk  { animation: none; transform: translate(${ADJ_DX}px, ${ADJ_DY}px); }
-  .ks-demo-enemy     { animation: none; }
-  .ks-demo-tap       { animation: none; }
+  .ks-demo-unit-move { animation: ks-demo-move-rm 3.4s ease-in-out infinite; }
+  .ks-demo-unit-atk  { animation: ks-demo-atk-rm 3.4s ease-in-out infinite; }
+  .ks-demo-enemy     { animation: ks-demo-enemy-rm 3.4s ease-in-out infinite; }
+  .ks-demo-tap       { animation: ks-demo-tap-rm 3.4s ease-out infinite; }
 }
 `;
 
