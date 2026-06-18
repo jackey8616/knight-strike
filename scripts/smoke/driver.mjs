@@ -9,6 +9,11 @@
 // ticks advance → play to natural end → Restart rebuilds + plays to end again →
 // Main Menu → start a different board. The Restart/Main-Menu legs exercise the
 // main.ts teardown/rebuild that PR #21 refactored.
+//
+// A mobile guard (issue #26) sits between menu-render and Start: it emulates a
+// phone viewport + prefers-reduced-motion: reduce (what iOS Low Power Mode /
+// Android battery saver report) and asserts the "how to move" demo still
+// animates instead of falling back to a frozen `animation: none`.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -170,6 +175,37 @@ function fail(message) {
   log("STEP1 menu:", JSON.stringify(menu));
   if (!menu.title || !menu.demoBox) fail("menu missing title or demo box");
   await shot("01-menu");
+
+  // STEP 1b — mobile guard (issue #26). On a phone in Low Power Mode / battery
+  // saver the browser reports prefers-reduced-motion: reduce; the menu's "how to
+  // move" demo must still animate (it used to fall back to `animation: none`,
+  // freezing the unit on its destination tile). Emulate a phone viewport +
+  // reduced-motion, assert every demo element's keyframes are live, then restore
+  // desktop emulation for the remaining flow.
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 3,
+    mobile: true,
+  });
+  await send("Emulation.setEmulatedMedia", {
+    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+  });
+  await sleep(200);
+  const demo = await evaluate(
+    `(()=>{const g=s=>{const el=document.querySelector(s);if(!el)return null;const c=getComputedStyle(el);return{name:c.animationName,dur:c.animationDuration};};return{move:g('.ks-demo-unit-move'),atk:g('.ks-demo-unit-atk'),enemy:g('.ks-demo-enemy'),tap:g('.ks-demo-tap')};})()`,
+  );
+  log("STEP1b mobile reduced-motion demo:", JSON.stringify(demo));
+  for (const [el, v] of Object.entries(demo)) {
+    if (!v) fail(`demo element .${el} missing on mobile menu`);
+    if (v.name === "none" || v.dur === "0s")
+      fail(
+        `demo .${el} frozen under reduced-motion (name=${v.name}, dur=${v.dur}) — issue #26 regression`,
+      );
+  }
+  await shot("01b-mobile-menu");
+  await send("Emulation.clearDeviceMetricsOverride");
+  await send("Emulation.setEmulatedMedia", { features: [] });
 
   // STEP 2 — pick difficulty + size, Start with no reload.
   if (!(await clickByText(".ks-menu button", DIFFICULTY)))
