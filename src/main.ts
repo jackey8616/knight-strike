@@ -63,6 +63,9 @@ async function bootstrap(): Promise<void> {
   // Currently hovered tile (issue #6): renderAll() re-reads it each tick so the
   // tile-info panel tracks live count changes, not just the value at hover time.
   let hoverId: TileId | null = null;
+  // Clicked/tapped tile (issue #10): any tile is selectable to inspect it in the
+  // tile-info box; the panel falls back to this when not hovering (e.g. touch).
+  let selectedTileId: TileId | null = null;
 
   function isRunning(): boolean {
     return !ended && !manualPaused && !pressFreeze && !selectionFreeze;
@@ -137,8 +140,15 @@ async function bootstrap(): Promise<void> {
     units.update(state);
     marching.update(state, intervalForSpeed(speed));
     factionPanel.update(state);
-    tileInfo.setHover(state, hoverId);
+    refreshTileInfo();
     pushHudStatus();
+  }
+
+  // Tile-info follows the hovered tile, falling back to the clicked/selected
+  // tile — so tapping any unit (issue #10) pins its details even on touch, where
+  // there is no hover.
+  function refreshTileInfo(): void {
+    tileInfo.setHover(state, hoverId ?? selectedTileId);
   }
 
   const dispatchCtrl = createDispatchController({
@@ -163,7 +173,7 @@ async function bootstrap(): Promise<void> {
     onTileHover: (id) => {
       hoverId = id;
       board.setHover(id);
-      tileInfo.setHover(state, id);
+      refreshTileInfo();
     },
     onTileClick: (id, button) => {
       if (button !== "left") return;
@@ -206,6 +216,8 @@ async function bootstrap(): Promise<void> {
 
   function selectTile(id: TileId): void {
     board.setSelection(id);
+    selectedTileId = id;
+    refreshTileInfo();
     const max = unitMaxSend(id);
     if (max >= 1) {
       const value = Math.max(1, Math.min(max, Math.floor(max * dispatchCtrl.getRatio())));
@@ -224,10 +236,12 @@ async function bootstrap(): Promise<void> {
 
   function deselect(): void {
     board.setSelection(null);
+    selectedTileId = null;
     selectedUnit = null;
     manualCount = null;
     ratioPanel.hideCount();
     selectionFreeze = false;
+    refreshTileInfo();
     syncRun();
   }
 
