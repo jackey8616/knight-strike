@@ -2,6 +2,7 @@ import { dayOf } from "./clock";
 import { resolveCombat } from "./combat";
 import { recomputeElite } from "./combat-tier";
 import { computeConnectivity } from "./connectivity";
+import { advanceConstruction, advanceDestruction } from "./construction";
 import { ev, type GameEvent, type StepResult } from "./events";
 import { expandFields, spawnFromHouses } from "./house";
 import { applyMaintenance } from "./maintenance";
@@ -26,7 +27,9 @@ export function step(state: GameState): StepResult {
 
   s = absorb(events, advanceMarch(s));
   s = absorb(events, resolveCombat(s));
-  // M8/M9: advanceConstruction → advanceDestruction → accumulateNests slot here.
+  s = absorb(events, advanceConstruction(s));
+  s = absorb(events, advanceDestruction(s));
+  // M9: accumulateNests slots here.
 
   const nextTick = s.tick + 1;
   const nextDay = dayOf(nextTick);
