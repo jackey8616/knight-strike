@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:pages": "VITE_BASE_PATH=/knight-strike/ vite build",
+    "build:pages": "vite build",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run --passWithNoTests",
