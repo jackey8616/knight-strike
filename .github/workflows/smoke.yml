@@ -41,4 +41,9 @@ jobs:
         with:
           name: smoke-screenshots
           path: scripts/smoke/.shots
-          if-no-files-found: ignore
+          # .shots is a dotfile dir; upload-artifact@v4 skips hidden paths by
+          # default, which silently dropped every screenshot. Opt them back in.
+          include-hidden-files: true
+          # warn (not ignore) so a future drop in screenshots is visible in the
+          # log instead of silently passing, as it did before this fix.
+          if-no-files-found: warn
