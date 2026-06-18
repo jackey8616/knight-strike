@@ -57,12 +57,12 @@ pnpm playtest src/scenarios/default.json --runs 10 --max-ticks 500
 
 | 層   | 模組                                                                      | 職責                                                                                                                                        | 涵蓋 AC    |
 | ---- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 渲染 | `render/app` `board` `terrain-theme` `terrain-texture` `units` `marching` `combat` `paths` `sprites` | iso 投影（64×32 菱形）、地形像素紋理頂面 + 抬升邊緣 + 岸線（PRD §6.1）、山堆疊方塊 + 遮擋淡化、領地罩染、tier sprite、行軍插值、GSAP bump / tint、拖曳虛線 | AC-01      |
+| 渲染 | `render/app` `board` `terrain-theme` `terrain-texture` `terrain-height` `units` `marching` `combat` `paths` `sprites` | iso 投影（64×32 菱形）、**滾動高度場起伏地表**、地形像素紋理頂面 + 岸線、**地圖外形懸崖 / 基座 / 海環**（PRD §6.1）、山堆疊方塊 + 遮擋淡化、領地罩染、tier sprite、行軍插值、GSAP bump / tint、拖曳虛線 | AC-01      |
 | 輸入 | `input/pointer` `keyboard` `camera` `dispatch`                            | click vs drag（>5px）、左右鍵分流、按壓 auto-pause、wheel + 觸控 pinch / pan、鍵盤（Space / 1–4 / R / Esc / WASD）、拖曳派遣手勢 + 比例滑桿 | AC-06 / 24 |
-| UI   | `ui/hud` `faction-panel` `tile-info` `end-screen` `start-menu` `responsive` | tick bar + 速度、勢力統計、hover 格資訊、勝負畫面（Restart + Main Menu）、開場 Start Menu（玩法說明 + AI 難度 + 棋盤尺寸）、自適應佈局        | AC-02 / 23 / 25 / 26 |
+| UI   | `ui/hud` `faction-panel` `tile-info` `end-screen` `start-menu` `responsive` | tick bar + 速度、勢力統計、hover 格資訊、勝負畫面（Restart + Main Menu）、開場 Start Menu（玩法說明 + AI 難度 + 棋盤尺寸 + 地圖外形）、自適應佈局 | AC-02 / 23 / 25 / 26 |
 | 入口 | `main.ts`                                                                 | 建 engine + renderer、wire UI、tick loop、auto-pause、cancel 接線（點行軍 sprite 取消，AC-15 UI 端）、Start Menu → 開局 → End Screen 導航     | AC-15 / 25 / 26 |
 
-> 預設可玩場景由 `scenarios/sized.ts` `makeScenario(size, difficulty)` 程序產生（玩家 Tokugawa = idle、其餘三家 = 玩家於 Start Menu 選定的難度，預設 19×19 / **normal**），故開局即有 AI 對手。棋盤尺寸與 AI 難度由 `ui/start-menu` 選定（取代舊版頂部右側 in-game Map Size 切換器）。
+> 預設可玩場景由 `scenarios/sized.ts` `makeScenario(size, difficulty, shape, seed)` 程序產生（玩家 Tokugawa = idle、其餘三家 = 玩家於 Start Menu 選定的難度，預設 19×19 / **normal** / Plateau；每次 Start 取隨機 seed，`?seed=N` 可重現），故開局即有 AI 對手。棋盤尺寸 / AI 難度 / 地圖外形由 `ui/start-menu` 選定（取代舊版頂部右側 in-game 切換器）。
 
 **退出條件**：
 

@@ -12,6 +12,7 @@ import { deriveTier } from "@/engine/upgrade";
 
 import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
 import { playCombatBump } from "./combat";
+import { groundLiftPx } from "./terrain-height";
 import type { TierTextures } from "./sprites";
 
 const TIER_RANK: Readonly<Record<Tier, number>> = {
@@ -81,7 +82,8 @@ function createUnitGfx(
   const tier = deriveTier(count);
   const texture = textures[tier];
   const node = new Container();
-  node.position.set(isoX(x, y), isoY(x, y));
+  // Sit on the rolling ground surface (PRD §6.1) so units ride the hills.
+  node.position.set(isoX(x, y), isoY(x, y) - groundLiftPx(x, y));
   // §3.1 iso back-to-front order: deeper rows (larger x+y) draw later. Adding
   // 0.5 keeps unit gfx above its tile base but below same-row neighbours.
   node.zIndex = x + y + 0.5;

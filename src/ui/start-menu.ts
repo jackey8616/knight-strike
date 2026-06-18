@@ -1,7 +1,9 @@
 import {
   AI_DIFFICULTIES,
+  MAP_SHAPES,
   MAP_SIZES,
   type Difficulty,
+  type MapShape,
   type MapSize,
 } from "@/scenarios/sized";
 import type { FactionId } from "@/engine/types";
@@ -13,6 +15,13 @@ import { installResponsiveStyles } from "./responsive";
 export type StartConfig = {
   readonly size: MapSize;
   readonly difficulty: Difficulty;
+  readonly shape: MapShape;
+};
+
+const SHAPE_LABELS: Readonly<Record<MapShape, string>> = {
+  plateau: "Plateau",
+  island: "Island",
+  coast: "Coast",
 };
 
 export type StartMenu = {
@@ -389,6 +398,7 @@ export function createStartMenu(
   opts: {
     readonly initialSize: MapSize;
     readonly initialDifficulty: Difficulty;
+    readonly initialShape: MapShape;
     readonly onStart: (config: StartConfig) => void;
   },
 ): StartMenu {
@@ -396,6 +406,7 @@ export function createStartMenu(
 
   let size: MapSize = opts.initialSize;
   let difficulty: Difficulty = opts.initialDifficulty;
+  let shape: MapShape = opts.initialShape;
 
   const root = document.createElement("div");
   root.style.cssText = OVERLAY_STYLE;
@@ -493,12 +504,24 @@ export function createStartMenu(
     ),
   );
 
+  root.appendChild(
+    segment<MapShape>(
+      "Map Shape",
+      MAP_SHAPES,
+      (s) => SHAPE_LABELS[s],
+      () => shape,
+      (s) => {
+        shape = s;
+      },
+    ),
+  );
+
   const start = document.createElement("button");
   start.type = "button";
   start.textContent = "Start";
   start.style.cssText = START_BTN_STYLE;
   start.addEventListener("click", () => {
-    opts.onStart({ size, difficulty });
+    opts.onStart({ size, difficulty, shape });
   });
   root.appendChild(start);
 

@@ -10,17 +10,27 @@ import {
 import { derivedOwner, tileId } from "@/engine/state";
 import type { FactionId, GameState, Terrain, TileId } from "@/engine/types";
 import {
+  BASE_COLOR,
+  CLIFF_PX,
+  CLIFF_SHADE_SE,
+  CLIFF_SHADE_SW,
+  CLIFF_STRATA,
+  CLIFF_TOP,
   DECOR,
-  EDGE_PX,
-  EDGE_SHADE_SE,
-  EDGE_SHADE_SW,
   GROUND,
+  SEA,
+  SEA_DEEP,
+  SEA_RIPPLE,
   shade,
   TERRAIN_TOP,
   TILE_OUTLINE_COLOR,
-  WATER_EDGE_PX,
 } from "@/render/terrain-theme";
 import { createTerrainTextures } from "@/render/terrain-texture";
+import { groundLiftPx, UNIT_PX } from "@/render/terrain-height";
+
+// The slab underside sits a cliff's depth below the lowest possible ground (one
+// unit below sea level), so every edge cliff and water skirt has a valid drop.
+const BASE_LIFT = -(UNIT_PX + CLIFF_PX);
 
 export const TILE_WIDTH = 64;
 export const TILE_HEIGHT = 32;
@@ -103,6 +113,56 @@ function computeMountainHeights(
     px.set(id, Math.min(u, MOUNTAIN_MAX_UNITS) * MOUNTAIN_UNIT_PX);
   }
   return px;
+}
+
+// PRD §6.1: flatten each connected WATER body (4-connected) to one surface that
+// never sits above the land around it — water can't perch on a plateau. The
+// level is the lowest rolling height among the body's tiles AND every land tile
+// it borders (the shore it would spill over). Computed once at load.
+function computeWaterLevels(
+  state: GameState,
+  boardSize: number,
+): Map<TileId, number> {
+  const isWater = (x: number, y: number): boolean =>
+    x >= 0 &&
+    x < boardSize &&
+    y >= 0 &&
+    y < boardSize &&
+    state.provinces.get(tileId(x, y))?.terrain === "WATER";
+  const inBoard = (x: number, y: number): boolean =>
+    x >= 0 && x < boardSize && y >= 0 && y < boardSize;
+
+  const level = new Map<TileId, number>();
+  const seen = new Set<TileId>();
+  for (let y = 0; y < boardSize; y++) {
+    for (let x = 0; x < boardSize; x++) {
+      if (!isWater(x, y) || seen.has(tileId(x, y))) continue;
+      const comp: TileId[] = [];
+      const queue: [number, number][] = [[x, y]];
+      seen.add(tileId(x, y));
+      let minH = groundLiftPx(x, y);
+      while (queue.length > 0) {
+        const [cx, cy] = queue.shift() as [number, number];
+        comp.push(tileId(cx, cy));
+        minH = Math.min(minH, groundLiftPx(cx, cy));
+        for (const [dx, dy] of NEIGHBOR4) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (isWater(nx, ny)) {
+            if (!seen.has(tileId(nx, ny))) {
+              seen.add(tileId(nx, ny));
+              queue.push([nx, ny]);
+            }
+          } else if (inBoard(nx, ny)) {
+            // Bordering land bounds the level — water spills down to it.
+            minH = Math.min(minH, groundLiftPx(nx, ny));
+          }
+        }
+      }
+      for (const id of comp) level.set(id, minH);
+    }
+  }
+  return level;
 }
 
 // Deterministic per-tile PRNG (LCG seeded by tile coords) — so decorations are
@@ -268,12 +328,13 @@ type TileGfx = {
   readonly hover: Graphics;
   readonly selection: Graphics;
   readonly terrain: Terrain;
+  // Mountain cube height (0 for flat tiles). Drives the occlusion fade and is
+  // added on top of `ground`; kept separate from the rolling ground so the
+  // gentle hills never trip the mountain-only fade.
   readonly elevation: number;
-  // Screen-space rise of the top face: mountain peak base, or the small cosmetic
-  // lip on flat tiles. Distinct from `elevation` (which is 0 for flat tiles and
-  // drives only the occlusion fade), so giving flat tiles a lip never makes them
-  // fade.
-  readonly lift: number;
+  // Rolling ground height (px) of the top face — the undulating surface every
+  // tile and everything on it sits at.
+  readonly ground: number;
   // Whether a textured top-face Sprite provides the fill (flat terrains); when
   // true drawTilePrism skips the flat colour fill. null for mountains.
   readonly hasTexture: boolean;
@@ -351,16 +412,18 @@ function drawMountainPeak(
   top: number,
   ownerColor: number | null,
   e: number,
+  base = 0,
 ): void {
   const hw = TILE_WIDTH / 2;
   const hh = TILE_HEIGHT / 2;
   const cap = MOUNTAIN_UNIT_PX * MOUNTAIN_MAX_UNITS;
   const peakH = TILE_HEIGHT * 0.7 + Math.min(e, cap) * 0.25;
+  const lift = e + base; // cube-tower top sits on the rolling ground
   const ax = 0;
-  const ay = -e - peakH;
-  const wx = -hw, wy = -e; // left rim corner
-  const ex = hw, ey = -e; // right rim corner
-  const sx = 0, sy = hh - e; // front rim corner
+  const ay = -lift - peakH;
+  const wx = -hw, wy = -lift; // left rim corner
+  const ex = hw, ey = -lift; // right rim corner
+  const sx = 0, sy = hh - lift; // front rim corner
 
   tri(g, wx, wy, ax, ay, sx, sy);
   g.fill({ color: shade(top, 0.62) });
@@ -412,42 +475,41 @@ function drawTilePrism(
   terrain: Terrain,
   ownerColor: number | null,
   e: number,
-  lift: number,
+  ground: number,
   hasTexture: boolean,
 ): void {
   g.clear();
   const top = TERRAIN_TOP[terrain];
   const hw = TILE_WIDTH / 2;
   const hh = TILE_HEIGHT / 2;
-  if (lift > 0) {
-    const swF = terrain === "MOUNTAIN" ? 0.55 : EDGE_SHADE_SW;
-    const seF = terrain === "MOUNTAIN" ? 0.72 : EDGE_SHADE_SE;
-    quad(g, -hw, -lift, 0, hh - lift, 0, hh, -hw, 0);
-    g.fill({ color: shade(top, swF), alpha: 1 });
-    quad(g, 0, hh - lift, hw, -lift, hw, 0, 0, hh);
-    g.fill({ color: shade(top, seF), alpha: 1 });
-    // Cube-layer seams across the front faces so the stack reads as units
-    // (mountains only — flat lips are too short for an interior seam).
-    for (let h = MOUNTAIN_UNIT_PX; h < e; h += MOUNTAIN_UNIT_PX) {
+  if (terrain === "MOUNTAIN" && e > 0) {
+    // Cube tower from the rolling ground (-ground) up to the tower top (-lift);
+    // the rolling earth sides below `ground` are drawn in the static side layer.
+    const lift = ground + e;
+    quad(g, -hw, -lift, 0, hh - lift, 0, hh - ground, -hw, -ground);
+    g.fill({ color: shade(top, 0.55), alpha: 1 });
+    quad(g, 0, hh - lift, hw, -lift, hw, -ground, 0, hh - ground);
+    g.fill({ color: shade(top, 0.72), alpha: 1 });
+    for (let h = ground + MOUNTAIN_UNIT_PX; h < lift; h += MOUNTAIN_UNIT_PX) {
       g.moveTo(-hw, -h);
       g.lineTo(0, hh - h);
       g.lineTo(hw, -h);
       g.stroke({ color: shade(top, 0.38), width: 1, alpha: 0.85 });
     }
-  }
-  if (terrain === "MOUNTAIN" && e > 0) {
-    drawMountainPeak(g, top, ownerColor, e);
+    drawMountainPeak(g, top, ownerColor, e, ground);
     return;
   }
+  // Flat top face at the rolling ground height; side walls are in the static
+  // layer. The textured Sprite provides the fill when present.
   if (!hasTexture) {
-    diamondPathAt(g, lift);
+    diamondPathAt(g, ground);
     g.fill({ color: top, alpha: 1 });
   }
   if (ownerColor !== null) {
-    diamondPathAt(g, lift);
+    diamondPathAt(g, ground);
     g.fill({ color: ownerColor, alpha: 0.3 });
   }
-  diamondPathAt(g, lift);
+  diamondPathAt(g, ground);
   g.stroke({
     color: ownerColor !== null ? shade(ownerColor, 0.7) : TILE_OUTLINE_COLOR,
     width: 1,
@@ -500,10 +562,137 @@ function hasUnit(state: GameState, x: number, y: number): boolean {
   return p !== undefined && p.occupants.some((o) => o.amount > 0);
 }
 
+// One earth side-face of a tile between its lifted edge (`topLift`) and a lower
+// level (`botLift`), on the SW or SE diamond edge, with rock strata when tall.
+function sideFace(
+  g: Graphics,
+  edge: "SW" | "SE",
+  topLift: number,
+  botLift: number,
+  shadeF: number,
+): void {
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  if (edge === "SW") {
+    quad(g, -hw, -topLift, 0, hh - topLift, 0, hh - botLift, -hw, -botLift);
+  } else {
+    quad(g, 0, hh - topLift, hw, -topLift, hw, -botLift, 0, hh - botLift);
+  }
+  g.fill({ color: shade(CLIFF_TOP, shadeF) });
+  for (let l = topLift - 8; l > botLift + 2; l -= 8) {
+    if (edge === "SW") {
+      g.moveTo(-hw, -l);
+      g.lineTo(0, hh - l);
+    } else {
+      g.moveTo(0, hh - l);
+      g.lineTo(hw, -l);
+    }
+    g.stroke({ color: shade(CLIFF_TOP, CLIFF_STRATA), width: 1, alpha: 0.6 });
+  }
+}
+
+// PRD §6.1: a land tile's two camera-facing earth side-faces, drawn as a full
+// PILLAR from the tile's ground down to the slab base. Front (nearer) tiles
+// paint over the lower part, so only the visible step between a tile and its
+// lower neighbour shows — and there are never back-face gaps at a down-step.
+// Static.
+function drawTileSides(g: Graphics, ground: number): void {
+  sideFace(g, "SW", ground, BASE_LIFT, CLIFF_SHADE_SW);
+  sideFace(g, "SE", ground, BASE_LIFT, CLIFF_SHADE_SE);
+}
+
+// A sea-coloured skirt under a WATER tile at the board edge, dropping from the
+// water surface to the slab base so the carved coast meets the sea ring instead
+// of showing the dark base through the gap.
+function drawWaterSkirt(
+  g: Graphics,
+  ground: number,
+  sw: boolean,
+  se: boolean,
+): void {
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  const bot = BASE_LIFT;
+  if (sw) {
+    quad(g, -hw, -ground, 0, hh - ground, 0, hh - bot, -hw, -bot);
+    g.fill({ color: SEA_DEEP });
+  }
+  if (se) {
+    quad(g, 0, hh - ground, hw, -ground, hw, -bot, 0, hh - bot);
+    g.fill({ color: SEA });
+  }
+}
+
+// The board's outer diamond corners in board-local coords (the union silhouette
+// of all tile diamonds), optionally inflated outward by (mx,my) px.
+function outerDiamond(
+  boardSize: number,
+  mx = 0,
+  my = 0,
+): readonly [number, number][] {
+  const max = boardSize - 1;
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  const cy = max * hh; // board-local centre y (centre x is 0)
+  const halfW = isoX(max, 0) + hw; // = (max)*hw + hw
+  const halfH = cy + hh;
+  return [
+    [0, cy - halfH - my], // top
+    [halfW + mx, cy], // right
+    [0, cy + halfH + my], // bottom
+    [-halfW - mx, cy], // left
+  ];
+}
+
+function polyPath(g: Graphics, pts: readonly [number, number][]): void {
+  const first = pts[0] ?? [0, 0];
+  g.moveTo(first[0], first[1]);
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i] as [number, number];
+    g.lineTo(p[0], p[1]);
+  }
+  g.closePath();
+}
+
+// Dark underside diamond the slab sits on — the board's outer diamond dropped by
+// the cliff height — so the landmass reads as solid, not floating in the void.
+function drawSlabBase(g: Graphics, boardSize: number): void {
+  const base = outerDiamond(boardSize, 4, 3).map(
+    ([x, y]) => [x, y - BASE_LIFT] as [number, number],
+  );
+  polyPath(g, base);
+  g.fill({ color: BASE_COLOR });
+}
+
+// Decorative ocean ring around the slab (Island / Coast): a sea diamond a few
+// tiles larger than the board, with concentric ripple rings. Static.
+function drawSeaRing(g: Graphics, boardSize: number): void {
+  const mx = TILE_WIDTH * 2.2;
+  const my = TILE_HEIGHT * 2.2;
+  polyPath(g, outerDiamond(boardSize, mx, my));
+  g.fill({ color: SEA });
+  for (let i = 1; i <= 3; i++) {
+    const t = i / 4;
+    polyPath(g, outerDiamond(boardSize, mx * (1 - t), my * (1 - t)));
+    g.stroke({
+      color: i % 2 === 0 ? SEA_DEEP : SEA_RIPPLE,
+      width: 1,
+      alpha: 0.5,
+    });
+  }
+}
+
+export type BoardOptions = {
+  // PRD §6.1: draw the decorative ocean ring around the slab (Island / Coast).
+  // Plateau leaves it off — the perimeter cliffs alone give the raised landmass.
+  readonly seaRing?: boolean;
+};
+
 export function createBoardRenderer(
   app: Application,
   initial: GameState,
   events: BoardEvents = {},
+  options: BoardOptions = {},
 ): BoardRenderer {
   const container = new Container();
   container.sortableChildren = true;
@@ -515,9 +704,20 @@ export function createBoardRenderer(
   const tiles = new Map<TileId, TileGfx>();
   const boardSize = initial.boardSize;
   const mountainPx = computeMountainHeights(initial, boardSize);
+  // PRD §6.1: each connected water body sits at one flat level (its lowest
+  // tile), so a lake / sea never perches above adjacent water as a raised block.
+  const waterLevels = computeWaterLevels(initial, boardSize);
   // PRD §6.1: shared textured top-face Sprites, one set built once and reused
   // across every tile of a terrain — off the per-tick redraw path.
   const terrainTextures = createTerrainTextures(app);
+
+  // PRD §6.1: whole-map silhouette — the slab base (and Island/Coast sea ring)
+  // behind every tile. Static: drawn once, never on the per-tick path.
+  const background = new Graphics();
+  background.zIndex = -10;
+  if (options.seaRing === true) drawSeaRing(background, boardSize);
+  drawSlabBase(background, boardSize);
+  container.addChild(background);
 
   for (let y = 0; y < boardSize; y++) {
     for (let x = 0; x < boardSize; x++) {
@@ -535,15 +735,33 @@ export function createBoardRenderer(
       const terrain = province?.terrain ?? "PLAINS";
       const elevation =
         terrain === "MOUNTAIN" ? (mountainPx.get(id) ?? MOUNTAIN_UNIT_PX) : 0;
-      // Screen-space lift of the top face. Mountains use their real elevation;
-      // flat tiles get a small cosmetic lip (water sits lower, so it reads as a
-      // basin below the surrounding land).
-      const lift =
-        terrain === "MOUNTAIN"
-          ? elevation
-          : terrain === "WATER"
-            ? WATER_EDGE_PX
-            : EDGE_PX;
+      // PRD §6.1: the unit-quantised rolling ground height of this tile's top
+      // face. Fixed tiles (castles / starting camp) are clamped to at least sea
+      // level so no faction starts in a basin; mountains add their cube elevation
+      // on top (in drawTilePrism). Everything on the tile — texture, decor,
+      // overlays, and the unit renderers — sits at this lift.
+      const isFixed =
+        province?.isCastle === true || (province?.occupants.length ?? 0) > 0;
+      let ground = isFixed
+        ? Math.max(0, groundLiftPx(x, y))
+        : groundLiftPx(x, y);
+      // Water sits at its connected body's flat level (its lowest tile).
+      if (terrain === "WATER") ground = waterLevels.get(id) ?? ground;
+
+      // PRD §6.1: earth side-faces as a pillar to the slab base (land), or a sea
+      // pillar (water). Drawn once behind the top face; front tiles paint over,
+      // leaving only the visible steps. Gap-free regardless of height jumps.
+      if (terrain !== "WATER") {
+        const sides = new Graphics();
+        drawTileSides(sides, ground);
+        node.addChild(sides);
+      } else {
+        // Water surface: a sea-coloured pillar down to the base so land banks
+        // and the board edge meet the sea instead of showing the dark base.
+        const skirt = new Graphics();
+        drawWaterSkirt(skirt, ground, true, true);
+        node.addChild(skirt);
+      }
 
       // Textured top-face Sprite for flat terrains, drawn BELOW `base` so the
       // walls/owner-wash/border painted into `base` composite over it. Static —
@@ -558,7 +776,7 @@ export function createBoardRenderer(
         if (tex !== undefined) {
           const sprite = new Sprite(tex);
           sprite.anchor.set(0.5, 0.5);
-          sprite.position.set(0, -lift);
+          sprite.position.set(0, -ground);
           node.addChild(sprite);
           hasTexture = true;
         }
@@ -574,20 +792,20 @@ export function createBoardRenderer(
       if (province?.isCastle !== true) {
         const decor = new Graphics();
         if (terrain === "WATER") {
-          drawWaterShoreline(decor, initial, x, y, lift);
+          drawWaterShoreline(decor, initial, x, y, ground);
         }
-        drawTerrainDecor(decor, terrain, lift, x, y);
+        drawTerrainDecor(decor, terrain, ground, x, y);
         base.addChild(decor);
       }
 
       const hover = new Graphics();
-      diamondPathAt(hover, lift);
+      diamondPathAt(hover, ground);
       hover.fill({ color: HOVER_COLOR, alpha: HOVER_ALPHA });
       hover.visible = false;
       node.addChild(hover);
 
       const selection = new Graphics();
-      diamondPathAt(selection, lift);
+      diamondPathAt(selection, ground);
       selection.stroke({
         color: SELECTION_COLOR,
         width: SELECTION_WIDTH,
@@ -628,7 +846,7 @@ export function createBoardRenderer(
         selection,
         terrain,
         elevation,
-        lift,
+        ground,
         hasTexture,
         painted: false,
         paintedColor: null,
@@ -663,7 +881,7 @@ export function createBoardRenderer(
           t.terrain,
           ownerColor,
           t.elevation,
-          t.lift,
+          t.ground,
           t.hasTexture,
         );
         if (province.isCastle) {

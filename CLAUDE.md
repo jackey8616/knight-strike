@@ -47,16 +47,17 @@ knight-strike/
 │   │   ├── production.ts     # produce()：self-replicate（PRD §4.3）
 │   │   ├── combat.ts         # resolveOrders()：cross-edge 戰鬥 + break→capture（PRD §4.6）
 │   │   ├── movement.ts       # findPath / dispatch / advanceMarching / cancelMarchingStack（PRD §4.5）
-│   │   ├── terrain.ts        # generateTerrain / 不可通行 / 減傷（PRD §4.7）
+│   │   ├── terrain.ts        # generateTerrain / coastOceanMask / 不可通行 / 減傷（PRD §4.7）
 │   │   ├── ai.ts             # stepAi()：規則狀態機（PRD §5）
 │   │   ├── ai-profile.ts     # RULE_PROFILES：難度旋鈕（PRD §5.3）
 │   │   ├── victory.ts        # applyDefeats / evaluateOutcome（PRD §7）
 │   │   └── util/             # rng (seedable)、helpers
 │   ├── render/               # 【Pixi 渲染層】
 │   │   ├── app.ts            # Pixi Application 初始化 / resize
-│   │   ├── board.ts          # 格子 + iso 投影 + 地形紋理頂面 + 山堆疊 + 領地罩染 + 高亮
+│   │   ├── board.ts          # 格子 + iso 投影 + 起伏地表 + 地形紋理頂面 + 山堆疊 + 領地罩染 + 地圖外形懸崖/海環 + 高亮
 │   │   ├── terrain-theme.ts  # 地形調色盤 + shade()（board / terrain-texture 共用真相，無 Pixi）
 │   │   ├── terrain-texture.ts # 地形頂面 dithered 菱形貼圖生成（PRD §6.1）
+│   │   ├── terrain-height.ts # 滾動高度場（value noise，board / units 共用，PRD §6.1）
 │   │   ├── units.ts          # 駐紮 stack 渲染 + 升級動畫
 │   │   ├── marching.ts       # 行軍 stack 插值動畫
 │   │   ├── combat.ts         # bump + tint flash
@@ -71,7 +72,7 @@ knight-strike/
 │   │   ├── hud.ts            # tick bar + 速度
 │   │   ├── faction-panel.ts
 │   │   ├── tile-info.ts
-│   │   ├── start-menu.ts     # 開場選單：玩法說明 + AI 難度 + 棋盤尺寸（PRD §6.2.1）
+│   │   ├── start-menu.ts     # 開場選單：玩法說明 + AI 難度 + 棋盤尺寸 + 地圖外形（PRD §6.2.1）
 │   │   ├── end-screen.ts     # 勝負畫面 + Restart / Main Menu（PRD §6.2.2）
 │   │   └── responsive.ts     # 窄螢幕重排
 │   ├── playtest/             # 【Headless 測試層】跑在 Node

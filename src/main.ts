@@ -25,8 +25,11 @@ import { createUnitsRenderer } from "@/render/units";
 import {
   makeScenario,
   readDifficulty,
+  readMapShape,
   readMapSize,
+  readSeed,
 } from "@/scenarios/sized";
+import { setHeightSeed } from "@/render/terrain-height";
 import { evaluateOutcome } from "@/engine/victory";
 import { createFactionPanel } from "@/ui/faction-panel";
 import { createHud } from "@/ui/hud";
@@ -44,24 +47,27 @@ type RenderApp = Awaited<ReturnType<typeof createRenderApp>>;
 type TierTextures = ReturnType<typeof createTierTextures>;
 
 type GameHooks = {
-  // Replay with the same config (End Screen "Restart", PRD §6.2.2).
+  // Replay with the same config + seed (End Screen "Restart", PRD §6.2.2).
   readonly onRestart: () => void;
   // Tear down and return to the Start Menu (End Screen "Main Menu", §6.2.2).
   readonly onMainMenu: () => void;
 };
 
-// Build one full playthrough — engine state, renderers, input, UI, ticker —
-// over the persistent Pixi app, for the chosen size + difficulty. Returns a
-// teardown so the shell can dispose it on Start / Restart / Main Menu without a
-// page reload (PRD §6.2.1).
+// Build one full playthrough — engine state, renderers, input, UI, ticker — over
+// the persistent Pixi app, for the chosen size + difficulty + map shape and a
+// terrain seed. Returns a teardown so the shell can dispose it on Start /
+// Restart / Main Menu without a page reload (PRD §6.2.1).
 function createGame(
   render: RenderApp,
   tierTextures: TierTextures,
   config: StartConfig,
+  seed: number,
   hooks: GameHooks,
 ): () => void {
+  // The rolling hills follow the same seed as the terrain (render-only).
+  setHeightSeed(seed);
   const initialState = buildInitialState(
-    makeScenario(config.size, config.difficulty),
+    makeScenario(config.size, config.difficulty, config.shape, seed),
   );
   let state: GameState = initialState;
   let ended = false;
@@ -92,14 +98,19 @@ function createGame(
     return TICK_INTERVAL_MS / s;
   }
 
-  const board = createBoardRenderer(render.app, state, {
-    onPointerOver: (id: TileId) => {
-      pointer.onTileOver(id);
+  const board = createBoardRenderer(
+    render.app,
+    state,
+    {
+      onPointerOver: (id: TileId) => {
+        pointer.onTileOver(id);
+      },
+      onPointerOut: (id: TileId) => {
+        pointer.onTileOut(id);
+      },
     },
-    onPointerOut: (id: TileId) => {
-      pointer.onTileOut(id);
-    },
-  });
+    { seaRing: config.shape !== "plateau" },
+  );
   render.app.stage.addChild(board.container);
 
   const units = createUnitsRenderer(state, tierTextures);
@@ -431,10 +442,10 @@ async function bootstrap(): Promise<void> {
 
   let teardownGame: (() => void) | null = null;
 
-  function startGame(config: StartConfig): void {
+  function startGame(config: StartConfig, seed: number): void {
     teardownGame?.();
-    teardownGame = createGame(render, tierTextures, config, {
-      onRestart: () => startGame(config),
+    teardownGame = createGame(render, tierTextures, config, seed, {
+      onRestart: () => startGame(config, seed),
       onMainMenu: () => {
         teardownGame?.();
         teardownGame = null;
@@ -446,9 +457,14 @@ async function bootstrap(): Promise<void> {
   const startMenu = createStartMenu(document.body, {
     initialSize: readMapSize(window.location.search),
     initialDifficulty: readDifficulty(window.location.search),
+    initialShape: readMapShape(window.location.search),
     onStart: (config) => {
       startMenu.hide();
-      startGame(config);
+      // A fresh random map per Start (unless `?seed=N` pins one); Restart reuses
+      // this seed so it replays the same map.
+      const randomSeed =
+        (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
+      startGame(config, readSeed(window.location.search, randomSeed));
     },
   });
 

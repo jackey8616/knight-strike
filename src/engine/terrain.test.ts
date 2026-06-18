@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseTileId, tileId } from "./state";
 import {
   applyTerrainDefense,
+  coastOceanMask,
   generateTerrain,
   isImpassableTerrain,
 } from "./terrain";
@@ -129,6 +130,82 @@ describe("generateTerrain", () => {
         const grid = generateTerrain(size, seed, fixed);
         const reach = reachable(grid, tileId(0, 0), size);
         for (const id of fixed) expect(reach.has(id)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("coastOceanMask (map shape: coast)", () => {
+  it("is deterministic for a given seed", () => {
+    const a = coastOceanMask(19, 42);
+    const b = coastOceanMask(19, 42);
+    expect([...a].sort()).toEqual([...b].sort());
+  });
+
+  it("carves some perimeter sea at every selectable size", () => {
+    for (const size of [11, 15, 19, 27]) {
+      expect(coastOceanMask(size, 42).size).toBeGreaterThan(0);
+    }
+  });
+
+  it("is dihedral-symmetric, so the four corners are equally coastal", () => {
+    for (const size of [11, 15, 19, 27]) {
+      const m = size - 1;
+      const mask = coastOceanMask(size, 7);
+      for (const id of mask) {
+        const { x, y } = parseTileId(id);
+        expect(mask.has(tileId(m - x, y))).toBe(true);
+        expect(mask.has(tileId(x, m - y))).toBe(true);
+        expect(mask.has(tileId(m - x, m - y))).toBe(true);
+        expect(mask.has(tileId(y, x))).toBe(true); // x<->y axis
+      }
+    }
+  });
+
+  it("never carves the corner castles or the centre", () => {
+    for (const size of [11, 15, 19, 27]) {
+      for (const id of cornersAndCentre(size)) {
+        expect(coastOceanMask(size, 42).has(id)).toBe(false);
+      }
+    }
+  });
+
+  it("never carves a protected tile", () => {
+    const size = 15;
+    const protectSet = cornersAndCentre(size);
+    const mask = coastOceanMask(size, 999, protectSet);
+    for (const id of protectSet) expect(mask.has(id)).toBe(false);
+  });
+
+  it("coast carve still leaves fixed tiles PLAINS, ringed, and connected", () => {
+    for (const size of [11, 15, 19, 27]) {
+      const fixed = cornersAndCentre(size);
+      for (const seed of [1, 42, 7, 999, 31337]) {
+        const mask = coastOceanMask(size, seed, fixed);
+        const grid = generateTerrain(size, seed, fixed, mask);
+        // fixed tiles stay deployable
+        for (const id of fixed) {
+          expect(grid.get(id)).toBe("PLAINS");
+          const { x, y } = parseTileId(id);
+          for (const [dx, dy] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ] as const) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
+            expect(isImpassableTerrain(grid.get(tileId(nx, ny)))).toBe(false);
+          }
+        }
+        // map still winnable: all castles + centre mutually reachable
+        const reach = reachable(grid, tileId(0, 0), size);
+        for (const id of fixed) expect(reach.has(id)).toBe(true);
+        // the carve actually placed perimeter water on the board
+        let water = 0;
+        for (const t of grid.values()) if (t === "WATER") water++;
+        expect(water).toBeGreaterThan(0);
       }
     }
   });
