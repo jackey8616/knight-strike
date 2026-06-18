@@ -51,15 +51,6 @@ const CSS = `
     line-height: 1.3 !important;
   }
 
-  .ks-mapsize {
-    top: 44px !important;
-    right: 8px !important;
-    padding: 3px 5px !important;
-    gap: 3px !important;
-    font-size: 10px !important;
-  }
-  .ks-mapsize button { padding: 2px 5px !important; }
-
   .ks-dispatch {
     bottom: 10px !important;
     left: auto !important;

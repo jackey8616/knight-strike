@@ -22,13 +22,17 @@ import { createMarchingRenderer } from "@/render/marching";
 import { createPathRenderer } from "@/render/paths";
 import { createTierTextures } from "@/render/sprites";
 import { createUnitsRenderer } from "@/render/units";
-import { makeScenario, readMapSize } from "@/scenarios/sized";
+import {
+  makeScenario,
+  readDifficulty,
+  readMapSize,
+} from "@/scenarios/sized";
 import { evaluateOutcome } from "@/engine/victory";
 import { createFactionPanel } from "@/ui/faction-panel";
 import { createHud } from "@/ui/hud";
-import { createMapSizePanel } from "@/ui/map-size";
 import { createTileInfoPanel } from "@/ui/tile-info";
 import { createEndScreen } from "@/ui/end-screen";
+import { createStartMenu, type StartConfig } from "@/ui/start-menu";
 
 const TICK_INTERVAL_MS = 2000;
 const MOUNT_ID = "app";
@@ -36,16 +40,29 @@ const PLAYER_FACTION: FactionId = "TOKUGAWA";
 
 type Speed = 1 | 2 | 3 | 4;
 
-async function bootstrap(): Promise<void> {
-  const container = document.getElementById(MOUNT_ID);
-  if (container === null) {
-    throw new Error(`missing #${MOUNT_ID} mount container`);
-  }
+type RenderApp = Awaited<ReturnType<typeof createRenderApp>>;
+type TierTextures = ReturnType<typeof createTierTextures>;
 
-  const render = await createRenderApp(container);
-  const tierTextures = createTierTextures(render.app);
-  const mapSize = readMapSize(window.location.search);
-  const initialState = buildInitialState(makeScenario(mapSize));
+type GameHooks = {
+  // Replay with the same config (End Screen "Restart", PRD §6.2.2).
+  readonly onRestart: () => void;
+  // Tear down and return to the Start Menu (End Screen "Main Menu", §6.2.2).
+  readonly onMainMenu: () => void;
+};
+
+// Build one full playthrough — engine state, renderers, input, UI, ticker —
+// over the persistent Pixi app, for the chosen size + difficulty. Returns a
+// teardown so the shell can dispose it on Start / Restart / Main Menu without a
+// page reload (PRD §6.2.1).
+function createGame(
+  render: RenderApp,
+  tierTextures: TierTextures,
+  config: StartConfig,
+  hooks: GameHooks,
+): () => void {
+  const initialState = buildInitialState(
+    makeScenario(config.size, config.difficulty),
+  );
   let state: GameState = initialState;
   let ended = false;
 
@@ -122,12 +139,6 @@ async function bootstrap(): Promise<void> {
   });
   const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
   const tileInfo = createTileInfoPanel(document.body);
-  // Switching size starts a fresh game at that board size, carried in the URL.
-  const mapSizePanel = createMapSizePanel(document.body, mapSize, (size) => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("size", String(size));
-    window.location.assign(url.toString());
-  });
 
   function pushHudStatus(): void {
     hud.setStatus({
@@ -257,13 +268,9 @@ async function bootstrap(): Promise<void> {
     syncRun();
   }
 
-  const endScreen = createEndScreen(document.body, () => {
-    state = initialState;
-    ended = false;
-    deselect();
-    endScreen.hide();
-    renderAll();
-    syncRun();
+  const endScreen = createEndScreen(document.body, {
+    onRestart: hooks.onRestart,
+    onMainMenu: hooks.onMainMenu,
   });
 
   const cameraGestures = createCameraGestures(render.app.canvas, {
@@ -388,24 +395,70 @@ async function bootstrap(): Promise<void> {
     resetCamera: () => board.resetCamera(),
   });
 
+  return function teardown(): void {
+    stopTicker();
+    window.removeEventListener("resize", onResize);
+    keyboard.destroy();
+    cameraGestures.destroy();
+    pointer.destroy();
+    ratioPanel.destroy();
+    tileInfo.destroy();
+    factionPanel.destroy();
+    hud.destroy();
+    endScreen.destroy();
+    // Children before parent: destroying board with { children: true } would
+    // double-destroy these, so dispose them first (they detach themselves).
+    paths.destroy();
+    marching.destroy();
+    units.destroy();
+    board.destroy();
+    if (import.meta.env.DEV) {
+      (window as unknown as { __ks?: unknown }).__ks = undefined;
+    }
+  };
+}
+
+async function bootstrap(): Promise<void> {
+  const container = document.getElementById(MOUNT_ID);
+  if (container === null) {
+    throw new Error(`missing #${MOUNT_ID} mount container`);
+  }
+
+  // Persistent shell: the Pixi app, tier textures and the Start Menu outlive
+  // individual games so size / difficulty can change without a page reload.
+  const render = await createRenderApp(container);
+  const tierTextures = createTierTextures(render.app);
+
+  let teardownGame: (() => void) | null = null;
+
+  function startGame(config: StartConfig): void {
+    teardownGame?.();
+    teardownGame = createGame(render, tierTextures, config, {
+      onRestart: () => startGame(config),
+      onMainMenu: () => {
+        teardownGame?.();
+        teardownGame = null;
+        startMenu.show();
+      },
+    });
+  }
+
+  const startMenu = createStartMenu(document.body, {
+    initialSize: readMapSize(window.location.search),
+    initialDifficulty: readDifficulty(window.location.search),
+    onStart: (config) => {
+      startMenu.hide();
+      startGame(config);
+    },
+  });
+
+  startMenu.show();
+
   window.addEventListener(
     "beforeunload",
     () => {
-      stopTicker();
-      window.removeEventListener("resize", onResize);
-      keyboard.destroy();
-      cameraGestures.destroy();
-      pointer.destroy();
-      ratioPanel.destroy();
-      tileInfo.destroy();
-      mapSizePanel.destroy();
-      factionPanel.destroy();
-      hud.destroy();
-      endScreen.destroy();
-      paths.destroy();
-      marching.destroy();
-      units.destroy();
-      board.destroy();
+      teardownGame?.();
+      startMenu.destroy();
       render.destroy();
     },
     { once: true },

@@ -69,15 +69,15 @@ knight-strike/
 │   │   ├── hud.ts            # tick bar + 速度
 │   │   ├── faction-panel.ts
 │   │   ├── tile-info.ts
-│   │   ├── map-size.ts       # 棋盤尺寸選單
-│   │   ├── end-screen.ts
+│   │   ├── start-menu.ts     # 開場選單：玩法說明 + AI 難度 + 棋盤尺寸（PRD §6.2.1）
+│   │   ├── end-screen.ts     # 勝負畫面 + Restart / Main Menu（PRD §6.2.2）
 │   │   └── responsive.ts     # 窄螢幕重排
 │   ├── playtest/             # 【Headless 測試層】跑在 Node
 │   │   ├── cli.ts            # pnpm playtest 入口
 │   │   ├── runner.ts         # scenario → result
 │   │   └── integration.test.ts
 │   ├── scenarios/            # 場景 JSON / TS（default / idle-target / spectator-4ai…）
-│   │   └── sized.ts          # 程序產生預設可玩開局（11/15/19/27）
+│   │   └── sized.ts          # 程序產生預設可玩開局（11/15/19/27 × 難度，Start Menu 用）
 │   └── main.ts               # 入口：建 engine + renderer + 接 UI
 ├── CLAUDE.md
 ├── package.json
