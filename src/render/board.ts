@@ -1,12 +1,26 @@
 import {
+  type Application,
   Container,
   type FederatedPointerEvent,
   Graphics,
   Polygon,
+  Sprite,
 } from "pixi.js";
 
 import { derivedOwner, tileId } from "@/engine/state";
 import type { FactionId, GameState, Terrain, TileId } from "@/engine/types";
+import {
+  DECOR,
+  EDGE_PX,
+  EDGE_SHADE_SE,
+  EDGE_SHADE_SW,
+  GROUND,
+  shade,
+  TERRAIN_TOP,
+  TILE_OUTLINE_COLOR,
+  WATER_EDGE_PX,
+} from "@/render/terrain-theme";
+import { createTerrainTextures } from "@/render/terrain-texture";
 
 export const TILE_WIDTH = 64;
 export const TILE_HEIGHT = 32;
@@ -28,32 +42,6 @@ export function isoX(x: number, y: number): number {
 export function isoY(x: number, y: number): number {
   return (x + y) * (TILE_HEIGHT / 2);
 }
-
-const TILE_OUTLINE_COLOR = 0x111111;
-
-// PRD §3.9 (v1.6): terrain top-face colours + screen-space elevation (px). The
-// faction/ownership colour is laid over the top face as a translucent tint, so
-// territory still reads while the terrain stays visible underneath.
-const TERRAIN_TOP: Readonly<Record<Terrain, number>> = {
-  PLAINS: 0x3f6b3a,
-  MOUNTAIN: 0x6f6f78,
-  WATER: 0x2f5aa0,
-  FOREST: 0x2f5530,
-};
-
-// PRD §5.1: per-terrain pixel-art decorations drawn on the tile top face
-// — chunky little features (grass tufts, trees, ripples, snow-capped rock) that
-// match the pixel-art unit sprites. They're seeded per-tile so a given tile
-// always looks the same, and drawn once at load (terrain never changes).
-const DECOR = {
-  GRASS: 0x6fa256,
-  GRASS_DARK: 0x3c6b34,
-  TRUNK: 0x6b4423,
-  LEAF: 0x357a3c,
-  LEAF_HI: 0x4f9a52,
-  RIPPLE: 0x6fa0d8,
-  SNOW: 0xeef2f6,
-} as const;
 
 // PRD §3.9 (v1.6): mountains render as stacked unit-cubes. A mountain tile's
 // height (in cube units) is its distance INTO the mountain mass — 1 at the edge
@@ -117,13 +105,6 @@ function computeMountainHeights(
   return px;
 }
 
-function shade(color: number, f: number): number {
-  const r = Math.round(((color >> 16) & 0xff) * f);
-  const g = Math.round(((color >> 8) & 0xff) * f);
-  const b = Math.round((color & 0xff) * f);
-  return (r << 16) | (g << 8) | b;
-}
-
 // Deterministic per-tile PRNG (LCG seeded by tile coords) — so decorations are
 // stable across redraws without storing them, and identical between runs.
 function tileRng(x: number, y: number): () => number {
@@ -149,19 +130,40 @@ function diamondPoint(
   return [dx, -e + dy];
 }
 
-function drawTree(g: Graphics, cx: number, cy: number): void {
+// Two silhouettes for a denser, more varied forest: a pointed conifer and a
+// rounder bushy canopy. Both layer dark→lit greens so the cluster has depth.
+function drawTree(
+  g: Graphics,
+  cx: number,
+  cy: number,
+  variant: number,
+): void {
   g.rect(cx - 0.6, cy, 1.2, 3);
   g.fill({ color: DECOR.TRUNK });
-  g.moveTo(cx, cy - 6);
-  g.lineTo(cx - 3.2, cy + 0.5);
-  g.lineTo(cx + 3.2, cy + 0.5);
-  g.closePath();
-  g.fill({ color: DECOR.LEAF });
-  g.moveTo(cx - 0.6, cy - 4.5);
-  g.lineTo(cx - 2.4, cy + 0.2);
-  g.lineTo(cx + 1.2, cy + 0.2);
-  g.closePath();
-  g.fill({ color: DECOR.LEAF_HI });
+  if (variant === 0) {
+    g.moveTo(cx, cy - 7);
+    g.lineTo(cx - 3.4, cy + 0.5);
+    g.lineTo(cx + 3.4, cy + 0.5);
+    g.closePath();
+    g.fill({ color: DECOR.LEAF_DARK });
+    g.moveTo(cx, cy - 6);
+    g.lineTo(cx - 3, cy + 0.2);
+    g.lineTo(cx + 3, cy + 0.2);
+    g.closePath();
+    g.fill({ color: DECOR.LEAF });
+    g.moveTo(cx - 0.6, cy - 4.5);
+    g.lineTo(cx - 2.4, cy + 0.2);
+    g.lineTo(cx + 1.2, cy + 0.2);
+    g.closePath();
+    g.fill({ color: DECOR.LEAF_HI });
+  } else {
+    g.rect(cx - 3, cy - 4, 6, 4);
+    g.fill({ color: DECOR.LEAF_DARK });
+    g.rect(cx - 2.4, cy - 5.6, 4.8, 4);
+    g.fill({ color: DECOR.LEAF });
+    g.rect(cx - 1.6, cy - 6.6, 2.6, 2.6);
+    g.fill({ color: DECOR.LEAF_HI });
+  }
 }
 
 function drawGrass(g: Graphics, cx: number, cy: number, rng: () => number): void {
@@ -179,36 +181,77 @@ function drawRipple(g: Graphics, cx: number, cy: number): void {
   g.fill({ color: DECOR.RIPPLE, alpha: 0.6 });
 }
 
-// Snow cap (a smaller inset diamond on the peak) plus a couple of rock specks.
+// Per-terrain pixel decor scattered on the (lifted) top face. Denser than a
+// flat colour fill alone — toward the lm_exp look — but still drawn once at
+// load (terrain never changes), so it stays off the per-tick redraw path.
 function drawTerrainDecor(
   g: Graphics,
   terrain: Terrain,
-  e: number,
+  lift: number,
   x: number,
   y: number,
 ): void {
   const rng = tileRng(x, y);
   if (terrain === "PLAINS") {
-    const n = 2 + Math.floor(rng() * 2);
+    const n = 4 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
-      const [dx, dy] = diamondPoint(rng, e, 0.66);
+      const [dx, dy] = diamondPoint(rng, lift, 0.7);
       drawGrass(g, dx, dy, rng);
     }
   } else if (terrain === "FOREST") {
-    const n = 3 + Math.floor(rng() * 2);
-    const pts: Array<readonly [number, number]> = [];
-    for (let i = 0; i < n; i++) pts.push(diamondPoint(rng, e, 0.58));
-    pts.sort((a, b) => a[1] - b[1]); // back-to-front so nearer trees overlap
-    for (const [dx, dy] of pts) drawTree(g, dx, dy);
-  } else if (terrain === "WATER") {
-    const n = 2 + Math.floor(rng() * 2);
+    const n = 6 + Math.floor(rng() * 4);
+    const pts: Array<readonly [number, number, number]> = [];
     for (let i = 0; i < n; i++) {
-      const [dx, dy] = diamondPoint(rng, e, 0.6);
+      const [dx, dy] = diamondPoint(rng, lift, 0.7);
+      pts.push([dx, dy, rng() < 0.5 ? 0 : 1]);
+    }
+    pts.sort((a, b) => a[1] - b[1]); // back-to-front so nearer trees overlap
+    for (const [dx, dy, v] of pts) drawTree(g, dx, dy, v);
+  } else if (terrain === "WATER") {
+    const n = 3 + Math.floor(rng() * 3);
+    for (let i = 0; i < n; i++) {
+      const [dx, dy] = diamondPoint(rng, lift, 0.6);
       drawRipple(g, dx, dy);
     }
   }
   // MOUNTAIN has no flat-top decor — its snow cap and shaded rock faces are
   // drawn as part of the peak geometry in drawMountainPeak.
+}
+
+// A foam rim along the diamond edges of a WATER tile that face non-water (land
+// or board border), so connected water reads as one open body with banks rather
+// than a grid of identical blue squares. Each grid neighbour maps to one iso
+// diamond edge. Drawn once at load into the static decor layer.
+function drawWaterShoreline(
+  g: Graphics,
+  state: GameState,
+  x: number,
+  y: number,
+  lift: number,
+): void {
+  const isWater = (nx: number, ny: number): boolean =>
+    state.provinces.get(tileId(nx, ny))?.terrain === "WATER";
+  const hw = TILE_WIDTH / 2;
+  const hh = TILE_HEIGHT / 2;
+  const top: readonly [number, number] = [0, -hh - lift];
+  const right: readonly [number, number] = [hw, -lift];
+  const bottom: readonly [number, number] = [0, hh - lift];
+  const left: readonly [number, number] = [-hw, -lift];
+  // edge ← grid neighbour direction (iso): NE=(x,y-1) SE=(x+1,y) SW=(x,y+1) NW=(x-1,y)
+  const edges: ReadonlyArray<
+    readonly [boolean, readonly [number, number], readonly [number, number]]
+  > = [
+    [isWater(x, y - 1), top, right],
+    [isWater(x + 1, y), right, bottom],
+    [isWater(x, y + 1), bottom, left],
+    [isWater(x - 1, y), left, top],
+  ];
+  for (const [water, a, b] of edges) {
+    if (water) continue;
+    g.moveTo(a[0], a[1]);
+    g.lineTo(b[0], b[1]);
+    g.stroke({ color: GROUND.WATER_FOAM, width: 1, alpha: 0.7 });
+  }
 }
 
 const HOVER_COLOR = 0xffffff;
@@ -226,6 +269,14 @@ type TileGfx = {
   readonly selection: Graphics;
   readonly terrain: Terrain;
   readonly elevation: number;
+  // Screen-space rise of the top face: mountain peak base, or the small cosmetic
+  // lip on flat tiles. Distinct from `elevation` (which is 0 for flat tiles and
+  // drives only the occlusion fade), so giving flat tiles a lip never makes them
+  // fade.
+  readonly lift: number;
+  // Whether a textured top-face Sprite provides the fill (flat terrains); when
+  // true drawTilePrism skips the flat colour fill. null for mountains.
+  readonly hasTexture: boolean;
   // Last-painted inputs — terrain/elevation never change, so a tile only needs
   // its (expensive) prism geometry rebuilt when the ownership tint changes, and
   // its alpha re-set when the occlusion fade flips. Skipping the no-op redraws
@@ -349,29 +400,38 @@ function drawMountainPeak(
   g.stroke({ color: shade(top, 0.42), width: 1, alpha: 0.7 });
 }
 
-// PRD §3.9 (v1.6): draw a tile as an iso prism — front-left/front-right side
-// walls under a raised top face — coloured by terrain, with the owner colour
-// tinted over the top. PLAINS/WATER have zero elevation (flat diamond).
+// PRD §6.1: draw a tile as an iso prism — front-left/front-right side walls
+// under a raised top face. `e` is the logical elevation (mountain cube height;
+// flat tiles 0, so they never trip the occlusion fade); `lift` is the screen-
+// space rise of the top face (mountain peak base, or the small cosmetic lip that
+// makes flat tiles read as raised earth blocks). When `hasTexture`, the textured
+// top-face Sprite (a sibling drawn below this Graphics) provides the fill, so we
+// only paint walls, the owner wash, and a faction-tinted border here.
 function drawTilePrism(
   g: Graphics,
   terrain: Terrain,
   ownerColor: number | null,
   e: number,
+  lift: number,
+  hasTexture: boolean,
 ): void {
   g.clear();
   const top = TERRAIN_TOP[terrain];
   const hw = TILE_WIDTH / 2;
   const hh = TILE_HEIGHT / 2;
-  if (e > 0) {
-    quad(g, -hw, -e, 0, hh - e, 0, hh, -hw, 0);
-    g.fill({ color: shade(top, 0.55), alpha: 1 });
-    quad(g, 0, hh - e, hw, -e, hw, 0, 0, hh);
-    g.fill({ color: shade(top, 0.72), alpha: 1 });
-    // Cube-layer seams across the front faces so the stack reads as units.
+  if (lift > 0) {
+    const swF = terrain === "MOUNTAIN" ? 0.55 : EDGE_SHADE_SW;
+    const seF = terrain === "MOUNTAIN" ? 0.72 : EDGE_SHADE_SE;
+    quad(g, -hw, -lift, 0, hh - lift, 0, hh, -hw, 0);
+    g.fill({ color: shade(top, swF), alpha: 1 });
+    quad(g, 0, hh - lift, hw, -lift, hw, 0, 0, hh);
+    g.fill({ color: shade(top, seF), alpha: 1 });
+    // Cube-layer seams across the front faces so the stack reads as units
+    // (mountains only — flat lips are too short for an interior seam).
     for (let h = MOUNTAIN_UNIT_PX; h < e; h += MOUNTAIN_UNIT_PX) {
-      g.moveTo(-TILE_WIDTH / 2, -h);
-      g.lineTo(0, TILE_HEIGHT / 2 - h);
-      g.lineTo(TILE_WIDTH / 2, -h);
+      g.moveTo(-hw, -h);
+      g.lineTo(0, hh - h);
+      g.lineTo(hw, -h);
       g.stroke({ color: shade(top, 0.38), width: 1, alpha: 0.85 });
     }
   }
@@ -379,14 +439,20 @@ function drawTilePrism(
     drawMountainPeak(g, top, ownerColor, e);
     return;
   }
-  diamondPathAt(g, e);
-  g.fill({ color: top, alpha: 1 });
-  diamondPathAt(g, e);
-  g.stroke({ color: TILE_OUTLINE_COLOR, width: 1, alpha: 1 });
-  if (ownerColor !== null) {
-    diamondPathAt(g, e);
-    g.fill({ color: ownerColor, alpha: 0.45 });
+  if (!hasTexture) {
+    diamondPathAt(g, lift);
+    g.fill({ color: top, alpha: 1 });
   }
+  if (ownerColor !== null) {
+    diamondPathAt(g, lift);
+    g.fill({ color: ownerColor, alpha: 0.3 });
+  }
+  diamondPathAt(g, lift);
+  g.stroke({
+    color: ownerColor !== null ? shade(ownerColor, 0.7) : TILE_OUTLINE_COLOR,
+    width: 1,
+    alpha: 1,
+  });
 }
 
 // Castle marker is rendered as a stylised keep silhouette inset within the
@@ -435,6 +501,7 @@ function hasUnit(state: GameState, x: number, y: number): boolean {
 }
 
 export function createBoardRenderer(
+  app: Application,
   initial: GameState,
   events: BoardEvents = {},
 ): BoardRenderer {
@@ -448,6 +515,9 @@ export function createBoardRenderer(
   const tiles = new Map<TileId, TileGfx>();
   const boardSize = initial.boardSize;
   const mountainPx = computeMountainHeights(initial, boardSize);
+  // PRD §6.1: shared textured top-face Sprites, one set built once and reused
+  // across every tile of a terrain — off the per-tick redraw path.
+  const terrainTextures = createTerrainTextures(app);
 
   for (let y = 0; y < boardSize; y++) {
     for (let x = 0; x < boardSize; x++) {
@@ -465,6 +535,34 @@ export function createBoardRenderer(
       const terrain = province?.terrain ?? "PLAINS";
       const elevation =
         terrain === "MOUNTAIN" ? (mountainPx.get(id) ?? MOUNTAIN_UNIT_PX) : 0;
+      // Screen-space lift of the top face. Mountains use their real elevation;
+      // flat tiles get a small cosmetic lip (water sits lower, so it reads as a
+      // basin below the surrounding land).
+      const lift =
+        terrain === "MOUNTAIN"
+          ? elevation
+          : terrain === "WATER"
+            ? WATER_EDGE_PX
+            : EDGE_PX;
+
+      // Textured top-face Sprite for flat terrains, drawn BELOW `base` so the
+      // walls/owner-wash/border painted into `base` composite over it. Static —
+      // never touched again after creation. Mountains skip it (their shaded peak
+      // is the top face).
+      const variants =
+        terrain !== "MOUNTAIN" ? terrainTextures[terrain] : undefined;
+      let hasTexture = false;
+      if (variants !== undefined && variants.length > 0) {
+        const pick = Math.floor(tileRng(x, y)() * variants.length);
+        const tex = variants[pick] ?? variants[0];
+        if (tex !== undefined) {
+          const sprite = new Sprite(tex);
+          sprite.anchor.set(0.5, 0.5);
+          sprite.position.set(0, -lift);
+          node.addChild(sprite);
+          hasTexture = true;
+        }
+      }
 
       const base = new Graphics();
       node.addChild(base);
@@ -475,18 +573,21 @@ export function createBoardRenderer(
       // castle tiles so the keep marker stays clean.
       if (province?.isCastle !== true) {
         const decor = new Graphics();
-        drawTerrainDecor(decor, terrain, elevation, x, y);
+        if (terrain === "WATER") {
+          drawWaterShoreline(decor, initial, x, y, lift);
+        }
+        drawTerrainDecor(decor, terrain, lift, x, y);
         base.addChild(decor);
       }
 
       const hover = new Graphics();
-      diamondPathAt(hover, elevation);
+      diamondPathAt(hover, lift);
       hover.fill({ color: HOVER_COLOR, alpha: HOVER_ALPHA });
       hover.visible = false;
       node.addChild(hover);
 
       const selection = new Graphics();
-      diamondPathAt(selection, elevation);
+      diamondPathAt(selection, lift);
       selection.stroke({
         color: SELECTION_COLOR,
         width: SELECTION_WIDTH,
@@ -527,6 +628,8 @@ export function createBoardRenderer(
         selection,
         terrain,
         elevation,
+        lift,
+        hasTexture,
         painted: false,
         paintedColor: null,
         paintedAlpha: 1,
@@ -555,7 +658,14 @@ export function createBoardRenderer(
         ownerColor = FACTION_COLORS[province.castleOwner];
       }
       if (!t.painted || t.paintedColor !== ownerColor) {
-        drawTilePrism(t.base, t.terrain, ownerColor, t.elevation);
+        drawTilePrism(
+          t.base,
+          t.terrain,
+          ownerColor,
+          t.elevation,
+          t.lift,
+          t.hasTexture,
+        );
         if (province.isCastle) {
           drawCastleMarker(t.base);
         }
