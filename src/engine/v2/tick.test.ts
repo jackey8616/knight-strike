@@ -47,7 +47,9 @@ describe("step (M5 skeleton)", () => {
   });
 
   it("emits tick.elapsed every tick and day.elapsed only on a day boundary", () => {
-    const { events } = runTicks(baseState(), 4);
+    // bare state (no entities) isolates the time events from economy events
+    const bare = createGameState({ boardSize: 5, rngSeed: 1 });
+    const { events } = runTicks(bare, 4);
     expect(events).toEqual([
       { kind: "tick.elapsed", tick: 1 },
       { kind: "tick.elapsed", tick: 2 },

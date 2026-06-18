@@ -67,4 +67,24 @@ export type StepResult = {
 export const ev = {
   tickElapsed: (tick: number): GameEvent => ({ kind: "tick.elapsed", tick }),
   dayElapsed: (day: number): GameEvent => ({ kind: "day.elapsed", day }),
+  houseBuilt: (houseId: string, owner: FactionId, tile: TileId): GameEvent => ({
+    kind: "house.built",
+    houseId,
+    owner,
+    tile,
+  }),
+  houseExpandedField: (houseId: string, tile: TileId): GameEvent => ({
+    kind: "house.expanded_field",
+    houseId,
+    tile,
+  }),
+  houseSpawnedUnit: (houseId: string, unitId: string): GameEvent => ({
+    kind: "house.spawned_unit",
+    houseId,
+    unitId,
+  }),
+  connectivityRecomputed: (
+    connected: readonly string[],
+    disconnected: readonly string[],
+  ): GameEvent => ({ kind: "connectivity.recomputed", connected, disconnected }),
 };
