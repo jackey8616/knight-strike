@@ -53,5 +53,22 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Dev tooling that runs on Node (smoke test driver/orchestrator): give it
+    // the Node + Node-22 web globals so no-undef passes.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        Buffer: "readonly",
+        console: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        URL: "readonly",
+        fetch: "readonly",
+        WebSocket: "readonly",
+      },
+    },
+  },
   prettier,
 );
