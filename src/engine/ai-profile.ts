@@ -10,8 +10,10 @@ export type RuleProfile = {
   readonly evalInterval: number;
   // Manhattan radius around own castle counted as a threat trigger.
   readonly defenseRadius: number;
-  // Maximum BFS hops the attack rule will consider when scanning enemy castles.
-  readonly attackHops: number;
+  // Attack reach as a multiple of board size — the attack rule scans enemies
+  // within round(boardSize * attackReach) BFS hops. Board-relative (no fixed
+  // cap) so the AI still reaches enemies on large maps.
+  readonly attackReach: number;
   // Power multiplier the source must exceed over the target to attack.
   readonly attackPowerRatio: number;
   // Whether the rally rule fires at all. Disabled on Easy.
@@ -27,8 +29,8 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
   easy: {
     evalInterval: 8,
     defenseRadius: 1,
-    attackHops: 4,
-    attackPowerRatio: 2.0,
+    attackReach: 0.75,
+    attackPowerRatio: 1.5,
     rallyEnabled: false,
     expandRatio: 0.5,
     castleQueenSendRatio: 0.2,
@@ -36,8 +38,8 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
   normal: {
     evalInterval: 5,
     defenseRadius: 2,
-    attackHops: 8,
-    attackPowerRatio: 1.5,
+    attackReach: 1.25,
+    attackPowerRatio: 1.15,
     rallyEnabled: true,
     expandRatio: 0.5,
     castleQueenSendRatio: 0.33,
@@ -45,8 +47,8 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
   hard: {
     evalInterval: 3,
     defenseRadius: 3,
-    attackHops: 10,
-    attackPowerRatio: 1.25,
+    attackReach: 2.0,
+    attackPowerRatio: 1.0,
     rallyEnabled: true,
     expandRatio: 0.66,
     castleQueenSendRatio: 0.4,

@@ -220,6 +220,28 @@ describe("ai: rule #2 expand", () => {
     expect(atTick1.marchingStacks).toHaveLength(0);
     expect(atTick3.marchingStacks).toHaveLength(1);
   });
+
+  it("biases expansion toward the nearest enemy castle (directional)", () => {
+    const s = mkState({
+      boardSize: 7,
+      tiles: [
+        { x: 3, y: 3, faction: "TOKUGAWA", amount: 10 },
+        // Strong enemy castle to the east: too tough to assault (9 < 100*1.15),
+        // so expand runs and should push toward it rather than spread randomly.
+        { x: 6, y: 3, faction: "TAKEDA", amount: 100, isCastle: true },
+      ],
+      aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
+      tick: 1,
+      seed: 7,
+    });
+    const next = stepAi(s);
+    expect(next.marchingStacks).toHaveLength(1);
+    const stack = next.marchingStacks[0]!;
+    expect(from(stack)).toBe(tileId(3, 3));
+    // (4,3) is the empty neighbour closest (manhattan 2) to the enemy castle at
+    // (6,3); the other three neighbours are all distance 4.
+    expect(to(stack)).toBe(tileId(4, 3));
+  });
 });
 
 describe("ai: rule #1 defense", () => {
@@ -324,7 +346,7 @@ describe("ai: rule #3 attack", () => {
       claimEmptiesFor: "TOKUGAWA",
     });
     const next = stepAi(s);
-    // aggregate 99 + 99 = 198 ≥ 100 * 1.5 → both tiles march on the castle.
+    // aggregate 99 + 99 = 198 ≥ 100 * 1.15 → both tiles march on the castle.
     expect(next.marchingStacks).toHaveLength(2);
     for (const stack of next.marchingStacks) {
       expect(stack.faction).toBe("TOKUGAWA");
@@ -339,7 +361,7 @@ describe("ai: rule #3 attack", () => {
     const s = mkState({
       boardSize: 5,
       tiles: [
-        { x: 1, y: 1, faction: "TOKUGAWA", amount: 100 }, // 99 < 150
+        { x: 1, y: 1, faction: "TOKUGAWA", amount: 100 }, // 99 < 115 (100 * 1.15)
         { x: 3, y: 2, faction: "TAKEDA", amount: 100, isCastle: true },
       ],
       aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
@@ -347,6 +369,27 @@ describe("ai: rule #3 attack", () => {
       claimEmptiesFor: "TOKUGAWA", // no expand / rally outlet either
     });
     expect(stepAi(s).marchingStacks).toHaveLength(0);
+  });
+
+  it("attack reach scales with board size (fires past the old 8-hop cap)", () => {
+    const s = mkState({
+      boardSize: 15,
+      tiles: [
+        { x: 2, y: 7, faction: "TOKUGAWA", amount: 100 },
+        { x: 2, y: 8, faction: "TOKUGAWA", amount: 100 },
+        // 10 / 11 hops away — beyond the old fixed 8-hop cap, but within the
+        // board-relative reach round(15 * 1.25) = 19.
+        { x: 12, y: 7, faction: "TAKEDA", amount: 50, isCastle: true },
+      ],
+      aiConfig: { TOKUGAWA: AI_NORMAL, TAKEDA: AI_IDLE },
+      tick: 1,
+    });
+    const next = stepAi(s);
+    // aggregate 99 + 99 = 198 ≥ 50 * 1.15 → both converge on the distant castle.
+    expect(next.marchingStacks).toHaveLength(2);
+    for (const stack of next.marchingStacks) {
+      expect(to(stack)).toBe(tileId(12, 7));
+    }
   });
 });
 

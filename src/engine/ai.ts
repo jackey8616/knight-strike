@@ -314,7 +314,19 @@ function tryExpand(
       pairs.push({ source, target });
     }
   }
+  // Directional expand (§5.2): shuffle first so equal-distance targets keep
+  // seed-driven variety, then bias the frontier toward the nearest enemy castle
+  // (stable sort) so territory pushes at the enemy instead of blobbing outward.
+  // No live enemy castle → pure shuffle (explore).
+  const enemyCastles = liveEnemyCastles(state, faction);
   shuffleInPlace(rng, pairs);
+  if (enemyCastles.length > 0) {
+    pairs.sort(
+      (a, b) =>
+        nearestEnemyCastleDist(a.target.id, enemyCastles) -
+        nearestEnemyCastleDist(b.target.id, enemyCastles),
+    );
+  }
   for (const pair of pairs) {
     const res = dispatch(state, {
       from: pair.source.tile.id,
@@ -438,6 +450,8 @@ function tryAssault(
 
   const ownTiles = findOwnTiles(state, faction);
   if (ownTiles.length === 0) return null;
+  // §5.3 attackReach: scan enemies within a board-relative hop budget.
+  const maxReach = Math.round(state.boardSize * profile.attackReach);
 
   type Src = { readonly tile: Province; readonly send: number };
   type Cand = {
@@ -479,7 +493,7 @@ function tryAssault(
       if (count < ASSAULT_MIN_SOURCE) continue;
       const d = dist.get(own.id);
       if (d === undefined) continue;
-      if (d > profile.attackHops) continue;
+      if (d > maxReach) continue;
       srcs.push({ tile: own, send: count - 1 });
     }
     if (srcs.length === 0) continue;
