@@ -60,6 +60,9 @@ async function bootstrap(): Promise<void> {
   // it can send (castle keeps 1), plus the exact count chosen on the slider.
   let selectedUnit: { readonly id: TileId; readonly max: number } | null = null;
   let manualCount: number | null = null;
+  // Currently hovered tile (issue #6): renderAll() re-reads it each tick so the
+  // tile-info panel tracks live count changes, not just the value at hover time.
+  let hoverId: TileId | null = null;
 
   function isRunning(): boolean {
     return !ended && !manualPaused && !pressFreeze && !selectionFreeze;
@@ -134,6 +137,7 @@ async function bootstrap(): Promise<void> {
     units.update(state);
     marching.update(state, intervalForSpeed(speed));
     factionPanel.update(state);
+    tileInfo.setHover(state, hoverId);
     pushHudStatus();
   }
 
@@ -157,6 +161,7 @@ async function bootstrap(): Promise<void> {
 
   const pointer = createPointerController(render.app.canvas, {
     onTileHover: (id) => {
+      hoverId = id;
       board.setHover(id);
       tileInfo.setHover(state, id);
     },
