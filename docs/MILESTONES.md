@@ -33,7 +33,7 @@
 | `movement.ts`                           | `findPath`（己方補給 vs 征服行軍）、`dispatch`（比例 + 主城留 1 + `forceCount`）、`cancelMarchingStack`、`advanceMarching`（同陣營合併、siege staging） | §4.5     | AC-05 / 07 / 08 / 09 / 14 / 15 |
 | `terrain.ts`                            | `isImpassableTerrain` / `applyTerrainDefense` / `generateTerrain`（seeded、連通修復）                                                                   | §4.7     | AC-16 / 17                     |
 | `victory.ts`                            | `applyDefeats`（敗北 → NEUTRAL、清 stack / order）、`evaluateOutcome`                                                                                   | §7       | AC-22                          |
-| `ai.ts` / `ai-profile.ts`               | `stepAi` 三檔規則狀態機（defense → assault → expand → rally）、交錯評估、`mixSeed` 決定論、`RULE_PROFILES`                                              | §5       | AC-18 / 19 / 20 / 21           |
+| `ai.ts` / `ai-profile.ts`               | `stepAi` 三檔規則狀態機（defense → assault → expand → rally）、同步評估、`mixSeed` 決定論、`RULE_PROFILES`                                              | §5       | AC-18 / 19 / 20 / 21           |
 | `tick.ts`                               | `step(state)`：AI → movement → produce → combat → defeats → `tick+1`                                                                                    | §4.2     | AC-02                          |
 
 > **重點對齊 v2.0**：戰鬥為**鄰邊 cross-edge + 兩階段 claim**（非舊版同 tile multi-occupant）；`AttackOrder` 帶 `count` / `route`（征服行軍）；**AI 已實作並寫入 PRD §5**（非舊文件的「deferred / 規格 orphan」）。
@@ -130,7 +130,7 @@ pnpm typecheck && pnpm lint && pnpm test:run && pnpm build
 | AC-17 | seeded 地形生成 + 連通保證                  |    ✅     |       |             |
 | AC-18 | AI 決定論（同 seed 同序列）                 |    ✅     |       |             |
 | AC-19 | AI 擴張                                     |    ✅     |       |             |
-| AC-20 | AI 交錯評估                                 |    ✅     |       |             |
+| AC-20 | AI 同步評估                                 |    ✅     |       |             |
 | AC-21 | idle / scripted 模式                        |    ✅     |       |     ✅      |
 | AC-22 | 敗北處置（NEUTRAL 化 + 清 stack / order）   |    ✅     |       |             |
 | AC-23 | 勝利 / 敗北畫面                             |           |  ✅   |             |

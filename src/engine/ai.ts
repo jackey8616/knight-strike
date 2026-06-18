@@ -10,7 +10,13 @@ import {
   totalAmount,
 } from "./state";
 import { isImpassableTerrain } from "./terrain";
-import type { FactionId, GameState, Province, TileId } from "./types";
+import type {
+  FactionId,
+  GameState,
+  MarchingStack,
+  Province,
+  TileId,
+} from "./types";
 import { KING_THRESHOLD, KNIGHT_THRESHOLD, QUEEN_THRESHOLD } from "./upgrade";
 import { createRng, type Rng } from "./util/rng";
 import { NON_NEUTRAL_FACTIONS } from "./victory";
@@ -30,25 +36,19 @@ import { NON_NEUTRAL_FACTIONS } from "./victory";
 
 export const AI_EVAL_INTERVAL = RULE_PROFILES.normal.evalInterval;
 
-// §4.3 staggered offsets: Tokugawa tick 1, Takeda 2, Oda 3, Uesugi 4 — so the
-// four factions never collide on the same evaluation tick at a shared interval.
-const FACTION_OFFSETS: Readonly<Record<Exclude<FactionId, "NEUTRAL">, number>> =
-  {
-    TOKUGAWA: 1,
-    TAKEDA: 2,
-    ODA: 3,
-    UESUGI: 4,
-  };
-
+// All rule factions evaluate on the same ticks (every evalInterval) and decide
+// from the same frozen start-of-tick board (see stepAi). There is deliberately
+// NO per-faction stagger: a stagger let later movers act on a fresher board — a
+// persistent reaction advantage that, under aggressive play, snowballed into a
+// large positional win-rate bias. Simultaneous evaluation removes any first /
+// last mover entirely while staying deterministic.
 export function shouldEvaluate(
   faction: FactionId,
   tick: number,
   evalInterval: number = AI_EVAL_INTERVAL,
 ): boolean {
-  if (faction === "NEUTRAL") return false;
-  const offset = FACTION_OFFSETS[faction];
-  if (tick < offset) return false;
-  return (tick - offset) % evalInterval === 0;
+  if (faction === "NEUTRAL" || tick < 1) return false;
+  return (tick - 1) % evalInterval === 0;
 }
 
 // Distinct per-faction salts so mixSeed never collides across factions when
@@ -443,6 +443,7 @@ function nearestEnemyCastleDist(
 function tryAssault(
   state: GameState,
   faction: FactionId,
+  rng: Rng,
   profile: RuleProfile,
 ): GameState | null {
   const enemyCastles = liveEnemyCastles(state, faction);
@@ -516,11 +517,17 @@ function tryAssault(
   }
   if (cands.length === 0) return null;
 
+  // Break ties with the per-faction RNG, not tile id. A lexical id tiebreak
+  // makes every faction prefer the same (low-coordinate) targets, so corner
+  // factions gang up on the low corner while the high corner snowballs — a
+  // positional win-rate bias. Seeded shuffle keeps determinism (same seed →
+  // same pick) while distributing aggression evenly. Stable sort below preserves
+  // the shuffled order within equal (isEnemyCastle, castleDist, defender) keys.
+  shuffleInPlace(rng, cands);
   cands.sort((a, b) => {
     if (a.isEnemyCastle !== b.isEnemyCastle) return a.isEnemyCastle ? -1 : 1;
     if (a.castleDist !== b.castleDist) return a.castleDist - b.castleDist;
-    if (a.defender !== b.defender) return a.defender - b.defender;
-    return a.target.id < b.target.id ? -1 : 1;
+    return a.defender - b.defender;
   });
 
   const chosen = cands[0] as Cand;
@@ -558,7 +565,7 @@ function evaluateFaction(
   const rng = createRng(mixSeed(state.rngSeed, faction, state.tick));
   const r1 = tryDefense(state, faction, rng, profile);
   if (r1 !== null) return r1;
-  const ra = tryAssault(state, faction, profile);
+  const ra = tryAssault(state, faction, rng, profile);
   if (ra !== null) return ra;
   const r2 = tryExpand(state, faction, rng, profile);
   if (r2 !== null) return r2;
@@ -567,15 +574,35 @@ function evaluateFaction(
   return state;
 }
 
+// Simultaneous evaluation: every rule faction decides from the SAME frozen
+// start-of-tick `state`, then their moves are merged. A faction only ever spends
+// its own garrisons (disjoint source tiles) and appends marching stacks, so the
+// per-faction province edits don't overlap; new stacks are renumbered to keep
+// ids unique. This removes the turn-order advantage a sequential / staggered
+// loop gave the later mover.
 export function stepAi(state: GameState): GameState {
-  let s = state;
+  const provinces = new Map<TileId, Province>(state.provinces);
+  const stacks: MarchingStack[] = [...state.marchingStacks];
+  let nextMarchingId = state.nextMarchingId;
+  let changed = false;
   for (const faction of NON_NEUTRAL_FACTIONS) {
-    if (s.defeated.has(faction)) continue;
-    const mode = s.aiConfig[faction];
+    if (state.defeated.has(faction)) continue;
+    const mode = state.aiConfig[faction];
     if (mode.kind !== "rule") continue;
     const profile = RULE_PROFILES[mode.tier];
-    if (!shouldEvaluate(faction, s.tick, profile.evalInterval)) continue;
-    s = evaluateFaction(s, faction, profile);
+    if (!shouldEvaluate(faction, state.tick, profile.evalInterval)) continue;
+    const r = evaluateFaction(state, faction, profile);
+    if (r === state) continue;
+    changed = true;
+    for (const [id, p] of r.provinces) {
+      if (p !== state.provinces.get(id)) provinces.set(id, p);
+    }
+    for (let k = state.marchingStacks.length; k < r.marchingStacks.length; k++) {
+      const st = r.marchingStacks[k] as MarchingStack;
+      stacks.push({ ...st, id: `mstack:${nextMarchingId}` });
+      nextMarchingId += 1;
+    }
   }
-  return s;
+  if (!changed) return state;
+  return { ...state, provinces, marchingStacks: stacks, nextMarchingId };
 }

@@ -113,19 +113,23 @@ function to(stack: { path: readonly TileId[] }): TileId {
   return stack.path[stack.path.length - 1] as TileId;
 }
 
-describe("ai: cadence / stagger (shouldEvaluate)", () => {
-  it("staggers factions by offset Tokugawa 1 / Takeda 2 / Oda 3 / Uesugi 4", () => {
-    expect(shouldEvaluate("TOKUGAWA", 1)).toBe(true);
-    expect(shouldEvaluate("TAKEDA", 1)).toBe(false);
-    expect(shouldEvaluate("TAKEDA", 2)).toBe(true);
-    expect(shouldEvaluate("ODA", 3)).toBe(true);
-    expect(shouldEvaluate("UESUGI", 4)).toBe(true);
+describe("ai: cadence (shouldEvaluate)", () => {
+  it("evaluates all rule factions together every interval (no stagger)", () => {
+    // Simultaneous evaluation: every faction fires on the same ticks (1, 6,
+    // 11 … at the default interval 5) so there is no first / last mover.
+    for (const f of ["TOKUGAWA", "TAKEDA", "ODA", "UESUGI"] as const) {
+      expect(shouldEvaluate(f, 1)).toBe(true);
+      expect(shouldEvaluate(f, 6)).toBe(true);
+      expect(shouldEvaluate(f, 2)).toBe(false);
+      expect(shouldEvaluate(f, 5)).toBe(false);
+    }
   });
 
-  it("repeats on the default interval and never fires for NEUTRAL", () => {
+  it("repeats on the default interval and never fires for NEUTRAL / tick 0", () => {
     expect(shouldEvaluate("TOKUGAWA", 6)).toBe(true);
     expect(shouldEvaluate("TOKUGAWA", 2)).toBe(false);
     expect(shouldEvaluate("NEUTRAL", 1)).toBe(false);
+    expect(shouldEvaluate("TOKUGAWA", 0)).toBe(false);
   });
 
   it("honours a custom evalInterval (Easy = 8)", () => {
@@ -207,18 +211,18 @@ describe("ai: rule #2 expand", () => {
     expect(neighbours).toContain(to(stack));
   });
 
-  it("respects the per-faction stagger (Oda acts at tick 3, not tick 1)", () => {
+  it("only acts on an evaluation tick (tick 1, not tick 2)", () => {
     const tiles: readonly TileSpec[] = [
       { x: 3, y: 3, faction: "ODA", amount: 10 },
     ];
     const atTick1 = stepAi(
       mkState({ boardSize: 6, tiles, aiConfig: { ODA: AI_NORMAL }, tick: 1 }),
     );
-    const atTick3 = stepAi(
-      mkState({ boardSize: 6, tiles, aiConfig: { ODA: AI_NORMAL }, tick: 3 }),
+    const atTick2 = stepAi(
+      mkState({ boardSize: 6, tiles, aiConfig: { ODA: AI_NORMAL }, tick: 2 }),
     );
-    expect(atTick1.marchingStacks).toHaveLength(0);
-    expect(atTick3.marchingStacks).toHaveLength(1);
+    expect(atTick1.marchingStacks).toHaveLength(1);
+    expect(atTick2.marchingStacks).toHaveLength(0);
   });
 
   it("biases expansion toward the nearest enemy castle (directional)", () => {
