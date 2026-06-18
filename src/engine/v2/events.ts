@@ -87,4 +87,27 @@ export const ev = {
     connected: readonly string[],
     disconnected: readonly string[],
   ): GameEvent => ({ kind: "connectivity.recomputed", connected, disconnected }),
+  combatEngaged: (a: string, b: string): GameEvent => ({ kind: "combat.engaged", a, b }),
+  combatDamageDealt: (unitId: string, damage: number, remaining: number): GameEvent => ({
+    kind: "combat.damage_dealt",
+    unitId,
+    damage,
+    remaining,
+  }),
+  combatUnitDestroyed: (unitId: string, by: string | null): GameEvent => ({
+    kind: "combat.unit_destroyed",
+    unitId,
+    by,
+  }),
+  unitStarvation: (unitId: string, shrunk: number): GameEvent => ({
+    kind: "unit.starvation",
+    unitId,
+    shrunk,
+  }),
+  unitEliteChanged: (faction: FactionId, from: string | null, to: string | null): GameEvent => ({
+    kind: "unit.elite_changed",
+    faction,
+    from,
+    to,
+  }),
 };

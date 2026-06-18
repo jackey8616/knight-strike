@@ -123,8 +123,8 @@
 
 | 參數 | 預設值 | Status |
 | --- | --- | --- |
-| 戰鬥傷害 / tick | `base{S:10,M:100,L:1000} × floor(sqrt(pop/TIER_MIN))` | default-chosen |
-| 維持費 / tick | `floor((pop−2000)/100)` | default-chosen |
+| 戰鬥傷害 / tick | `max(1, floor(pop × tierWeight/100))`, tierWeight {S:1,M:10,L:100} | default-chosen (tuned M7) |
+| 維持費 / tick | `max(1, floor((pop−2000)/100))`（pop > 2000） | default-chosen |
 | 裁員速度 / tick | `floor((pop−2000)/4)`，≥1，至 2000 | default-chosen |
 | 多軍配對 | 最近敵軍、tie 小 id | default-chosen |
 | 怪物倍率 | `2.0` | default-chosen |
