@@ -37,6 +37,7 @@ pnpm install
 | `pnpm lint`                     | ESLint + Prettier check (no auto-fix)                |
 | `pnpm format`                   | Prettier write                                       |
 | `pnpm playtest <scenario.json>` | Headless scenario runner (see below)                 |
+| `pnpm balance`                  | AI balance guard (deterministic 4-AI batch; CI)      |
 
 ## Playing
 

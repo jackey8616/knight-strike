@@ -2,7 +2,7 @@
 
 ## 1. 專案概要
 
-Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.0）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.1）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
 
 ## 2. 技術棧與版本
 
@@ -252,6 +252,7 @@ PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 | `pnpm test:coverage`                | 出 coverage 報告；milestone 完成前跑、檢查 engine ≥ 90%             |
 | `pnpm playtest <scenario.json>`     | 跑單場 headless；scenario 路徑必填、無預設                          |
 | `pnpm playtest <s.json> --runs 100` | balance / 回歸測試                                                  |
+| `pnpm balance`                      | AI 平衡守門：固定 4-AI 批次，失衡即 fail（CI gate 一步）            |
 | `pnpm lint`                         | ESLint + Prettier check（**不**自動 fix）；PR 前必跑                |
 | `pnpm format`                       | Prettier write；commit 前手動跑或 lefthook 代勞                    |
 | `pnpm typecheck`                    | `tsc --noEmit`；milestone 完成前必跑                                |
