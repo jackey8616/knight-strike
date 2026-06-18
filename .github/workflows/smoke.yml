@@ -1,0 +1,44 @@
+name: Browser Smoke
+
+# Headless browser smoke for the UI shell (Start Menu → game → End screen →
+# Restart/Main-Menu rebuild). Manual-only: it boots a real Chrome + dev server
+# and plays games to completion, so it's far heavier than the per-PR CI gate.
+# Trigger it from the Actions tab before merging UI/render work. Locally the
+# exact same run is `pnpm smoke`.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.3.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # ubuntu-latest ships Chrome preinstalled — use it, no download.
+      - name: Resolve Chrome
+        run: echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable || command -v chromium-browser)" >> "$GITHUB_ENV"
+      - name: Browser smoke
+        run: pnpm smoke
+        env:
+          CHROME_NO_SANDBOX: "1"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: scripts/smoke/.shots
+          if-no-files-found: ignore

@@ -235,6 +235,7 @@ PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 - **不強制**單元測試（DOM / Pixi 互動 mock 成本高、回報率低）。
 - 靠 **manual smoke**（§8 工作流）+ **`/run` skill** 跑實機驗證。
 - 若某 input 純邏輯（如 `pointer.ts` 的 click vs drag 判斷），可選擇性寫 unit test。
+- **動到 UI shell（`start-menu` / `end-screen` / `main.ts` teardown-rebuild），或任何會影響 menu→game→end→restart→main-menu 流程的改動 → push / 開 PR 前先跑 `pnpm smoke`**（zero-dep headless 瀏覽器端到端，須 exit 0）。框架見 `scripts/smoke/`；CI 為 manual-only（`.github/workflows/smoke.yml`），不會自動擋 PR，所以這條靠自律。
 
 ## 6. 執行指令
 
@@ -253,6 +254,7 @@ PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 | `pnpm playtest <scenario.json>`     | 跑單場 headless；scenario 路徑必填、無預設                          |
 | `pnpm playtest <s.json> --runs 100` | balance / 回歸測試                                                  |
 | `pnpm balance`                      | AI 平衡守門：固定 4-AI 批次，失衡即 fail（CI gate 一步）            |
+| `pnpm smoke`                        | 無依賴 headless 瀏覽器 smoke（CDP 驅動 Chrome 跑 menu→game→end→restart）；UI shell 改動後手動驗，CI 為 manual-only（`scripts/smoke/`、`.github/workflows/smoke.yml`） |
 | `pnpm lint`                         | ESLint + Prettier check（**不**自動 fix）；PR 前必跑                |
 | `pnpm format`                       | Prettier write；commit 前手動跑或 lefthook 代勞                    |
 | `pnpm typecheck`                    | `tsc --noEmit`；milestone 完成前必跑                                |
@@ -332,6 +334,7 @@ Milestone 列表（與 [`MILESTONES.md`](docs/MILESTONES.md) 對齊）：
 - [ ] `pnpm test:coverage` engine line coverage ≥ 90%
 - [ ] 用 `/run` skill 啟動 dev server，瀏覽器肉眼跑通本 milestone 對應的 manual 驗證步驟
 - [ ] 用 `/verify` skill 端到端跑一次
+- [ ] **若本次動到 UI shell / `main.ts` 生命週期 → `pnpm smoke` 通過（exit 0）**（§5.4）
 
 ### 8.5 遇到不確定 = 停下來問
 
