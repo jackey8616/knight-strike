@@ -38,8 +38,30 @@ export const NEST_DRIP: ScenarioInput = {
   nests: [{ x: 4, y: 4 }],
 };
 
+// Four rule AIs on the 4-nation board — the balance battleground. Each starts
+// with a castle, a house, and a starting army; the AIs build, expand and march
+// to conquer. Used to check the game converges (a winner, not perpetual stalemate).
+export const SPECTATOR_4AI: ScenarioInput = {
+  ...SPECTATOR_4,
+  name: "spectator-4ai",
+  ai: { TOKUGAWA: "normal", TAKEDA: "normal", ODA: "normal", UESUGI: "normal" },
+  units: [
+    { owner: "TOKUGAWA", x: 1, y: 1, population: 100 },
+    { owner: "TAKEDA", x: 7, y: 1, population: 100 },
+    { owner: "ODA", x: 1, y: 7, population: 100 },
+    { owner: "UESUGI", x: 7, y: 7, population: 100 },
+  ],
+  factions: {
+    TOKUGAWA: { gold: 300 },
+    TAKEDA: { gold: 300 },
+    ODA: { gold: 300 },
+    UESUGI: { gold: 300 },
+  },
+};
+
 export const SCENARIOS: Readonly<Record<string, ScenarioInput>> = {
   "quick-win": QUICK_WIN,
   "spectator-4": SPECTATOR_4,
+  "spectator-4ai": SPECTATOR_4AI,
   "nest-drip": NEST_DRIP,
 };

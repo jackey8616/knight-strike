@@ -2,6 +2,7 @@ import type { GameEvent } from "@/engine/v2/events";
 import { createGameState, defaultFactions, makeFaction, tileId } from "@/engine/v2/state";
 import { step } from "@/engine/v2/tick";
 import type {
+  AiMode,
   Faction,
   FactionId,
   Field,
@@ -12,6 +13,8 @@ import type {
   Terrain,
   Unit,
 } from "@/engine/v2/types";
+import { defaultAiConfig } from "@/engine/v2/state";
+import { PLAYER_FACTIONS } from "@/engine/v2/types";
 import { evaluateOutcome, type GameOutcome } from "@/engine/v2/victory";
 
 // v2 headless playtest scenario — a flat, JSON-friendly description of an
@@ -41,6 +44,7 @@ export type ScenarioInput = {
   readonly rngSeed: number;
   readonly remainingDays?: number;
   readonly factions?: Partial<Record<FactionId, ScenarioFactionCfg>>;
+  readonly ai?: Partial<Record<FactionId, AiMode>>;
   readonly units?: readonly ScenarioUnit[];
   readonly houses?: readonly ScenarioHouse[];
   readonly fields?: readonly ScenarioField[];
@@ -49,12 +53,22 @@ export type ScenarioInput = {
   readonly terrain?: readonly ScenarioTerrain[];
 };
 
-export type RunOptions = { readonly maxTicks: number; readonly emitEvents?: boolean };
+export type RunOptions = {
+  readonly maxTicks: number;
+  readonly emitEvents?: boolean;
+  // spectator: run AI-vs-AI to the last nation standing (ignore the player-loss
+  // short-circuit) and report the winner — for balance batches.
+  readonly spectator?: boolean;
+};
 export type RunResult = {
   readonly outcome: GameOutcome;
   readonly ticks: number;
+  readonly winner: FactionId | null; // last nation standing, or null if a draw
   readonly events?: readonly GameEvent[];
 };
+
+const aliveFactions = (state: GameState): FactionId[] =>
+  PLAYER_FACTIONS.filter((f) => !state.defeated.has(f));
 
 export function buildScenarioState(input: ScenarioInput): GameState {
   const factions = defaultFactions();
@@ -114,11 +128,18 @@ export function buildScenarioState(input: ScenarioInput): GameState {
     durability: 100,
   }));
 
+  const aiConfig = defaultAiConfig();
+  for (const id of Object.keys(input.ai ?? {}) as FactionId[]) {
+    const mode = input.ai?.[id];
+    if (mode !== undefined) aiConfig[id] = mode;
+  }
+
   return createGameState({
     boardSize: input.boardSize,
     rngSeed: input.rngSeed,
     remainingDays: input.remainingDays ?? 3000,
     factions,
+    aiConfig,
     provinces,
     units,
     houses,
@@ -134,15 +155,17 @@ export function buildScenarioState(input: ScenarioInput): GameState {
 export function runScenario(input: ScenarioInput, opts: RunOptions): RunResult {
   let s = buildScenarioState(input);
   const events: GameEvent[] = [];
-  for (let i = 0; i < opts.maxTicks; i += 1) {
-    const outcome = evaluateOutcome(s);
-    if (outcome.kind !== "ongoing") {
-      return opts.emitEvents ? { outcome, ticks: s.tick, events } : { outcome, ticks: s.tick };
-    }
+  const done = (): boolean =>
+    opts.spectator === true ? aliveFactions(s).length <= 1 : evaluateOutcome(s).kind !== "ongoing";
+
+  for (let i = 0; i < opts.maxTicks && !done(); i += 1) {
     const r = step(s);
     s = r.state;
     if (opts.emitEvents) for (const e of r.events) events.push(e);
   }
-  const outcome = evaluateOutcome(s);
-  return opts.emitEvents ? { outcome, ticks: s.tick, events } : { outcome, ticks: s.tick };
+
+  const survivors = aliveFactions(s);
+  const winner = survivors.length === 1 ? (survivors[0] as FactionId) : null;
+  const base = { outcome: evaluateOutcome(s), ticks: s.tick, winner };
+  return opts.emitEvents ? { ...base, events } : base;
 }

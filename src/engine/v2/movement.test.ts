@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceMarch, findPath, issueMarch } from "./movement";
+import { advanceMarch, findPath, issueMarch, mergeFriendlyUnits } from "./movement";
 import { createGameState, tileId } from "./state";
 import type { FactionId, Province, Unit } from "./types";
 
@@ -61,7 +61,7 @@ describe("issueMarch / advanceMarch", () => {
     expect(after.units[0]?.tile).toBe(tileId(0, 0)); // stayed put
   });
 
-  it("stops when the next tile is occupied by an enemy", () => {
+  it("stops when the next tile is occupied by an enemy (kept for AC coverage)", () => {
     let s = createGameState({
       boardSize: 5,
       rngSeed: 1,
@@ -71,5 +71,43 @@ describe("issueMarch / advanceMarch", () => {
     const after = advanceMarch(s).state;
     expect(after.units.find((u) => u.id === "unit:1")?.tile).toBe(tileId(0, 0));
     expect(after.marchOrders).toHaveLength(0); // order dropped, will fight instead
+  });
+});
+
+describe("mergeFriendlyUnits [AC-16]", () => {
+  const at = (id: string, owner: FactionId, x: number, y: number, pop: number): Unit => ({
+    id,
+    owner,
+    tile: tileId(x, y),
+    population: pop,
+    isMonster: false,
+    isElite: false,
+    task: null,
+    combatLock: null,
+  });
+
+  it("merges co-located idle friendly units into one summed army", () => {
+    const s = createGameState({
+      boardSize: 3,
+      rngSeed: 1,
+      units: [at("a", "TOKUGAWA", 1, 1, 5000), at("b", "TOKUGAWA", 1, 1, 5000)],
+    });
+    const after = mergeFriendlyUnits(s);
+    expect(after.units).toHaveLength(1);
+    expect(after.units[0]?.population).toBe(10000); // stacked → one big army
+  });
+
+  it("never merges enemies, nor units that are fighting / building", () => {
+    const s = createGameState({
+      boardSize: 3,
+      rngSeed: 1,
+      units: [
+        at("a", "TOKUGAWA", 1, 1, 100),
+        at("e", "TAKEDA", 1, 1, 100), // enemy on the same tile — not merged
+        { ...at("b", "TOKUGAWA", 2, 2, 100), combatLock: "x" }, // busy
+        { ...at("c", "TOKUGAWA", 2, 2, 100), combatLock: "y" }, // busy
+      ],
+    });
+    expect(mergeFriendlyUnits(s).units).toHaveLength(4); // nothing merges
   });
 });

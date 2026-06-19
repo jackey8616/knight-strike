@@ -1,3 +1,4 @@
+import { stepAi } from "./ai";
 import { dayOf } from "./clock";
 import { resolveCombat } from "./combat";
 import { recomputeElite } from "./combat-tier";
@@ -7,7 +8,7 @@ import { ev, type GameEvent, type StepResult } from "./events";
 import { expandFields, spawnFromHouses } from "./house";
 import { applyMaintenance } from "./maintenance";
 import { accumulateNests } from "./monster";
-import { advanceMarch } from "./movement";
+import { advanceMarch, mergeFriendlyUnits } from "./movement";
 import { growPopulation } from "./population";
 import { applyDefeats } from "./victory";
 import type { GameState } from "./types";
@@ -27,7 +28,9 @@ export function step(state: GameState): StepResult {
   const events: GameEvent[] = [];
   let s = state;
 
+  s = stepAi(s); // PRD §5.1 — AI decisions on the tick-start snapshot, first
   s = absorb(events, advanceMarch(s));
+  s = mergeFriendlyUnits(s); // co-located friendly units merge into one army (§4.7)
   s = absorb(events, resolveCombat(s));
   s = absorb(events, advanceConstruction(s));
   s = absorb(events, advanceDestruction(s));
