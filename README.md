@@ -4,7 +4,7 @@ Web remake of the 2005 free Japanese title _国家大作戦_ / Falcom's **Lord M
 
 [`docs/PRD.md`](docs/PRD.md) (v2.x) is the single source of truth for rules, numbers and acceptance criteria; [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) covers the opponent AI; [`docs/MILESTONES.md`](docs/MILESTONES.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md) track delivery; [`CLAUDE.md`](CLAUDE.md) is the engineering reference. This README only covers running, building and the scripts.
 
-> **Easter egg:** the original prototype (the v1 territory-claim game) is preserved, hidden — load the app with **`?v1`** to play it.
+> **Default is v1; v2 lives at `?v2`.** The app boots the **v1** game by default (its look & feel is what we ship). Load **`?v2`** for the v2 Lord Monarch economy game described below (`?v1` also forces v1 explicitly). `src/main.ts` is a thin router over `main-v1.ts` / `main-v2.ts`.
 
 ## Status
 
@@ -69,7 +69,7 @@ Scenarios live in `src/playtest/v2/scenarios.ts`; the runner / scenario schema i
 ## Repo layout
 
 - `src/engine/v2/` — pure v2 logic; **no Pixi / DOM / GSAP** (ESLint-enforced). `src/engine/*.ts` is the v1 engine (kept for the `?v1` easter egg).
-- `src/render/v2/`, `src/ui/v2/` — v2 Pixi board + DOM HUD/controls. `src/main.ts` boots v2 (or v1 on `?v1`).
+- `src/render/v2/`, `src/ui/v2/` — v2 Pixi board + DOM HUD/controls. `src/main.ts` routes: default → `main-v1.ts` (v1), `?v2` → `main-v2.ts` (v2).
 - `src/playtest/v2/` — v2 headless runner, scenarios, CLI.
 - `docs/` — `PRD.md` (spec), `AI-DESIGN.md`, `MILESTONES.md`, `BACKLOG.md`, `v2_spec/` (source).
 - `scripts/smoke/` — CDP browser smoke (`run.mjs` + `driver.mjs`).
