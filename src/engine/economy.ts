@@ -102,6 +102,34 @@ export type BuildResult =
   | { readonly ok: true; readonly state: GameState; readonly tile: TileId }
   | { readonly ok: false; readonly state: GameState; readonly reason: BuildReason };
 
+// PRD §4.3 build precondition, as a reason (null = buildable). Shared by
+// buildHouse and the UI's `canBuildHouse` so the engine rule and the player's
+// "Build House" affordance never drift.
+export function buildBlockReason(
+  state: GameState,
+  cmd: BuildHouseCommand,
+): BuildReason | null {
+  const p = state.provinces.get(cmd.tile);
+  if (
+    p === undefined ||
+    cmd.faction === "NEUTRAL" ||
+    derivedOwner(p) !== cmd.faction
+  ) {
+    return "wrong-owner";
+  }
+  const builder = findOccupant(p, cmd.faction);
+  if (builder === undefined || builder.amount <= 0) return "no-builder";
+  if (p.isCastle) return "is-castle";
+  if (p.isHouse === true) return "already-house";
+  if (isImpassableTerrain(p.terrain)) return "not-buildable";
+  if (state.economy[cmd.faction].gold < HOUSE_COST) return "insufficient-gold";
+  return null;
+}
+
+export function canBuildHouse(state: GameState, cmd: BuildHouseCommand): boolean {
+  return buildBlockReason(state, cmd) === null;
+}
+
 // PRD §4.3: a faction spends HOUSE_COST gold to raise a House on an owned tile
 // it has a garrison on. The builder seeds the House with half its troops (the
 // founding population), keeping the rest as the tile's garrison. Castles and
@@ -110,27 +138,11 @@ export function buildHouse(
   state: GameState,
   cmd: BuildHouseCommand,
 ): BuildResult {
-  const p = state.provinces.get(cmd.tile);
-  if (
-    p === undefined ||
-    cmd.faction === "NEUTRAL" ||
-    derivedOwner(p) !== cmd.faction
-  ) {
-    return { ok: false, state, reason: "wrong-owner" };
-  }
-  const builder = findOccupant(p, cmd.faction);
-  if (builder === undefined || builder.amount <= 0) {
-    return { ok: false, state, reason: "no-builder" };
-  }
-  if (p.isCastle) return { ok: false, state, reason: "is-castle" };
-  if (p.isHouse === true) return { ok: false, state, reason: "already-house" };
-  if (isImpassableTerrain(p.terrain)) {
-    return { ok: false, state, reason: "not-buildable" };
-  }
+  const reason = buildBlockReason(state, cmd);
+  if (reason !== null) return { ok: false, state, reason };
+  const p = state.provinces.get(cmd.tile) as Province;
+  const builder = findOccupant(p, cmd.faction) as Occupant;
   const econ = state.economy[cmd.faction];
-  if (econ.gold < HOUSE_COST) {
-    return { ok: false, state, reason: "insufficient-gold" };
-  }
 
   // Half the builder seeds the founding population; the other half (always ≥ 1,
   // since this is ceil) stays as the tile's garrison so a new House keeps a

@@ -62,6 +62,15 @@ const CSS = `
   }
   .ks-dispatch button { padding: 6px 9px !important; }
 
+  .ks-economy {
+    top: 6px !important;
+    left: 8px !important;
+    padding: 4px 7px !important;
+    gap: 6px !important;
+    font-size: 10px !important;
+  }
+  .ks-economy input[type="range"] { width: 56px !important; }
+
   .ks-end { font-size: 13px !important; }
 }
 `;

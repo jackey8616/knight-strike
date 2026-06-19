@@ -8,6 +8,9 @@ export type KeyboardDeps = {
   cancelDrag(): void;
   panBy(dx: number, dy: number): void;
   resetCamera(): void;
+  // PRD §4.3: build a House on the currently-selected tile (no-op if none /
+  // not eligible — main wires the eligibility).
+  buildHouse(): void;
 };
 
 export type KeyboardController = {
@@ -82,6 +85,10 @@ export function createKeyboardController(
       case "r":
       case "R":
         deps.resetCamera();
+        return;
+      case "b":
+      case "B":
+        deps.buildHouse();
         return;
       default:
         break;

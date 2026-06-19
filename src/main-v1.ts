@@ -1,3 +1,4 @@
+import { buildHouse, MAX_TAX_PCT, setTaxPct } from "@/engine/economy";
 import {
   cancelMarchingStack,
   dispatch as engineDispatch,
@@ -31,6 +32,7 @@ import {
 } from "@/scenarios/sized";
 import { setHeightSeed } from "@/render/terrain-height";
 import { evaluateOutcome } from "@/engine/victory";
+import { createEconomyPanel } from "@/ui/economy-panel";
 import { createFactionPanel } from "@/ui/faction-panel";
 import { createHud } from "@/ui/hud";
 import { createTileInfoPanel } from "@/ui/tile-info";
@@ -149,7 +151,28 @@ function createGame(
     onSpeed: (s) => setSpeed(s),
   });
   const factionPanel = createFactionPanel(document.body, PLAYER_FACTION);
-  const tileInfo = createTileInfoPanel(document.body);
+  const tileInfo = createTileInfoPanel(document.body, {
+    playerFaction: PLAYER_FACTION,
+    onBuild: (id) => buildHouseAt(id),
+  });
+  const economyPanel = createEconomyPanel(document.body, {
+    initialTaxPct: state.economy[PLAYER_FACTION].taxPct,
+    maxTaxPct: MAX_TAX_PCT,
+    onTax: (pct) => {
+      state = setTaxPct(state, PLAYER_FACTION, pct);
+      renderAll();
+    },
+  });
+
+  // PRD §4.3: build a House on a player-owned tile (engine validates; a no-op
+  // when ineligible). Deselects + re-renders on success, like a dispatch commit.
+  function buildHouseAt(id: TileId): void {
+    const res = buildHouse(state, { faction: PLAYER_FACTION, tile: id });
+    if (!res.ok) return;
+    state = res.state;
+    deselect();
+    renderAll();
+  }
 
   function pushHudStatus(): void {
     hud.setStatus({
@@ -174,6 +197,10 @@ function createGame(
     units.update(state);
     marching.update(state, intervalForSpeed(speed));
     factionPanel.update(state);
+    economyPanel.update(
+      state.economy[PLAYER_FACTION].gold,
+      state.economy[PLAYER_FACTION].taxPct,
+    );
     refreshTileInfo();
     pushHudStatus();
   }
@@ -368,6 +395,7 @@ function createGame(
           toY: number,
           ratio: DispatchRatio,
         ) => { ok: boolean; reason?: string };
+        playerBuildHouse: (x: number, y: number) => boolean;
         setPaused: (v: boolean) => void;
       };
     };
@@ -387,6 +415,11 @@ function createGame(
         }
         return { ok: false, reason: res.reason };
       },
+      playerBuildHouse: (x, y) => {
+        const before = state;
+        buildHouseAt(makeTileId(x, y));
+        return state !== before;
+      },
       setPaused,
     };
   }
@@ -404,6 +437,10 @@ function createGame(
     },
     panBy: (dx, dy) => board.panBy(dx, dy),
     resetCamera: () => board.resetCamera(),
+    // PRD §4.3: `B` builds a House on the currently-selected tile.
+    buildHouse: () => {
+      if (selectedTileId !== null) buildHouseAt(selectedTileId);
+    },
   });
 
   return function teardown(): void {
@@ -414,6 +451,7 @@ function createGame(
     pointer.destroy();
     ratioPanel.destroy();
     tileInfo.destroy();
+    economyPanel.destroy();
     factionPanel.destroy();
     hud.destroy();
     endScreen.destroy();

@@ -1,4 +1,5 @@
-import type { GameState, TileId } from "@/engine/types";
+import { canBuildHouse, HOUSE_COST } from "@/engine/economy";
+import type { FactionId, GameState, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 import { installResponsiveStyles } from "./responsive";
 
@@ -25,6 +26,14 @@ export type TileInfoPanel = {
   destroy(): void;
 };
 
+export type TileInfoDeps = {
+  // The human faction, and a callback to build a House on `id`. When provided,
+  // the panel shows a "Build House" button on a build-eligible selected tile
+  // (PRD §4.3). Omitted in contexts with no player (e.g. spectator).
+  readonly playerFaction: FactionId;
+  readonly onBuild: (id: TileId) => void;
+};
+
 const FACTION_LABEL: Readonly<Record<string, string>> = {
   TOKUGAWA: "Tokugawa",
   TAKEDA: "Takeda",
@@ -40,6 +49,18 @@ const TIER_LABEL = {
   KING: "King",
 } as const;
 
+const BUILD_BTN_STYLE = [
+  "margin-top: 6px",
+  "width: 100%",
+  "padding: 4px 8px",
+  "background: #2c4a2f",
+  "color: #dfe",
+  "border: 1px solid #4fb55f",
+  "border-radius: 4px",
+  "cursor: pointer",
+  "font: inherit",
+].join(";");
+
 const TERRAIN_LABEL: Readonly<Record<string, string>> = {
   PLAINS: "Plains",
   FOREST: "Forest · −25% dmg",
@@ -47,7 +68,10 @@ const TERRAIN_LABEL: Readonly<Record<string, string>> = {
   WATER: "Water · impassable",
 };
 
-export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
+export function createTileInfoPanel(
+  parent: HTMLElement,
+  deps?: TileInfoDeps,
+): TileInfoPanel {
   installResponsiveStyles();
   const root = document.createElement("div");
   root.style.cssText = ROOT_STYLE;
@@ -69,9 +93,8 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
       return;
     }
     const lines: string[] = [];
-    lines.push(
-      `<div style='font-weight:700'>(${p.x}, ${p.y})${p.isCastle ? " ★ Castle" : ""}</div>`,
-    );
+    const tag = p.isCastle ? " ★ Castle" : p.isHouse === true ? " ⌂ House" : "";
+    lines.push(`<div style='font-weight:700'>(${p.x}, ${p.y})${tag}</div>`);
     const terrain = p.terrain ?? "PLAINS";
     if (terrain !== "PLAINS") {
       lines.push(
@@ -80,6 +103,11 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
     }
     if (p.isCastle && p.castleOwner !== null) {
       lines.push(`<div>Castle of: ${FACTION_LABEL[p.castleOwner] ?? p.castleOwner}</div>`);
+    }
+    if (p.isHouse === true && p.houseOwner !== null && p.houseOwner !== undefined) {
+      lines.push(
+        `<div>House of: ${FACTION_LABEL[p.houseOwner] ?? p.houseOwner} · Pop ${p.housePopulation ?? 0}</div>`,
+      );
     }
     if (p.occupants.length === 0) {
       if (p.lastClaimedFaction !== null) {
@@ -120,6 +148,19 @@ export function createTileInfoPanel(parent: HTMLElement): TileInfoPanel {
       }
     }
     root.innerHTML = lines.join("");
+
+    // PRD §4.3: offer "Build House" on a build-eligible selected tile. Appended
+    // as a real button (the rest of the panel is innerHTML) so it carries a
+    // click handler. canBuildHouse is the engine's own predicate, so the button
+    // only shows when the build would actually succeed.
+    if (deps !== undefined && canBuildHouse(state, { faction: deps.playerFaction, tile: id })) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `⌂ Build House (${HOUSE_COST}⛁)`;
+      btn.style.cssText = BUILD_BTN_STYLE;
+      btn.addEventListener("click", () => deps.onBuild(id));
+      root.appendChild(btn);
+    }
   }
 
   renderEmpty();

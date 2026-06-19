@@ -2,10 +2,12 @@
 // global WebSocket + fetch. `run.mjs` boots a Vite dev server + headless Chrome
 // and invokes this; nothing here launches anything.
 //
-// Flow (PRD §8 AC-38..42): menu renders → Start (no reload) → engine ticks
-// (day advances) → entities render (castles/houses/units via window.__ks) →
-// player control bar (tax slider / build mode) works → ?v1 easter egg boots the
-// original prototype. Page exceptions are always fatal.
+// Flow: ?v2 menu renders → Start (no reload) → engine ticks (day advances) →
+// entities render (castles/houses/units via window.__ks) → player control bar
+// (tax slider / build mode) works → the DEFAULT boots the v1 game, and its
+// House economy (PRD §4.3 / AC-27..31) works: seed Houses render, the gold + tax
+// HUD is wired, and the player can claim a tile and build a House on it. Page
+// exceptions are always fatal.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,8 +145,49 @@ function fail(message) {
   log("STEP4 default (v1) booted");
   await shot("v2-03-default-v1");
 
+  // STEP 5 — v1 House economy (PRD §4.3 / AC-27..31): Start the v1 game, then
+  // assert seed Houses render, the gold + tax HUD exists, and the tax slider is
+  // wired to the engine.
+  await evaluate(`[...document.querySelectorAll('.ks-menu button')].find(b=>b.textContent.trim()==='Start').click()`);
+  await waitFor(`!!(window.__ks && window.__ks.getState && window.__ks.getState().economy)`, 15000, 300, "v1 game + economy state");
+  const v1 = await evaluate(
+    `(()=>{const s=window.__ks.getState();const P=[...s.provinces.values()];return{houses:P.filter(p=>p.isHouse===true).length,castles:P.filter(p=>p.isCastle).length,gold:s.economy.TOKUGAWA.gold};})()`,
+  );
+  log("STEP5 v1 economy:", JSON.stringify(v1));
+  if (v1.houses < 4 || v1.castles < 4 || v1.gold <= 0) fail("v1 economy seed missing: " + JSON.stringify(v1));
+  const econUi = await evaluate(
+    `(()=>({panel:!!document.querySelector('.ks-economy'),tax:!!document.querySelector('.ks-economy input[type=range]')}))()`,
+  );
+  log("STEP5 economy UI:", JSON.stringify(econUi));
+  if (!econUi.panel || !econUi.tax) fail("v1 economy panel/tax slider missing: " + JSON.stringify(econUi));
+  await evaluate(
+    `(()=>{const sl=document.querySelector('.ks-economy input[type=range]');sl.value='25';sl.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+  );
+  const taxPct = await evaluate(`window.__ks.getState().economy.TOKUGAWA.taxPct`);
+  if (taxPct !== 25) fail("v1 tax slider not wired to engine: " + taxPct);
+  await shot("v1-01-economy");
+
+  // STEP 6 — player builds a House. No tile is eligible at t=0 (castle can't
+  // host one, the seed House is taken), so claim an empty tile first, then build.
+  if ((await evaluate(`window.__ks.playerBuildHouse(0,0)`)) !== false) fail("build wrongly allowed on castle");
+  await evaluate(`window.__ks.setPaused(false)`);
+  await evaluate(`window.__ks.playerDispatch(0,0,0,1,1.0)`);
+  await waitFor(
+    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,1');return !!p&&p.occupants.length===1&&p.occupants[0].faction==='TOKUGAWA';})()`,
+    25000,
+    500,
+    "claim tile (0,1)",
+  );
+  const built = await evaluate(`window.__ks.playerBuildHouse(0,1)`);
+  const isHouse = await evaluate(
+    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,1');return p.isHouse===true&&p.houseOwner==='TOKUGAWA';})()`,
+  );
+  log("STEP6 player build:", JSON.stringify({ built, isHouse }));
+  if (!built || !isHouse) fail("v1 player build-house failed");
+  await shot("v1-02-built");
+
   if (pageExceptions.length) fail("page exceptions: " + JSON.stringify(pageExceptions));
   if (STRICT_CONSOLE && consoleErrors.length) fail("console errors (strict): " + JSON.stringify(consoleErrors));
-  log("RESULT_OK — default boots v1; ?v2 menu/start/ticks/entities/controls");
+  log("RESULT_OK — ?v2 menu/start/ticks/entities/controls; v1 default boots + House economy (seed houses, gold/tax HUD, player build)");
   process.exit(0);
 })().catch((e) => fail(e.message));
