@@ -525,10 +525,10 @@ function drawTilePrism(
 // Castle marker is rendered as a stylised keep silhouette inset within the
 // tile diamond — three crenellations and a wider base — so the four corner
 // castles read at a glance even at 1x zoom without dedicated sprite art.
-function drawCastleMarker(g: Graphics): void {
-  const baseY = TILE_HEIGHT / 4;
+function drawCastleMarker(g: Graphics, lift: number): void {
+  const baseY = TILE_HEIGHT / 4 - lift;
   const halfW = TILE_WIDTH / 5;
-  const bodyTop = -TILE_HEIGHT / 4;
+  const bodyTop = -TILE_HEIGHT / 4 - lift;
   const merlonStep = halfW / 1.5;
   const merlonH = 3;
 
@@ -552,12 +552,13 @@ function drawCastleMarker(g: Graphics): void {
 // House marker (PRD §4.3): a small gabled hut inset in the tile diamond — a
 // squat body with a peaked roof — so an economy tile reads distinctly from a
 // castle keep at a glance. Ownership is conveyed by the tile's owner tint, so
-// the marker itself is a fixed colour.
-function drawHouseMarker(g: Graphics): void {
+// the marker itself is a fixed colour. `lift` raises it onto the tile's rolling
+// top face (drawn at -ground) so it sits on the surface instead of sinking.
+function drawHouseMarker(g: Graphics, lift: number): void {
   const halfW = TILE_WIDTH / 9;
-  const bodyTop = -TILE_HEIGHT / 12;
-  const bodyBot = TILE_HEIGHT / 6;
-  const roofPeak = -TILE_HEIGHT / 4;
+  const bodyTop = -TILE_HEIGHT / 12 - lift;
+  const bodyBot = TILE_HEIGHT / 6 - lift;
+  const roofPeak = -TILE_HEIGHT / 4 - lift;
 
   // Body (square) then roof (triangle) as one outline.
   g.moveTo(-halfW, bodyBot);
@@ -916,9 +917,9 @@ export function createBoardRenderer(
           t.hasTexture,
         );
         if (province.isCastle) {
-          drawCastleMarker(t.base);
+          drawCastleMarker(t.base, t.ground);
         } else if (isHouse) {
-          drawHouseMarker(t.base);
+          drawHouseMarker(t.base, t.ground);
         }
         t.painted = true;
         t.paintedColor = ownerColor;
