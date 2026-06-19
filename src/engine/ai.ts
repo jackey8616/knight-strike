@@ -557,16 +557,10 @@ function tryAssault(
 // to seed a worthwhile House population (half) and still leave a defender.
 const BUILD_MIN_GARRISON = 3;
 
-function adjacentOwnHouse(
-  state: GameState,
-  p: Province,
-  faction: FactionId,
-): boolean {
-  for (const nb of neighborsOf(state, p.id)) {
-    if (nb.isHouse === true && nb.houseOwner === faction) return true;
-  }
-  return false;
-}
+// Every faction aims for at least this many Houses regardless of territory size,
+// so the lone seed House doesn't satisfy the per-tile ratio and freeze economic
+// growth before the faction can expand.
+const MIN_TARGET_HOUSES = 3;
 
 function adjacentHostile(
   state: GameState,
@@ -593,10 +587,11 @@ function ownedNeighbourCount(
 
 // PRD §4.3: spend gold to raise a House — the only troop source, so an AI that
 // never builds starves; but over-building stalls expansion, so it keeps roughly
-// one House per profile.housePerTiles owned tiles. Builds on the garrisoned,
-// non-frontline interior tile with the most owned neighbours (fastest growth),
-// spaced out from existing own Houses. Deterministic pick (first best by Map
-// order) → §4.2 determinism holds.
+// one House per profile.housePerTiles owned tiles (min MIN_TARGET_HOUSES).
+// Builds on the garrisoned, non-frontline owned tile with the most owned
+// neighbours (fastest growth) — clustering near other Houses is fine and even
+// boosts growth, and lets a just-spawned stack build straight away. Deterministic
+// pick (first best by Map order) → §4.2 determinism holds.
 function tryBuildHouse(
   state: GameState,
   faction: FactionId,
@@ -609,9 +604,17 @@ function tryBuildHouse(
   for (const p of ownTiles) {
     if (p.isHouse === true && p.houseOwner === faction) houseCount += 1;
   }
-  if (houseCount >= Math.floor(ownTiles.length / profile.housePerTiles)) {
-    return null;
-  }
+  // Houses are the only troop source, so a faction should invest spare gold in
+  // them rather than hoard it. Target a House per `housePerTiles` owned tiles,
+  // but always aim for at least MIN_TARGET_HOUSES — otherwise the one seed House
+  // satisfies the ratio until the faction owns ~8 tiles, which it can't reach
+  // without the troops more Houses would produce (the bootstrap deadlock). The
+  // builder-availability checks below still gate it, so this never over-builds.
+  const target = Math.max(
+    MIN_TARGET_HOUSES,
+    Math.floor(ownTiles.length / profile.housePerTiles),
+  );
+  if (houseCount >= target) return null;
 
   let best: Province | null = null;
   let bestScore = -1;
@@ -619,7 +622,6 @@ function tryBuildHouse(
     if (p.isCastle || p.isHouse === true) continue;
     if (ownAmount(p, faction) < BUILD_MIN_GARRISON) continue;
     if (adjacentHostile(state, p, faction)) continue;
-    if (adjacentOwnHouse(state, p, faction)) continue;
     const score = ownedNeighbourCount(state, p, faction);
     if (score > bestScore) {
       bestScore = score;
@@ -645,10 +647,10 @@ function evaluateFaction(
   const rng = createRng(mixSeed(state.rngSeed, faction, state.tick));
   const r1 = tryDefense(state, faction, rng, profile);
   if (r1 !== null) return r1;
-  const ra = tryAssault(state, faction, rng, profile);
-  if (ra !== null) return ra;
   const rb = tryBuildHouse(state, faction, profile);
   if (rb !== null) return rb;
+  const ra = tryAssault(state, faction, rng, profile);
+  if (ra !== null) return ra;
   const r2 = tryExpand(state, faction, rng, profile);
   if (r2 !== null) return r2;
   const r25 = tryRally(state, faction, rng, profile);
