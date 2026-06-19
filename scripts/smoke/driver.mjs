@@ -106,8 +106,8 @@ function fail(message) {
   await send("Log.enable");
   log("CDP connected:", CDP);
 
-  // STEP 1 — menu renders (AC-38).
-  await send("Page.navigate", { url: APP });
+  // STEP 1 — v2 menu renders (AC-38). v2 is at ?v2 (default is v1).
+  await send("Page.navigate", { url: APP + "?v2" });
   await waitFor(`!!document.querySelector('.ks-menu')`, 30000, 500, "menu visible");
   const menu = await evaluate(
     `(()=>{const m=document.querySelector('.ks-menu');return{title:m.textContent.includes('Knight Strike'),start:[...m.querySelectorAll('button')].some(b=>b.textContent.trim()==='Start')};})()`,
@@ -137,14 +137,14 @@ function fail(message) {
   const tax = await evaluate(`window.__ks.getState().factions.TOKUGAWA.taxRate`);
   if (tax !== 0.15) fail("tax not applied: " + tax);
 
-  // STEP 4 — ?v1 easter egg boots the original prototype.
-  await send("Page.navigate", { url: APP + "?v1" });
-  await waitFor(`!!document.querySelector('.ks-menu') && !!document.querySelector('canvas')`, 30000, 500, "v1 prototype boots");
-  log("STEP4 ?v1 easter egg booted");
-  await shot("v2-03-v1-easter-egg");
+  // STEP 4 — the DEFAULT (no param) boots the v1 game (the shipped default).
+  await send("Page.navigate", { url: APP });
+  await waitFor(`!!document.querySelector('.ks-menu') && !!document.querySelector('canvas')`, 30000, 500, "default v1 boots");
+  log("STEP4 default (v1) booted");
+  await shot("v2-03-default-v1");
 
   if (pageExceptions.length) fail("page exceptions: " + JSON.stringify(pageExceptions));
   if (STRICT_CONSOLE && consoleErrors.length) fail("console errors (strict): " + JSON.stringify(consoleErrors));
-  log("RESULT_OK — v2 menu/start/ticks/entities/controls + ?v1 easter egg");
+  log("RESULT_OK — default boots v1; ?v2 menu/start/ticks/entities/controls");
   process.exit(0);
 })().catch((e) => fail(e.message));

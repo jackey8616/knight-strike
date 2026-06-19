@@ -4,7 +4,7 @@
 
 Knight Strike 是日本 2005 年免費小品《国家大作戦》/ Lord Monarch 的 web 重製版。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
 
-> **⚠️ v2 重製狀態（重要）**：專案已**全面轉向 v2 經濟模型**（PRD v2.x — 房屋 / 田地 / 稅收 / 軍隊 / 征服 + 怪物，依 `docs/v2_spec/`）。**現役程式碼在 `src/engine/v2/`、`src/render/v2/`、`src/ui/v2/`、`src/playtest/v2/`**；`src/main.ts` 預設開 v2。原 **v1 原型**（領地自然成長 + 拖曳征服行軍，本節下方 §3 樹所述）**保留為 `?v1` 隱藏彩蛋**（`src/main-v1.ts` + `src/engine/*.ts` 等舊路徑，勿刪）。**本文件 §3 的檔案樹仍描述 v1 架構，尚待隨 v2 補完**——改 v2 code 時以 `src/*/v2/` 實際結構為準，並參 [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md)。
+> **⚠️ v1 / v2 雙軌狀態（重要）**：專案有兩套可玩版本。`src/main.ts` 是**路由**：**預設載入 v1**（原型——領地自然成長 + 拖曳征服行軍，§3 樹所述；`src/main-v1.ts` + `src/engine/*.ts` / `src/render` / `src/input` / `src/ui` 舊路徑），`?v2` 載入 **v2 經濟模型**（房屋 / 田地 / 稅收 / 軍隊 + 怪物，依 `docs/v2_spec/`；`src/main-v2.ts` + `src/engine/v2/`、`src/render/v2/`、`src/ui/v2/`、`src/playtest/v2/`）。**目前 v1 為出貨預設**（look & feel 較佳）；長期方向為**把 v2 經濟 / 建築系統移植進 v1**（見對話）。改哪一軌就看 `src/*/v2/`（v2）或 `src/engine/*.ts` 等（v1）；§3 檔案樹描述 v1。參 [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md)。
 
 ## 2. 技術棧與版本
 
