@@ -320,6 +320,7 @@ const SELECTION_COLOR = 0xffd700;
 const SELECTION_WIDTH = 2;
 const CASTLE_MARKER_COLOR = 0xf4f1d6;
 const CASTLE_MARKER_OUTLINE = 0x222222;
+const HOUSE_MARKER_COLOR = 0xd9a05b;
 
 type TileGfx = {
   readonly id: TileId;
@@ -345,6 +346,10 @@ type TileGfx = {
   painted: boolean;
   paintedColor: number | null;
   paintedAlpha: number;
+  // Whether a House marker is currently painted on the tile — a House can be
+  // built (tile already owner-tinted, so paintedColor wouldn't change) or razed,
+  // so the repaint trigger tracks it explicitly (PRD §4.3).
+  paintedHouse: boolean;
 };
 
 export type BoardEvents = {
@@ -541,6 +546,30 @@ function drawCastleMarker(g: Graphics): void {
   g.lineTo(halfW, baseY);
   g.closePath();
   g.fill({ color: CASTLE_MARKER_COLOR, alpha: 0.9 });
+  g.stroke({ color: CASTLE_MARKER_OUTLINE, width: 1, alpha: 1 });
+}
+
+// House marker (PRD §4.3): a small gabled hut inset in the tile diamond — a
+// squat body with a peaked roof — so an economy tile reads distinctly from a
+// castle keep at a glance. Ownership is conveyed by the tile's owner tint, so
+// the marker itself is a fixed colour.
+function drawHouseMarker(g: Graphics): void {
+  const halfW = TILE_WIDTH / 9;
+  const bodyTop = -TILE_HEIGHT / 12;
+  const bodyBot = TILE_HEIGHT / 6;
+  const roofPeak = -TILE_HEIGHT / 4;
+
+  // Body (square) then roof (triangle) as one outline.
+  g.moveTo(-halfW, bodyBot);
+  g.lineTo(-halfW, bodyTop);
+  g.lineTo(halfW, bodyTop);
+  g.lineTo(halfW, bodyBot);
+  g.closePath();
+  g.moveTo(-halfW - 2, bodyTop);
+  g.lineTo(0, roofPeak);
+  g.lineTo(halfW + 2, bodyTop);
+  g.closePath();
+  g.fill({ color: HOUSE_MARKER_COLOR, alpha: 0.92 });
   g.stroke({ color: CASTLE_MARKER_OUTLINE, width: 1, alpha: 1 });
 }
 
@@ -851,6 +880,7 @@ export function createBoardRenderer(
         painted: false,
         paintedColor: null,
         paintedAlpha: 1,
+        paintedHouse: false,
       });
     }
   }
@@ -875,7 +905,8 @@ export function createBoardRenderer(
       } else if (province.isCastle && province.castleOwner !== null) {
         ownerColor = FACTION_COLORS[province.castleOwner];
       }
-      if (!t.painted || t.paintedColor !== ownerColor) {
+      const isHouse = province.isHouse === true;
+      if (!t.painted || t.paintedColor !== ownerColor || t.paintedHouse !== isHouse) {
         drawTilePrism(
           t.base,
           t.terrain,
@@ -886,9 +917,12 @@ export function createBoardRenderer(
         );
         if (province.isCastle) {
           drawCastleMarker(t.base);
+        } else if (isHouse) {
+          drawHouseMarker(t.base);
         }
         t.painted = true;
         t.paintedColor = ownerColor;
+        t.paintedHouse = isHouse;
       }
       // PRD §3.9: a raised tile fades when a unit sits on a tile it occludes
       // (the row behind/above it under the 45° camera), so vision isn't blocked.
