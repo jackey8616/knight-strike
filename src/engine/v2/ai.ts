@@ -1,7 +1,8 @@
 import { startDestruction } from "./construction";
 import { buildHouse, HOUSE_COST, validateBuild } from "./house";
 import { issueMarch } from "./movement";
-import { makeFaction, parseTileId, vonNeumannNeighbors } from "./state";
+import { makeFaction, mooreNeighbors, parseTileId, tileId, vonNeumannNeighbors } from "./state";
+import { isPassable } from "./terrain";
 import { RULE_PROFILES, type AiProfile } from "./ai-profile";
 import { PLAYER_FACTIONS, type FactionId, type GameState, type TileId, type Unit } from "./types";
 
@@ -46,14 +47,56 @@ function idleUnits(state: GameState, faction: FactionId): Unit[] {
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-function nearestTile(tiles: readonly TileId[], from: TileId): TileId | null {
-  let best: TileId | null = null;
+// Nearest tile, ties broken by `seed` (per-faction mixSeed) so symmetric boards
+// don't make every faction pile onto the same target.
+function nearestTile(tiles: readonly TileId[], from: TileId, seed = 0): TileId | null {
   let bestD = Number.POSITIVE_INFINITY;
+  const ties: TileId[] = [];
   for (const t of tiles) {
     const d = manhattan(t, from);
-    if (d < bestD || (d === bestD && best !== null && t < best)) {
-      best = t;
+    if (d < bestD) {
       bestD = d;
+      ties.length = 0;
+      ties.push(t);
+    } else if (d === bestD) {
+      ties.push(t);
+    }
+  }
+  if (ties.length === 0) return null;
+  ties.sort();
+  return ties[(seed >>> 0) % ties.length] ?? null;
+}
+
+const ownHouseCount = (state: GameState, faction: FactionId): number =>
+  state.houses.filter((h) => h.owner === faction).length;
+
+// Nearest empty buildable tile outside any own house's Moore-8 — where the AI
+// relocates an idle army to found a new house and scale its economy.
+function nearestBuildSpot(state: GameState, faction: FactionId, from: TileId, boardSize: number): TileId | null {
+  const excl = new Set<TileId>();
+  for (const h of state.houses) {
+    if (h.owner !== faction) continue;
+    const { x, y } = parseTileId(h.tile);
+    excl.add(h.tile);
+    for (const n of mooreNeighbors(x, y, boardSize)) excl.add(n);
+  }
+  const occ = new Set<TileId>([
+    ...state.houses.map((h) => h.tile),
+    ...state.fields.map((f) => f.tile),
+    ...state.nests.map((n) => n.tile),
+    ...state.buildings.map((b) => b.tile),
+  ]);
+  let best: TileId | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (let x = 0; x < boardSize; x += 1) {
+    for (let y = 0; y < boardSize; y += 1) {
+      const t = tileId(x, y);
+      if (excl.has(t) || occ.has(t) || !isPassable(state, t) || state.provinces.get(t)?.isCastle) continue;
+      const d = manhattan(t, from);
+      if (d < bestD || (d === bestD && best !== null && t < best)) {
+        best = t;
+        bestD = d;
+      }
     }
   }
   return best;
@@ -108,6 +151,7 @@ function actArmy(
   profile: AiProfile,
   castle: TileId | null,
   boardSize: number,
+  seed: number,
 ): GameState {
   if (army.population >= profile.attackThreshold) {
     const sgCastle = adjacentEnemyCastle(state, army.tile, faction, boardSize);
@@ -120,7 +164,7 @@ function actArmy(
       const r = startDestruction(state, { faction, unitId: army.id, targetKind: "HOUSE", targetId: sgHouse });
       if (r.ok) return r.state;
     }
-    const castleTarget = nearestTile(enemyCastleTiles(state, faction), army.tile);
+    const castleTarget = nearestTile(enemyCastleTiles(state, faction), army.tile, seed);
     if (castleTarget !== null) {
       const m = issueMarch(state, army.id, castleTarget);
       if (m !== state) return m;
@@ -128,6 +172,7 @@ function actArmy(
     const houseTarget = nearestTile(
       state.houses.filter((h) => isEnemy(faction, h.owner)).map((h) => h.tile),
       army.tile,
+      seed,
     );
     if (houseTarget !== null) {
       const m = issueMarch(state, army.id, houseTarget);
@@ -136,9 +181,18 @@ function actArmy(
     return state;
   }
 
-  if (state.factions[faction].gold >= HOUSE_COST && validateBuild(state, { faction, tile: army.tile }).ok) {
-    const b = buildHouse(state, { faction, tile: army.tile });
-    if (b.ok) return b.state;
+  // weak army → grow the economy (build up to houseTarget while gold allows),
+  // else rally to the castle to merge into an attack force.
+  if (state.factions[faction].gold >= HOUSE_COST && ownHouseCount(state, faction) < profile.houseTarget) {
+    if (validateBuild(state, { faction, tile: army.tile }).ok) {
+      const b = buildHouse(state, { faction, tile: army.tile });
+      if (b.ok) return b.state;
+    }
+    const spot = nearestBuildSpot(state, faction, army.tile, boardSize);
+    if (spot !== null) {
+      const m = issueMarch(state, army.id, spot);
+      if (m !== state) return m;
+    }
   }
   if (castle !== null && army.tile !== castle) {
     const m = issueMarch(state, army.id, castle);
@@ -160,8 +214,9 @@ export function stepAi(state: GameState): GameState {
 
     s = setTax(s, faction, profile.taxRate);
     const castle = castleTileOf(s, faction);
+    const seed = mixSeed(state.rngSeed, faction, state.tick);
     for (const army of idleUnits(s, faction)) {
-      s = actArmy(s, faction, army, profile, castle, state.boardSize);
+      s = actArmy(s, faction, army, profile, castle, state.boardSize, seed);
     }
   }
   return s;

@@ -9,7 +9,7 @@ import { expandFields, spawnFromHouses } from "./house";
 import { applyMaintenance } from "./maintenance";
 import { accumulateNests } from "./monster";
 import { advanceMarch, mergeFriendlyUnits } from "./movement";
-import { growPopulation } from "./population";
+import { collectTax, growPopulation } from "./population";
 import { applyDefeats } from "./victory";
 import type { GameState } from "./types";
 
@@ -46,6 +46,7 @@ export function step(state: GameState): StepResult {
     events.push(ev.dayElapsed(nextDay));
     s = { ...s, elapsedDaysThisLevel: s.elapsedDaysThisLevel + 1 };
     s = absorb(events, computeConnectivity(s));
+    s = collectTax(s);
     s = absorb(events, growPopulation(s));
     s = absorb(events, expandFields(s));
     s = absorb(events, spawnFromHouses(s));

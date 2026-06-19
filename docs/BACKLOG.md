@@ -131,6 +131,7 @@
 | L 級破壞力 / tick | `floor(sqrt(pop/10))` | default-chosen |
 | 耐久度 | 房=pop、田 1、橋 10、柵欄 10、城堡 300、巢穴 100 | default-chosen |
 | 稅率→增長曲線 | 線性 `(30−taxPct)/30` | default-chosen |
+| 稅收金錢 / 天 | 連通房屋 `floor(pop × taxRate)` 入國庫 | default-chosen |
 | 田地擴張節奏 | 每 2 天 | default-chosen |
 | 林防禦減傷 | ×0.75（v2 可選，預設開） | default-chosen |
 | 起始金錢 / 部隊 | 場景指定 | default-chosen |

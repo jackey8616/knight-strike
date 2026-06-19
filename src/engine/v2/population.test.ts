@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { growPopulation, growthPerDay } from "./population";
+import { collectTax, growPopulation, growthPerDay } from "./population";
 import { createGameState, defaultFactions, makeFaction, tileId } from "./state";
 import type { FactionId, Field, GameState, House } from "./types";
 
@@ -92,5 +92,33 @@ describe("growPopulation [AC-09]", () => {
     const once = growPopulation(s).state;
     const twice = growPopulation(once);
     expect(twice.state).toBe(once);
+  });
+});
+
+describe("collectTax", () => {
+  it("a connected house pays floor(population × taxRate) into the treasury", () => {
+    const s = createGameState({
+      boardSize: 5,
+      rngSeed: 1,
+      houses: [house(100, true)], // connected
+      factions: taxed(0.15),
+    });
+    // gold starts at 0 (taxed() default) → +floor(100×0.15)=15
+    expect(collectTax(s).factions.TOKUGAWA.gold).toBe(15);
+  });
+
+  it("a disconnected house pays no tax", () => {
+    const s = createGameState({
+      boardSize: 5,
+      rngSeed: 1,
+      houses: [house(100, false)], // disconnected
+      factions: taxed(0.15),
+    });
+    expect(collectTax(s)).toBe(s); // unchanged
+  });
+
+  it("0% tax yields no income", () => {
+    const s = createGameState({ boardSize: 5, rngSeed: 1, houses: [house(100, true)], factions: taxed(0) });
+    expect(collectTax(s)).toBe(s);
   });
 });
