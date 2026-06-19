@@ -294,7 +294,7 @@ export function advanceDestruction(state: GameState): StepResult {
           const dur = castleDurability(p) - power;
           const nextProv = new Map(provinces);
           if (dur <= 0) {
-            nextProv.set(t.targetId, { ...p, castleDurability: 0 });
+            nextProv.set(t.targetId, { ...p, castleDurability: 0, castleDestroyedBy: u.owner });
             events.push(ev.buildingDestroyed(t.targetId));
             destroyed = true;
           } else {

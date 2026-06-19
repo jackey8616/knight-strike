@@ -173,7 +173,9 @@ export function createGameState(init: GameStateInit): GameState {
     connectivity: new Set<string>(),
     aiConfig: init.aiConfig ?? defaultAiConfig(),
     defeated: new Set<FactionId>(),
-    remainingDays: init.remainingDays ?? 0,
+    // PRD §7.3 — a level is granted 3000 days up front; this is the time-out
+    // budget. Scenarios may override.
+    remainingDays: init.remainingDays ?? 3000,
     elapsedDaysThisLevel: 0,
     rngSeed: init.rngSeed,
     nextEntityId: init.nextEntityId ?? 1,

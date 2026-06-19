@@ -163,6 +163,9 @@ export type Province = {
   // PRD §4.9 — castle HP (default CASTLE_DURABILITY when undefined). Reaching 0
   // via destruction = the king is down (M8 sets it; M10 acts on it).
   readonly castleDurability?: number;
+  // The faction whose unit razed this castle (the killer), set when durability
+  // hits 0. M10 reads it to choose inheritance (human) vs catastrophe (MONSTER).
+  readonly castleDestroyedBy?: FactionId;
 };
 
 export type GameState = {

@@ -9,6 +9,7 @@ import { applyMaintenance } from "./maintenance";
 import { accumulateNests } from "./monster";
 import { advanceMarch } from "./movement";
 import { growPopulation } from "./population";
+import { applyDefeats } from "./victory";
 import type { GameState } from "./types";
 
 // PRD §4.2 — one tick. Stages land milestone by milestone; each reads the
@@ -40,6 +41,7 @@ export function step(state: GameState): StepResult {
 
   if (crossedDay) {
     events.push(ev.dayElapsed(nextDay));
+    s = { ...s, elapsedDaysThisLevel: s.elapsedDaysThisLevel + 1 };
     s = absorb(events, computeConnectivity(s));
     s = absorb(events, growPopulation(s));
     s = absorb(events, expandFields(s));
@@ -48,7 +50,7 @@ export function step(state: GameState): StepResult {
 
   s = absorb(events, applyMaintenance(s));
   s = recomputeElite(s);
-  // M9/M10: applyDefeats slots in here.
+  s = absorb(events, applyDefeats(s));
 
   return { state: s, events };
 }
