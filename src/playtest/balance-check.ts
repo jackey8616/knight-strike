@@ -15,8 +15,8 @@ const GAMES = 96;
 const MAX_TICKS = 500;
 const FACTIONS: readonly Exclude<FactionId, "NEUTRAL">[] = ["TOKUGAWA", "TAKEDA", "ODA", "UESUGI"];
 
-// Current sample (4-AI normal, seeds 1..96, v2.6 House economy): win
-// ~18/21/22/32%, stalemate ~7%, avg ~295 ticks. Thresholds keep margin over that
+// Current sample (4-AI normal, seeds 1..96, v2.8 build-first AI economy): win
+// ~11/34/13/33%, stalemate ~8%, avg ~274 ticks. Thresholds keep margin over that
 // while clearly catching a regression to the pre-v2.1 state (one faction ~55%,
 // others ~5%, stalemate ~35%).
 const MAX_WIN_RATE = 0.45; // dominance guard

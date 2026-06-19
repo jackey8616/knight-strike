@@ -41,7 +41,7 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     expandRatio: 0.5,
     castleQueenSendRatio: 0.2,
     taxPct: 12,
-    housePerTiles: 5,
+    housePerTiles: 4,
   },
   normal: {
     evalInterval: 5,
@@ -52,7 +52,7 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     expandRatio: 0.5,
     castleQueenSendRatio: 0.33,
     taxPct: 15,
-    housePerTiles: 4,
+    housePerTiles: 3,
   },
   hard: {
     evalInterval: 3,
@@ -63,6 +63,6 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     expandRatio: 0.66,
     castleQueenSendRatio: 0.4,
     taxPct: 18,
-    housePerTiles: 3,
+    housePerTiles: 2,
   },
 };
