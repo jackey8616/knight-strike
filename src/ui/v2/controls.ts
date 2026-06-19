@@ -28,7 +28,8 @@ export function createControls(container: HTMLElement, handlers: ControlsHandler
   const bar = document.createElement("div");
   bar.className = "ks-controls";
   bar.style.cssText =
-    "position:absolute;left:50%;bottom:8px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;" +
+    "position:absolute;left:50%;bottom:calc(8px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);" +
+    "display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;max-width:96vw;" +
     "padding:6px 10px;background:rgba(20,20,20,.82);color:#eee;font:12px monospace;border-radius:8px;z-index:6";
 
   const button = (text: string, onClick: () => void, cls = ""): HTMLButtonElement => {
@@ -77,14 +78,16 @@ export function createControls(container: HTMLElement, handlers: ControlsHandler
     bar.appendChild(b);
   }
 
+  // full-width row inside the bar (order:-1 → renders on top), so it flows with
+  // the wrapped buttons instead of overlapping them on a narrow phone.
   const status = document.createElement("div");
   status.className = "ks-status";
   status.style.cssText =
-    "position:absolute;left:50%;bottom:44px;transform:translateX(-50%);padding:3px 8px;background:rgba(20,20,20,.7);" +
-    "color:#ccc;font:11px monospace;border-radius:5px;z-index:6";
+    "order:-1;flex-basis:100%;text-align:center;color:#ccc;font:11px monospace;pointer-events:none";
   status.textContent = BUILD_HINT.OFF;
+  bar.appendChild(status);
 
-  container.append(bar, status);
+  container.appendChild(bar);
   setMode("OFF");
 
   return {
@@ -94,7 +97,6 @@ export function createControls(container: HTMLElement, handlers: ControlsHandler
     },
     destroy: () => {
       bar.remove();
-      status.remove();
     },
   };
 }
