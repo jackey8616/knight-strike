@@ -129,6 +129,25 @@ describe("economy: build house (AC-27)", () => {
     expect(p.lastClaimedFaction).toBe("TOKUGAWA");
   });
 
+  it("[AC-27] rejects building within the Moore-8 ring of an own House (spacing)", () => {
+    const m = emptyBoard(5);
+    // existing own House at (2,2); a garrisoned buildable tile at (3,3) (a
+    // diagonal neighbour, inside the Moore-8 ring) and at (4,4) (outside it).
+    patch(m, 2, 2, { isHouse: true, houseOwner: "TOKUGAWA", housePopulation: 5, lastClaimedFaction: "TOKUGAWA" });
+    patch(m, 3, 3, { occupants: [occ("TOKUGAWA", 6)], lastClaimedFaction: "TOKUGAWA" });
+    patch(m, 4, 4, { occupants: [occ("TOKUGAWA", 6)], lastClaimedFaction: "TOKUGAWA" });
+    const state = makeState(m, { economy: makeEconomy(HOUSE_COST, 0) });
+    expect(buildHouse(state, { faction: "TOKUGAWA", tile: tileId(3, 3) })).toMatchObject({
+      ok: false,
+      reason: "house-too-close",
+    });
+    expect(buildHouse(state, { faction: "TOKUGAWA", tile: tileId(4, 4) }).ok).toBe(true);
+    // An enemy House nearby does not block (own-faction spacing only).
+    patch(m, 2, 2, { isHouse: true, houseOwner: "TAKEDA", housePopulation: 5, lastClaimedFaction: "TAKEDA" });
+    const state2 = makeState(m, { economy: makeEconomy(HOUSE_COST, 0) });
+    expect(buildHouse(state2, { faction: "TOKUGAWA", tile: tileId(3, 3) }).ok).toBe(true);
+  });
+
   it("[AC-27] rejects: not owned / no builder / castle / already-house / impassable / no gold", () => {
     const mk = (p: Partial<Province>, gold = HOUSE_COST): GameState => {
       const m = emptyBoard(3);

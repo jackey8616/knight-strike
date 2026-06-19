@@ -26,12 +26,12 @@ const MAX_STALEMATE_RATE = 0.25; // convergence guard
 
 // Economy-activity guard. Houses are the only troop source, so "houses built per
 // game" is the health signal for the AI economy. It scales ~linearly with board
-// width, so we normalize by size (houses built / row); the current AI sits at
-// ~2.1–2.6/row across sizes. The band is generous — it catches a *collapse*
-// (AI stops building → hoards gold, the v2.8 regression) or *runaway* building,
-// not normal drift. The exact rate is printed every run for fine-grained
-// monitoring; tighten the band only if a real floor/ceiling is wanted.
-const MIN_HOUSES_PER_ROW = 1.0;
+// width, so we normalize by size (houses built / row). With House spacing (§4.3)
+// the AI builds a deliberately sparser economy — ~0.9–1.5/row across sizes. The
+// band is generous — it catches a *collapse* (AI stops building → hoards gold,
+// the v2.8 regression, which lands near ~0.1–0.3/row) or *runaway* building, not
+// normal drift. The exact rate is printed every run for fine-grained monitoring.
+const MIN_HOUSES_PER_ROW = 0.6;
 const MAX_HOUSES_PER_ROW = 4.0;
 
 // Bigger boards legitimately take longer to resolve, so the tick cap scales with

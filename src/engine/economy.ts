@@ -96,6 +96,7 @@ export type BuildReason =
   | "is-castle"
   | "already-house"
   | "not-buildable"
+  | "house-too-close"
   | "insufficient-gold";
 
 export type BuildResult =
@@ -122,6 +123,9 @@ export function buildBlockReason(
   if (p.isCastle) return "is-castle";
   if (p.isHouse === true) return "already-house";
   if (isImpassableTerrain(p.terrain)) return "not-buildable";
+  // PRD §4.3: keep Houses ≥2 tiles apart — no own House in the 8 surrounding
+  // tiles — so a faction can't carpet an area with Houses.
+  if (hasOwnHouseInMoore8(state, p.x, p.y, cmd.faction)) return "house-too-close";
   if (state.economy[cmd.faction].gold < HOUSE_COST) return "insufficient-gold";
   return null;
 }
@@ -185,6 +189,24 @@ export function growthAmount(ownedNeighbours: number, taxPct: number): number {
   return Math.max(MIN_GROWTH, Math.floor((base * factor) / MAX_TAX_PCT));
 }
 
+// PRD §4.3 build spacing: does `faction` already own a House on any of the 8
+// tiles surrounding (x, y)? Keeps Houses ≥2 tiles apart. Shared by the build
+// predicate and the AI's builder selection so neither drifts.
+export function hasOwnHouseInMoore8(
+  state: GameState,
+  x: number,
+  y: number,
+  faction: FactionId,
+): boolean {
+  for (const [dx, dy] of MOORE8) {
+    const nb = state.provinces.get(tileId(x + dx, y + dy));
+    if (nb !== undefined && nb.isHouse === true && nb.houseOwner === faction) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function countOwnedMooreNeighbours(
   state: GameState,
   p: Province,
@@ -242,8 +264,29 @@ export function collectTax(state: GameState): GameState {
 
 // ---- Troop spawn -----------------------------------------------------------
 
-// The own-claimed 4-neighbour a house spawns its stack onto (deterministic by
-// tile id); null → none, so the caller falls back to the house tile itself.
+// Deterministic-but-unbiased index into a tile's candidate neighbours, hashed
+// from (rngSeed, tile, tick). Picking `candidates.sort()[0]` (lexical tile-id)
+// made every house spawn toward the same compass direction, which compounded
+// into a board-position win bias (a corner snowballing) — the same positional-
+// bias trap the assault AI avoids with a seeded shuffle. This keeps the pick
+// deterministic (replay-safe) without the bias.
+function spawnPickIndex(
+  seed: number,
+  x: number,
+  y: number,
+  tick: number,
+  n: number,
+): number {
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  h = Math.imul(h ^ (x | 0), 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ (y | 0), 0xc2b2ae35) >>> 0;
+  h = Math.imul(h ^ (tick | 0), 0x27d4eb2f) >>> 0;
+  h ^= h >>> 16;
+  return (h >>> 0) % n;
+}
+
+// The own-claimed 4-neighbour a house spawns its stack onto (deterministic but
+// position-unbiased); null → none, so the caller falls back to the house tile.
 function pickSpawnTile(
   state: GameState,
   house: Province,
@@ -256,8 +299,8 @@ function pickSpawnTile(
     if (nb !== undefined && derivedOwner(nb) === owner) candidates.push(nid);
   }
   if (candidates.length === 0) return null;
-  candidates.sort();
-  return candidates[0] as TileId;
+  const idx = spawnPickIndex(state.rngSeed, house.x, house.y, state.tick, candidates.length);
+  return candidates[idx] as TileId;
 }
 
 // PRD §4.3: a house at/over SPAWN_THRESHOLD population spawns one SPAWN_SIZE
