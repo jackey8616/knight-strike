@@ -461,6 +461,10 @@ export type RunResult = {
   readonly winner: FactionId | null;
   readonly outcome: RunOutcome;
   readonly ticks: number;
+  // PRD §4.3: total Houses built (across all factions) over the game — a cheap
+  // economy-activity signal the balance guard bounds so a regression that kills
+  // (gold hoarding) or explodes House-building is caught.
+  readonly housesBuilt: number;
   readonly events?: readonly TickEvent[];
 };
 
@@ -650,6 +654,7 @@ export function runScenario(
   }
   const events: TickEvent[] = [];
   const emit = options.emitEvents === true;
+  let housesBuilt = 0;
 
   while (state.tick < options.maxTicks) {
     let scriptedDispatched = 0;
@@ -686,6 +691,9 @@ export function runScenario(
     const prevDefeated = state.defeated;
     const stepped = stepWithEvents(state);
     state = stepped.state;
+    for (const e of stepped.events) {
+      if (e.type === "house_built") housesBuilt += 1;
+    }
 
     if (emit) {
       const newlyDefeated: FactionId[] = [];
@@ -711,6 +719,7 @@ export function runScenario(
         winner: outcome.winner,
         outcome: outcome.winner === null ? "elimination" : "win",
         ticks: state.tick,
+        housesBuilt,
         ...(emit ? { events } : {}),
       };
     }
@@ -721,6 +730,7 @@ export function runScenario(
     winner: null,
     outcome: "stalemate",
     ticks: state.tick,
+    housesBuilt,
     ...(emit ? { events } : {}),
   };
 }

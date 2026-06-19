@@ -1,8 +1,9 @@
 // AI balance guard (CI). Runs a fixed, deterministic batch of all-AI games at
 // EVERY playable board size and asserts the rule AI stays balanced: no faction
-// dominates or is shut out, and games converge (low stalemate rate). The engine
-// is deterministic (fixed seeds → identical games every run), so this is NOT
-// flaky: a change that skews the balance — at any size — fails this check.
+// dominates or is shut out, games converge (low stalemate rate), and the economy
+// stays active (houses-built rate within a band). The engine is deterministic
+// (fixed seeds → identical games every run), so this is NOT flaky: a change that
+// skews the balance — at any size — fails this check.
 //
 // Why all sizes: the AI's reach / economy / conquest pace scale with the board,
 // so a change that's fair on 11×11 can still skew or stall on 27×27 (the largest
@@ -22,6 +23,16 @@ const FACTIONS: readonly Exclude<FactionId, "NEUTRAL">[] = ["TOKUGAWA", "TAKEDA"
 const MAX_WIN_RATE = 0.45; // dominance guard
 const MIN_WIN_RATE = 0.05; // shut-out guard
 const MAX_STALEMATE_RATE = 0.25; // convergence guard
+
+// Economy-activity guard. Houses are the only troop source, so "houses built per
+// game" is the health signal for the AI economy. It scales ~linearly with board
+// width, so we normalize by size (houses built / row); the current AI sits at
+// ~2.1–2.6/row across sizes. The band is generous — it catches a *collapse*
+// (AI stops building → hoards gold, the v2.8 regression) or *runaway* building,
+// not normal drift. The exact rate is printed every run for fine-grained
+// monitoring; tighten the band only if a real floor/ceiling is wanted.
+const MIN_HOUSES_PER_ROW = 1.0;
+const MAX_HOUSES_PER_ROW = 4.0;
 
 // Bigger boards legitimately take longer to resolve, so the tick cap scales with
 // size — otherwise large maps would hit the cap and read as all-stalemate. (No
@@ -45,6 +56,7 @@ type SizeResult = {
   readonly wins: ReadonlyMap<FactionId, number>;
   readonly stalemates: number;
   readonly avgTicks: number;
+  readonly avgHousesBuilt: number;
 };
 
 function runSize(size: number): SizeResult {
@@ -52,15 +64,24 @@ function runSize(size: number): SizeResult {
   const wins = new Map<FactionId, number>(FACTIONS.map((f) => [f, 0]));
   let stalemates = 0;
   let tickSum = 0;
+  let housesSum = 0;
   for (let i = 0; i < GAMES_PER_SIZE; i++) {
     const result = runScenario(fourAiScenario(size, (1 + i) >>> 0), { maxTicks: cap });
     tickSum += result.ticks;
+    housesSum += result.housesBuilt;
     if (result.outcome === "stalemate") stalemates += 1;
     else if (result.winner !== null) {
       wins.set(result.winner, (wins.get(result.winner) ?? 0) + 1);
     }
   }
-  return { size, cap, wins, stalemates, avgTicks: tickSum / GAMES_PER_SIZE };
+  return {
+    size,
+    cap,
+    wins,
+    stalemates,
+    avgTicks: tickSum / GAMES_PER_SIZE,
+    avgHousesBuilt: housesSum / GAMES_PER_SIZE,
+  };
 }
 
 function main(): void {
@@ -85,12 +106,22 @@ function main(): void {
       }
       console.log(`    ${faction.padEnd(9)} ${(rate * 100).toFixed(0).padStart(3)}%${flag}`);
     }
+    const housesPerRow = r.avgHousesBuilt / size;
     console.log(
-      `    stalemate ${(stalemateRate * 100).toFixed(0)}%   avg ${r.avgTicks.toFixed(0)} ticks`,
+      `    stalemate ${(stalemateRate * 100).toFixed(0)}%   avg ${r.avgTicks.toFixed(0)} ticks   houses built/game ${r.avgHousesBuilt.toFixed(1)} (${housesPerRow.toFixed(2)}/row)`,
     );
     if (stalemateRate > MAX_STALEMATE_RATE) {
       failures.push(
         `${size}×${size} stalemate ${(stalemateRate * 100).toFixed(0)}% > ${MAX_STALEMATE_RATE * 100}%`,
+      );
+    }
+    if (housesPerRow < MIN_HOUSES_PER_ROW) {
+      failures.push(
+        `${size}×${size} houses built ${r.avgHousesBuilt.toFixed(1)}/game (${housesPerRow.toFixed(2)}/row) < ${MIN_HOUSES_PER_ROW}/row — AI barely building (gold hoarding?)`,
+      );
+    } else if (housesPerRow > MAX_HOUSES_PER_ROW) {
+      failures.push(
+        `${size}×${size} houses built ${r.avgHousesBuilt.toFixed(1)}/game (${housesPerRow.toFixed(2)}/row) > ${MAX_HOUSES_PER_ROW}/row — runaway building`,
       );
     }
   }
