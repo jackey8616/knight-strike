@@ -1,5 +1,5 @@
 import { RULE_PROFILES, type RuleProfile } from "./ai-profile";
-import { buildHouse, HOUSE_COST } from "./economy";
+import { buildHouse, hasOwnHouseInMoore8, HOUSE_COST } from "./economy";
 import { dispatch } from "./movement";
 import {
   derivedOwner,
@@ -595,6 +595,7 @@ function ownedNeighbourCount(
 function tryBuildHouse(
   state: GameState,
   faction: FactionId,
+  rng: Rng,
   profile: RuleProfile,
 ): GameState | null {
   if (profile.housePerTiles <= 0) return null;
@@ -616,12 +617,19 @@ function tryBuildHouse(
   );
   if (houseCount >= target) return null;
 
+  // Shuffle before the max-scan so equal-score tiles are tiebroken by the
+  // per-faction RNG, not Map (board-position) order — otherwise building drifts
+  // to the same corner of every territory, a positional bias (§5.1, same fix as
+  // the assault rule). Deterministic for a given seed.
+  const shuffled = shuffleInPlace(rng, ownTiles.slice());
   let best: Province | null = null;
   let bestScore = -1;
-  for (const p of ownTiles) {
+  for (const p of shuffled) {
     if (p.isCastle || p.isHouse === true) continue;
     if (ownAmount(p, faction) < BUILD_MIN_GARRISON) continue;
     if (adjacentHostile(state, p, faction)) continue;
+    // PRD §4.3: keep Houses ≥2 tiles apart (no own House in the Moore-8 ring).
+    if (hasOwnHouseInMoore8(state, p.x, p.y, faction)) continue;
     const score = ownedNeighbourCount(state, p, faction);
     if (score > bestScore) {
       bestScore = score;
@@ -647,7 +655,7 @@ function evaluateFaction(
   const rng = createRng(mixSeed(state.rngSeed, faction, state.tick));
   const r1 = tryDefense(state, faction, rng, profile);
   if (r1 !== null) return r1;
-  const rb = tryBuildHouse(state, faction, profile);
+  const rb = tryBuildHouse(state, faction, rng, profile);
   if (rb !== null) return rb;
   const ra = tryAssault(state, faction, rng, profile);
   if (ra !== null) return ra;
