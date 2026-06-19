@@ -119,4 +119,18 @@ export const ev = {
   constructionCompleted: (taskId: string): GameEvent => ({ kind: "construction.completed", taskId }),
   constructionAborted: (taskId: string): GameEvent => ({ kind: "construction.aborted", taskId }),
   buildingDestroyed: (buildingId: string): GameEvent => ({ kind: "building.destroyed", buildingId }),
+  nestAccumulated: (nestId: string, accumulated: number): GameEvent => ({
+    kind: "nest.accumulated",
+    nestId,
+    accumulated,
+  }),
+  monsterSpawned: (unitId: string, nestId: string): GameEvent => ({
+    kind: "monster.spawned",
+    unitId,
+    nestId,
+  }),
+  nationConsumedByMonster: (nation: FactionId): GameEvent => ({
+    kind: "nation.consumed_by_monster",
+    nation,
+  }),
 };

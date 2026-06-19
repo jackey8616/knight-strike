@@ -6,6 +6,7 @@ import { advanceConstruction, advanceDestruction } from "./construction";
 import { ev, type GameEvent, type StepResult } from "./events";
 import { expandFields, spawnFromHouses } from "./house";
 import { applyMaintenance } from "./maintenance";
+import { accumulateNests } from "./monster";
 import { advanceMarch } from "./movement";
 import { growPopulation } from "./population";
 import type { GameState } from "./types";
@@ -29,7 +30,7 @@ export function step(state: GameState): StepResult {
   s = absorb(events, resolveCombat(s));
   s = absorb(events, advanceConstruction(s));
   s = absorb(events, advanceDestruction(s));
-  // M9: accumulateNests slots here.
+  s = absorb(events, accumulateNests(s));
 
   const nextTick = s.tick + 1;
   const nextDay = dayOf(nextTick);
