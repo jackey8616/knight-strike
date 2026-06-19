@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Knight Strike</title>
     <style>
       html,
@@ -10,7 +10,10 @@
         margin: 0;
         padding: 0;
         width: 100%;
-        height: 100%;
+        height: 100vh;
+        /* dvh = the *visible* viewport — excludes the mobile browser's
+           toolbar, so bottom-anchored UI (the control bar) isn't hidden. */
+        height: 100dvh;
         background: #1a1a1a;
         overflow: hidden;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -19,6 +22,7 @@
       #app {
         width: 100vw;
         height: 100vh;
+        height: 100dvh;
       }
       #app canvas {
         display: block;

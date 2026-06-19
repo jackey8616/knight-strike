@@ -21,7 +21,8 @@ export function createV2Hud(container: HTMLElement): V2Hud {
   const el = document.createElement("div");
   el.className = "ks-hud";
   el.style.cssText =
-    "position:absolute;left:8px;top:8px;padding:8px 10px;background:rgba(20,20,20,.78);" +
+    "position:absolute;left:calc(8px + env(safe-area-inset-left,0px));top:calc(8px + env(safe-area-inset-top,0px));" +
+    "padding:8px 10px;background:rgba(20,20,20,.78);max-width:92vw;" +
     "color:#eee;font:12px/1.5 monospace;border-radius:6px;pointer-events:none;z-index:5";
   container.appendChild(el);
 
