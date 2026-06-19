@@ -1,6 +1,6 @@
 # BACKLOG — Knight Strike（v2 國家大作戰經濟模型）
 
-本文件是 v2 重製的**工作佇列**：把 [`MILESTONES.md`](MILESTONES.md) 的每個 milestone 拆成 **1–3 個 Claude turn** 可完成的 task，標出對應 [`PRD.md`](PRD.md) §9 的 AC 與測試型態。**規格查 PRD、交付契約查 MILESTONES、實作鐵則查 [`CLAUDE.md`](../CLAUDE.md)**；本文件只排「做的順序、相依、狀態」。
+本文件是 v2 重製的**工作佇列**：把 [`MILESTONES.md`](MILESTONES.md) 的每個 milestone 拆成 **1–3 個 Claude turn** 可完成的 task，標出對應 [`PRD.md`](PRD.md) §9 的 AC 與測試型態。**規格查 PRD、交付契約查 MILESTONES、實作鐵則查 [`CLAUDE.md`](../../CLAUDE.md)**；本文件只排「做的順序、相依、狀態」。
 
 > **使用約定**
 > - 順序由上而下；`Deps` 標跨 milestone 相依。`Test` 欄：**U**=vitest 單元（同目錄 `*.test.ts`，TDD 先寫）、**I**=`runScenario` 整合、**S**=`pnpm smoke` CDP 圖形。
@@ -159,4 +159,4 @@
 5. **天邊界 vs per-tick**：增長 / 擴張 / 產兵每天一次但 driver 是 per-tick；測精確 tick 數跨天邊界，避免雙算 / 漏算。
 6. **兩條殺國王路徑**：人類繼承 vs 怪物災難共用觸發、結果分歧；明確 branch `killer==="MONSTER"`，兩路各測（BL-1001/903）。
 7. **MONSTER 偽勢力**：滲入每個 `Record<FactionId,…>` 與計分 / 敗北迴圈；M5 型別階段就定 pseudo-faction 處理。
-8. **AI 規格不足**：v2_spec 未細定對手 AI；BL-1201 須先設計回合再實作。
+8. **AI 規格不足**：v2_reference_spec 未細定對手 AI；BL-1201 須先設計回合再實作。

@@ -1,8 +1,10 @@
 # Knight Strike
 
-Web remake of the 2005 free Japanese title _国家大作戦_ / Falcom's **Lord Monarch**: a 45° isometric, real-time-tick economy wargame. Build **houses** (100 gold) that grow **fields** and **population**, route tax back to your **castle**, spend the population into 100-strong armies, **stack them into a real force**, and march out to raze enemy castles. Manage upkeep, bridges and fences, and **monster nests** that drip out monster armies. Four corner castles (you play **Tokugawa**) against three economy-aware rule AIs; last nation standing wins.
+Web remake of the 2005 free Japanese title _国家大作戦_ / Falcom's **Lord Monarch** — a 45° isometric, real-time-tick grid wargame. Four corner castles (you play **Tokugawa**) against three rule AIs.
 
-[`docs/PRD.md`](docs/PRD.md) (v2.x) is the single source of truth for rules, numbers and acceptance criteria; [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) covers the opponent AI; [`docs/MILESTONES.md`](docs/MILESTONES.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md) track delivery; [`CLAUDE.md`](CLAUDE.md) is the engineering reference. This README only covers running, building and the scripts.
+The **shipped default is the v1 game**: territory self-replicates troops each tick; drag-dispatch garrisons to expand, siege and conquer; first to take every enemy castle wins. A separate **economy** branch (Lord Monarch-style houses → fields → tax → armies, plus bridges/fences and monsters) is playable at **`?v2`** and is the reference design for grafting an economy onto the v1 base.
+
+[`docs/PRD.md`](docs/PRD.md) is the **active spec** (currently the v1 game — being amended to stack v2 systems onto the v1 base). The full **v2 reference design** — its PRD / MILESTONES / BACKLOG / AI-DESIGN plus the Lord Monarch source spec — lives in [`docs/v2_reference_spec/`](docs/v2_reference_spec/). [`CLAUDE.md`](CLAUDE.md) is the engineering reference. This README only covers running, building and the scripts.
 
 > **Default is v1; v2 lives at `?v2`.** The app boots the **v1** game by default (its look & feel is what we ship). Load **`?v2`** for the v2 Lord Monarch economy game described below (`?v1` also forces v1 explicitly). `src/main.ts` is a thin router over `main-v1.ts` / `main-v2.ts`.
 
