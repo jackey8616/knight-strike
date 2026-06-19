@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveOrders, stageDamage } from "./combat";
+import { makeEconomy } from "./economy";
 import { advanceMarching } from "./movement";
 import { derivedOwner, tileId } from "./state";
 import {
@@ -31,6 +32,7 @@ function makeState(
       UESUGI: AI_IDLE,
       NEUTRAL: AI_IDLE,
     },
+    economy: makeEconomy(),
     defeated: new Set<FactionId>(defeated),
     rngSeed: 42,
     nextMarchingId: 1,
@@ -259,5 +261,33 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     const r = resolveOrders(state);
     expect((r.state.provinces.get(T) as Province).lastClaimedFaction).toBe("TOKUGAWA");
     expect(derivedOwner(r.state.provinces.get(T) as Province)).toBe("TOKUGAWA");
+  });
+
+  it("[AC-31] breaking an enemy-claimed House tile razes it (population lost)", () => {
+    const house: Province = {
+      id: T,
+      x: 1,
+      y: 0,
+      isCastle: false,
+      castleOwner: null,
+      isHouse: true,
+      houseOwner: "TAKEDA",
+      housePopulation: 15,
+      occupants: [],
+      lastClaimedFaction: "TAKEDA",
+    };
+    const state = makeState(
+      new Map([
+        [F, tile(F, [occ("TOKUGAWA", 5)], "TOKUGAWA")],
+        [T, house],
+      ]),
+      [order(F, T, "TOKUGAWA", 5, [], 1)],
+      2,
+    );
+    const t = resolveOrders(state).state.provinces.get(T) as Province;
+    expect(t.isHouse).toBe(false);
+    expect(t.houseOwner).toBe(null);
+    expect(t.housePopulation).toBe(0);
+    expect(t.lastClaimedFaction).toBe(null); // broken to neutral
   });
 });

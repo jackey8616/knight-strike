@@ -1,3 +1,4 @@
+import { razeHouseAt } from "./economy";
 import { applyTerrainDefense } from "./terrain";
 import type {
   AttackOrder,
@@ -144,15 +145,17 @@ export function resolveOrders(state: GameState): CombatResult {
 
     if (enemyClaim) {
       const left = o.count - 1; // break costs 1
-      provinces.set(o.to, { ...toP, lastClaimedFaction: null });
+      // PRD §4.3: breaking an enemy-claimed tile razes any House on it.
+      provinces.set(o.to, { ...razeHouseAt(toP), lastClaimedFaction: null });
       events.push({ from: o.from, to: o.to, kind: "break", combatTick: t, baseDamage: 0, attacks: [] });
       if (left > 0) kept.push({ ...o, count: left }); // capture next tick
       continue;
     }
 
-    // Capture (claim → faction) then advance.
+    // Capture (claim → faction) then advance. Raze any leftover House (a
+    // defeated faction's inert House can sit on an unclaimed tile, §4.3).
     const remaining = o.count - 1;
-    provinces.set(o.to, { ...toP, lastClaimedFaction: o.faction });
+    provinces.set(o.to, { ...razeHouseAt(toP), lastClaimedFaction: o.faction });
     events.push({ from: o.from, to: o.to, kind: "capture", combatTick: t, baseDamage: 0, attacks: [] });
     if (remaining <= 0) continue; // tile claimed, no troops left to advance
     // Advance onto the captured tile as a marching column. `from` stays at

@@ -1,26 +1,38 @@
 import { stepAi } from "./ai";
 import { resolveOrders } from "./combat";
+import {
+  collectTax,
+  growPopulation,
+  isEconomyTick,
+  spawnFromHouses,
+} from "./economy";
 import { advanceMarching } from "./movement";
-import { produce } from "./production";
 import type { GameState } from "./types";
 import { applyDefeats } from "./victory";
 
-// PRD §3.2 v1.4 step order:
-//   1. movement (advanceMarching: stacks step forward; arrivals move into an
-//      own tile or register an AttackOrder against a non-own target)
-//   2. production (castle / garrison +1; tiles engaged in a siege are frozen)
-//   3. combat (resolveOrders: per-AttackOrder cross-edge step-function ramp
-//      then break→capture once the target is empty)
-//   4. defeats (faction without castleOwner occupant on its own castle →
-//      defeated; remnants → NEUTRAL, marching stacks + its orders dropped)
-//   5. victory check is caller-side (evaluateOutcome reads state)
+// PRD §4.2 (v2.6) step order:
+//   1. AI (stepAi: rule factions dispatch / build houses; lands in state)
+//   2. movement (advanceMarching: stacks step forward; arrivals settle or
+//      register an AttackOrder)
+//   3. economy — only on economy "days" (isEconomyTick):
+//      a. growPopulation (houses grow, scaled by owned territory, minus tax)
+//      b. collectTax (live houses pay floor(pop × taxPct/100) into the treasury)
+//      c. spawnFromHouses (houses at/over the threshold spawn a troop stack)
+//   4. combat (resolveOrders: cross-edge step-function + break→capture; a
+//      captured House tile is razed, §4.3)
+//   5. defeats (faction without castleOwner occupant on its own castle → defeated)
+//   6. victory check is caller-side (evaluateOutcome reads state)
 //
-// stepAi() stays at the top so any (currently idle) AI dispatch lands in
-// marchingStacks before advanceMarching.
+// Troops no longer self-replicate (v1's produce() is retired, §4.3) — the only
+// troop source is House spawns.
 export function step(state: GameState): GameState {
   let s = stepAi(state);
   s = advanceMarching(s);
-  s = produce(s);
+  if (isEconomyTick(s.tick)) {
+    s = growPopulation(s);
+    s = collectTax(s);
+    s = spawnFromHouses(s);
+  }
   s = resolveOrders(s).state;
   s = applyDefeats(s);
   return { ...s, tick: s.tick + 1 };

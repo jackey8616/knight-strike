@@ -41,6 +41,12 @@ export function makeScenario(
       { x: max, y: 0, owner: "TAKEDA", count: 3, isCastle: true },
       { x: 0, y: max, owner: "ODA", count: 3, isCastle: true },
       { x: max, y: max, owner: "UESUGI", count: 3, isCastle: true },
+      // PRD §4.3 (v2.6): one seed House next to each corner castle so the
+      // economy turns over from tick 0 (the only troop source is House spawns).
+      { x: 1, y: 0, owner: "TOKUGAWA", count: 0, isCastle: false, isHouse: true },
+      { x: max - 1, y: 0, owner: "TAKEDA", count: 0, isCastle: false, isHouse: true },
+      { x: 1, y: max, owner: "ODA", count: 0, isCastle: false, isHouse: true },
+      { x: max - 1, y: max, owner: "UESUGI", count: 0, isCastle: false, isHouse: true },
       { x: mid, y: mid, owner: "NEUTRAL", count: 3, isCastle: false },
     ],
     aiConfig: {

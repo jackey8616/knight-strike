@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { makeEconomy } from "./economy";
 import { tileId } from "./state";
 import { step } from "./tick";
 import {
@@ -28,6 +29,7 @@ function makeState(
       UESUGI: AI_IDLE,
       NEUTRAL: AI_IDLE,
     },
+    economy: makeEconomy(),
     defeated: new Set<FactionId>(),
     rngSeed: 42,
     nextMarchingId: 1,
@@ -79,10 +81,13 @@ describe("step (tick orchestrator)", () => {
     expect(step(makeState(new Map(), 5)).tick).toBe(6);
   });
 
-  it("[AC-V2-29] uncontested castles self-replicate +1 each tick", () => {
-    const out = step(makeState(castles(), 1));
+  it("[AC-03] garrisons no longer self-replicate (auto-gen retired, §4.3)", () => {
+    // No houses, no economy → a uncontested castle garrison stays put tick over
+    // tick. Troops now come only from House spawns (§4.3).
+    let out = step(makeState(castles(), 1));
+    for (let i = 0; i < 6; i++) out = step(out); // cross an economy tick too
     for (const id of [tileId(0, 0), tileId(10, 0), tileId(0, 10), tileId(10, 10)]) {
-      expect((out.provinces.get(id) as Province).occupants[0]?.amount).toBe(4);
+      expect((out.provinces.get(id) as Province).occupants[0]?.amount).toBe(3);
     }
   });
 

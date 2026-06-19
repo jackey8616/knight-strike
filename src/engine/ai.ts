@@ -1,4 +1,5 @@
 import { RULE_PROFILES, type RuleProfile } from "./ai-profile";
+import { buildHouse, HOUSE_COST } from "./economy";
 import { dispatch } from "./movement";
 import {
   derivedOwner,
@@ -552,11 +553,90 @@ function tryAssault(
   return null;
 }
 
-// §4.1 priority order: threat → assault → expand → rally. Assault sits above
-// expand so a faction strong enough to break an enemy castle commits to it
-// instead of expanding into empty tiles forever (the v1.3 stalemate cause).
-// Assault self-gates on aggregate force, so early game it declines and the
-// faction grows via expand until it can mount a decisive convergence.
+// PRD §4.3 (v2.6): a builder tile must hold at least this many troops — enough
+// to seed a worthwhile House population (half) and still leave a defender.
+const BUILD_MIN_GARRISON = 3;
+
+function adjacentOwnHouse(
+  state: GameState,
+  p: Province,
+  faction: FactionId,
+): boolean {
+  for (const nb of neighborsOf(state, p.id)) {
+    if (nb.isHouse === true && nb.houseOwner === faction) return true;
+  }
+  return false;
+}
+
+function adjacentHostile(
+  state: GameState,
+  p: Province,
+  faction: FactionId,
+): boolean {
+  for (const nb of neighborsOf(state, p.id)) {
+    if (hasHostileOccupant(nb, faction)) return true;
+  }
+  return false;
+}
+
+function ownedNeighbourCount(
+  state: GameState,
+  p: Province,
+  faction: FactionId,
+): number {
+  let n = 0;
+  for (const nb of neighborsOf(state, p.id)) {
+    if (derivedOwner(nb) === faction) n += 1;
+  }
+  return n;
+}
+
+// PRD §4.3: spend gold to raise a House — the only troop source, so an AI that
+// never builds starves; but over-building stalls expansion, so it keeps roughly
+// one House per profile.housePerTiles owned tiles. Builds on the garrisoned,
+// non-frontline interior tile with the most owned neighbours (fastest growth),
+// spaced out from existing own Houses. Deterministic pick (first best by Map
+// order) → §4.2 determinism holds.
+function tryBuildHouse(
+  state: GameState,
+  faction: FactionId,
+  profile: RuleProfile,
+): GameState | null {
+  if (profile.housePerTiles <= 0) return null;
+  if (state.economy[faction].gold < HOUSE_COST) return null;
+  const ownTiles = findOwnTiles(state, faction);
+  let houseCount = 0;
+  for (const p of ownTiles) {
+    if (p.isHouse === true && p.houseOwner === faction) houseCount += 1;
+  }
+  if (houseCount >= Math.floor(ownTiles.length / profile.housePerTiles)) {
+    return null;
+  }
+
+  let best: Province | null = null;
+  let bestScore = -1;
+  for (const p of ownTiles) {
+    if (p.isCastle || p.isHouse === true) continue;
+    if (ownAmount(p, faction) < BUILD_MIN_GARRISON) continue;
+    if (adjacentHostile(state, p, faction)) continue;
+    if (adjacentOwnHouse(state, p, faction)) continue;
+    const score = ownedNeighbourCount(state, p, faction);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+  if (best === null) return null;
+  const res = buildHouse(state, { faction, tile: best.id });
+  return res.ok ? res.state : null;
+}
+
+// §4.1 priority order: threat → assault → build → expand → rally. Assault sits
+// above expand so a faction strong enough to break an enemy castle commits to it
+// instead of expanding forever (the v1.3 stalemate cause). Build sits below
+// assault but above expand so a solvent faction invests its surplus garrisons in
+// economy before pushing into more empty land; it self-caps on a tile ratio, so
+// the faction still expands once it has enough Houses.
 function evaluateFaction(
   state: GameState,
   faction: FactionId,
@@ -567,6 +647,8 @@ function evaluateFaction(
   if (r1 !== null) return r1;
   const ra = tryAssault(state, faction, rng, profile);
   if (ra !== null) return ra;
+  const rb = tryBuildHouse(state, faction, profile);
+  if (rb !== null) return rb;
   const r2 = tryExpand(state, faction, rng, profile);
   if (r2 !== null) return r2;
   const r25 = tryRally(state, faction, rng, profile);
@@ -583,6 +665,9 @@ function evaluateFaction(
 export function stepAi(state: GameState): GameState {
   const provinces = new Map<TileId, Province>(state.provinces);
   const stacks: MarchingStack[] = [...state.marchingStacks];
+  // PRD §4.3: factions spend their own gold to build Houses. Each faction only
+  // touches its own economy entry (disjoint), so merge them like provinces.
+  const economy = { ...state.economy };
   let nextMarchingId = state.nextMarchingId;
   let changed = false;
   for (const faction of NON_NEUTRAL_FACTIONS) {
@@ -597,6 +682,9 @@ export function stepAi(state: GameState): GameState {
     for (const [id, p] of r.provinces) {
       if (p !== state.provinces.get(id)) provinces.set(id, p);
     }
+    if (r.economy[faction] !== state.economy[faction]) {
+      economy[faction] = r.economy[faction];
+    }
     for (let k = state.marchingStacks.length; k < r.marchingStacks.length; k++) {
       const st = r.marchingStacks[k] as MarchingStack;
       stacks.push({ ...st, id: `mstack:${nextMarchingId}` });
@@ -604,5 +692,5 @@ export function stepAi(state: GameState): GameState {
     }
   }
   if (!changed) return state;
-  return { ...state, provinces, marchingStacks: stacks, nextMarchingId };
+  return { ...state, provinces, marchingStacks: stacks, economy, nextMarchingId };
 }

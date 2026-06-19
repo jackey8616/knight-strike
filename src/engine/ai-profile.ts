@@ -23,6 +23,12 @@ export type RuleProfile = {
   // Fraction of a Queen-band castle (count 15..29) to siphon on expand. Only
   // the Queen band — Soldier and King bands stay static per §4.1.
   readonly castleQueenSendRatio: number;
+  // PRD §4.3 (v2.6) economy knobs. taxPct = the faction's fixed tax rate (0..30):
+  // higher = more gold now but slower House growth. housePerTiles = build roughly
+  // one House per this many owned tiles (the AI stops building once it hits that
+  // ratio and expands instead); 0 disables building.
+  readonly taxPct: number;
+  readonly housePerTiles: number;
 };
 
 export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
@@ -34,6 +40,8 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     rallyEnabled: false,
     expandRatio: 0.5,
     castleQueenSendRatio: 0.2,
+    taxPct: 12,
+    housePerTiles: 5,
   },
   normal: {
     evalInterval: 5,
@@ -43,6 +51,8 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     rallyEnabled: true,
     expandRatio: 0.5,
     castleQueenSendRatio: 0.33,
+    taxPct: 15,
+    housePerTiles: 4,
   },
   hard: {
     evalInterval: 3,
@@ -52,5 +62,7 @@ export const RULE_PROFILES: Readonly<Record<RuleTier, RuleProfile>> = {
     rallyEnabled: true,
     expandRatio: 0.66,
     castleQueenSendRatio: 0.4,
+    taxPct: 18,
+    housePerTiles: 3,
   },
 };

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { makeEconomy } from "@/engine/economy";
 import { dispatch, findPath } from "@/engine/movement";
 import { derivedOwner, tileId } from "@/engine/state";
 import { step } from "@/engine/tick";
@@ -41,6 +42,7 @@ function blankBoard(size: number): GameState {
       UESUGI: AI_IDLE,
       NEUTRAL: AI_IDLE,
     },
+    economy: makeEconomy(),
     defeated: new Set<FactionId>(),
     rngSeed: 1,
     nextMarchingId: 1,

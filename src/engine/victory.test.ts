@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { makeEconomy } from "./economy";
 import { tileId } from "./state";
 import {
   AI_IDLE,
@@ -30,6 +31,7 @@ function makeState(
       UESUGI: AI_IDLE,
       NEUTRAL: AI_IDLE,
     },
+    economy: makeEconomy(),
     defeated,
     rngSeed: 42,
     nextMarchingId: 1,
