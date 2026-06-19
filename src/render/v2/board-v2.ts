@@ -32,6 +32,7 @@ const label = (text: string, size: number, color: number): Text =>
 export type V2BoardRenderer = {
   render(state: GameState): void;
   recenter(viewW: number, viewH: number, boardSize: number): void;
+  screenToTile(globalX: number, globalY: number): { x: number; y: number } | null;
   destroy(): void;
 };
 
@@ -43,6 +44,7 @@ export function createV2BoardRenderer(app: Application): V2BoardRenderer {
   const entities = new Container();
   world.addChild(tiles, entities);
   app.stage.addChild(world);
+  let boardSize = 0;
 
   const diamond = (g: Graphics, x: number, y: number, color: number): void => {
     const cx = isoX(x, y);
@@ -74,6 +76,7 @@ export function createV2BoardRenderer(app: Application): V2BoardRenderer {
 
   return {
     render(state: GameState): void {
+      boardSize = state.boardSize;
       tiles.clear();
       entities.removeChildren().forEach((c) => c.destroy({ children: true }));
       entities.sortableChildren = true;
@@ -146,12 +149,23 @@ export function createV2BoardRenderer(app: Application): V2BoardRenderer {
       }
     },
 
-    recenter(viewW: number, viewH: number, boardSize: number): void {
+    recenter(viewW: number, viewH: number, size: number): void {
       // center the diamond board in the viewport
       world.x = viewW / 2;
-      world.y = viewH / 2 - (boardSize * TILE_H) / 2;
-      const scale = Math.min(1, viewW / ((boardSize + 1) * TILE_W), viewH / ((boardSize + 1) * TILE_H));
+      world.y = viewH / 2 - (size * TILE_H) / 2;
+      const scale = Math.min(1, viewW / ((size + 1) * TILE_W), viewH / ((size + 1) * TILE_H));
       world.scale.set(scale);
+    },
+
+    // Inverse iso pick: global pointer coords → tile (or null if off-board).
+    screenToTile(globalX: number, globalY: number): { x: number; y: number } | null {
+      const lp = world.toLocal({ x: globalX, y: globalY });
+      const a = lp.x / (TILE_W / 2); // x − y
+      const b = lp.y / (TILE_H / 2); // x + y
+      const x = Math.round((a + b) / 2);
+      const y = Math.round((b - a) / 2);
+      if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) return null;
+      return { x, y };
     },
 
     destroy(): void {

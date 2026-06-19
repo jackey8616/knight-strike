@@ -59,9 +59,24 @@ export const SPECTATOR_4AI: ScenarioInput = {
   },
 };
 
+// The default playable game: you are TOKUGAWA (idle = manual control) against
+// three normal AIs.
+export const PLAYER_GAME: ScenarioInput = {
+  ...SPECTATOR_4AI,
+  name: "player",
+  ai: { TAKEDA: "normal", ODA: "normal", UESUGI: "normal" }, // TOKUGAWA omitted → idle/manual
+  factions: {
+    TOKUGAWA: { isPlayer: true, gold: 300 },
+    TAKEDA: { gold: 300 },
+    ODA: { gold: 300 },
+    UESUGI: { gold: 300 },
+  },
+};
+
 export const SCENARIOS: Readonly<Record<string, ScenarioInput>> = {
   "quick-win": QUICK_WIN,
   "spectator-4": SPECTATOR_4,
   "spectator-4ai": SPECTATOR_4AI,
   "nest-drip": NEST_DRIP,
+  player: PLAYER_GAME,
 };

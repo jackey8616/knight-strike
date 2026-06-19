@@ -108,9 +108,26 @@ try {
     fs.writeFileSync(path.join(SHOTS, "v2-02-game.png"), Buffer.from(r.data, "base64")),
   );
 
-  if (exceptions.length) throw new Error("page exceptions: " + JSON.stringify(exceptions));
+  // player build: pause, drop a unit on an empty tile via state poke is hard;
+  // instead exercise the control surface — set tax via __ks and confirm it sticks.
+  await evaluate(`window.__ks.setTax(0.15)`);
+  const tax = await evaluate(`window.__ks.getState().factions.TOKUGAWA.taxRate`);
+  log("player tax set →", tax);
+  const controls = await evaluate(
+    `(()=>{return{bar:!!document.querySelector('.ks-controls'),build:document.querySelectorAll('.ks-controls button').length,tax:!!document.querySelector('.ks-tax')};})()`,
+  );
+  log("controls:", JSON.stringify(controls));
+
   if (counts.castles < 4 || counts.houses < 1) throw new Error("entities missing: " + JSON.stringify(counts));
-  log("RESULT_OK — v2 render boots, ticks advance, entities present");
+  if (!controls.bar || !controls.tax || tax !== 0.15) throw new Error("controls/tax not wired: " + JSON.stringify({ controls, tax }));
+
+  // easter egg: ?v1 boots the original prototype
+  await send("Page.navigate", { url: APP + "?v1" });
+  await waitFor(`!!document.querySelector('.ks-menu') && !!document.querySelector('canvas')`, 30000, "v1 menu");
+  log("easter-egg ?v1 booted (v1 prototype menu + canvas)");
+
+  if (exceptions.length) throw new Error("page exceptions: " + JSON.stringify(exceptions));
+  log("RESULT_OK — v2 plays (render/ticks/entities/controls) + ?v1 easter egg boots");
   cleanup();
   process.exit(0);
 } catch (e) {
