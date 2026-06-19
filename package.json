@@ -19,6 +19,7 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage --passWithNoTests",
     "playtest": "tsx src/playtest/cli.ts",
+    "playtest:v2": "tsx src/playtest/v2/cli.ts",
     "smoke": "node scripts/smoke/run.mjs",
     "balance": "tsx src/playtest/balance-check.ts",
     "lint": "eslint . --max-warnings 0",
