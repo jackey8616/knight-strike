@@ -5,7 +5,7 @@ import { issueMarch } from "@/engine/v2/movement";
 import { makeFaction, parseTileId, tileId, vonNeumannNeighbors } from "@/engine/v2/state";
 import { step } from "@/engine/v2/tick";
 import type { FactionId, GameState, Speed, Unit } from "@/engine/v2/types";
-import { evaluateOutcome } from "@/engine/v2/victory";
+import { evaluateOutcome, scoreLevelEnd } from "@/engine/v2/victory";
 import { createRenderApp } from "@/render/app";
 import { createV2BoardRenderer } from "@/render/v2/board-v2";
 import { createControls } from "@/ui/v2/controls";
@@ -138,8 +138,13 @@ async function main(): Promise<void> {
       const outcome = evaluateOutcome(state);
       if (outcome.kind !== "ongoing") {
         ended = true;
-        const winner = outcome.kind === "win" ? outcome.winner : outcome.kind;
-        mount.appendChild(overlay("ks-end", `Result: ${winner}`, "Restart", () => location.reload()));
+        const r = scoreLevelEnd(state);
+        const title =
+          outcome.kind === "win" ? "Victory" : outcome.kind === "loss" ? "Defeat" : "Stalemate";
+        const stats =
+          `occupation ${Math.round(r.occupationRate * 100)}% · ` +
+          `battle efficiency ${r.battleEfficiency} · days left ${r.finalRemainingDays}`;
+        mount.appendChild(overlay("ks-end", title, "Restart", () => location.reload(), stats));
       }
     }
   });
@@ -174,19 +179,33 @@ async function main(): Promise<void> {
   }
 }
 
-function overlay(className: string, title: string, button: string, onClick: () => void): HTMLElement {
+function overlay(
+  className: string,
+  title: string,
+  button: string,
+  onClick: () => void,
+  subtitle?: string,
+): HTMLElement {
   const el = document.createElement("div");
   el.className = className;
   el.style.cssText =
     "position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "gap:16px;background:rgba(12,12,12,.82);color:#eee;font:600 18px/1.4 monospace;z-index:10";
+    "gap:14px;background:rgba(12,12,12,.82);color:#eee;font:600 18px/1.4 monospace;z-index:10";
   const h = document.createElement("div");
   h.textContent = title;
+  el.append(h);
+  if (subtitle !== undefined) {
+    const s = document.createElement("div");
+    s.className = "ks-end-stats";
+    s.style.cssText = "font:13px monospace;opacity:.85";
+    s.textContent = subtitle;
+    el.append(s);
+  }
   const b = document.createElement("button");
   b.textContent = button;
   b.style.cssText = "padding:10px 24px;font:600 16px monospace;cursor:pointer;border-radius:6px;border:0";
   b.addEventListener("click", onClick);
-  el.append(h, b);
+  el.append(b);
   return el;
 }
 
