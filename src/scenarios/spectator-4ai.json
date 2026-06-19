@@ -6,6 +6,10 @@
     { "x": 10, "y": 0, "owner": "TAKEDA", "count": 3, "isCastle": true },
     { "x": 0, "y": 10, "owner": "ODA", "count": 3, "isCastle": true },
     { "x": 10, "y": 10, "owner": "UESUGI", "count": 3, "isCastle": true },
+    { "x": 1, "y": 0, "owner": "TOKUGAWA", "count": 0, "isCastle": false, "isHouse": true },
+    { "x": 9, "y": 0, "owner": "TAKEDA", "count": 0, "isCastle": false, "isHouse": true },
+    { "x": 1, "y": 10, "owner": "ODA", "count": 0, "isCastle": false, "isHouse": true },
+    { "x": 9, "y": 10, "owner": "UESUGI", "count": 0, "isCastle": false, "isHouse": true },
     { "x": 5, "y": 5, "owner": "NEUTRAL", "count": 3, "isCastle": false }
   ],
   "aiConfig": {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RULE_PROFILES } from "./ai-profile";
 import { shouldEvaluate, stepAi } from "./ai";
+import { HOUSE_COST, makeEconomy } from "./economy";
 import { tileId } from "./state";
 import {
   AI_EASY,
@@ -29,6 +30,7 @@ type StateOpts = {
   readonly aiConfig: Partial<Record<Exclude<FactionId, "NEUTRAL">, AiMode>>;
   readonly tick?: number;
   readonly seed?: number;
+  readonly gold?: number;
   readonly defeated?: readonly FactionId[];
   // Mark every empty tile as last-claimed by this faction (so the expand /
   // rally rules treat the board as "already ours" and decline, isolating the
@@ -100,6 +102,7 @@ function mkState(opts: StateOpts): GameState {
     marchingStacks: [],
     attackOrders: [],
     aiConfig,
+    economy: makeEconomy(opts.gold ?? 0),
     defeated: new Set<FactionId>(opts.defeated ?? []),
     rngSeed: (opts.seed ?? 1) >>> 0,
     nextMarchingId: 1,
@@ -422,5 +425,35 @@ describe("ai: determinism", () => {
       if (stack !== undefined) targets.add(to(stack));
     }
     expect(targets.size).toBeGreaterThan(1);
+  });
+});
+
+describe("tryBuildHouse (PRD §4.3)", () => {
+  // A board fully claimed by TOKUGAWA (so expand finds no empty target and
+  // declines), with a single garrisoned interior tile to build on and no enemy
+  // (so defense / assault decline). Build is the only eligible rule.
+  function buildState(gold: number): GameState {
+    return mkState({
+      boardSize: 5,
+      tiles: [{ x: 2, y: 2, faction: "TOKUGAWA", amount: 5 }],
+      aiConfig: { TOKUGAWA: AI_NORMAL },
+      claimEmptiesFor: "TOKUGAWA",
+      gold,
+    });
+  }
+
+  it("[AC-27] a solvent AI builds a House on a garrisoned interior tile and spends gold", () => {
+    const out = stepAi(buildState(HOUSE_COST));
+    const p = out.provinces.get(tileId(2, 2)) as Province;
+    expect(p.isHouse).toBe(true);
+    expect(p.houseOwner).toBe("TOKUGAWA");
+    expect(out.economy.TOKUGAWA.gold).toBe(0);
+  });
+
+  it("[AC-27] an insolvent AI does not build (no house, no spend)", () => {
+    const out = stepAi(buildState(HOUSE_COST - 1));
+    const p = out.provinces.get(tileId(2, 2)) as Province;
+    expect(p.isHouse ?? false).toBe(false);
+    expect(out.economy.TOKUGAWA.gold).toBe(HOUSE_COST - 1);
   });
 });

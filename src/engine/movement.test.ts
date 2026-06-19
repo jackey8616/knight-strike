@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { makeEconomy } from "./economy";
 import {
   advanceMarching,
   cancelMarchingStack,
@@ -45,6 +46,7 @@ function emptyState(boardSize = 5): GameState {
       UESUGI: AI_IDLE,
       NEUTRAL: AI_IDLE,
     },
+    economy: makeEconomy(),
     defeated: new Set<FactionId>(),
     rngSeed: 42,
     nextMarchingId: 1,

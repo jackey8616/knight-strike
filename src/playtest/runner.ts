@@ -1,7 +1,18 @@
 import { stepAi } from "@/engine/ai";
+import { RULE_PROFILES } from "@/engine/ai-profile";
 import { resolveOrders } from "@/engine/combat";
+import {
+  collectTax,
+  DEFAULT_TAX_PCT,
+  growPopulation,
+  HOUSE_SEED_POP,
+  isEconomyTick,
+  makeEconomy,
+  spawnFromHouses,
+  SPAWN_SIZE,
+  STARTING_GOLD,
+} from "@/engine/economy";
 import { advanceMarching, dispatch, type DispatchRatio } from "@/engine/movement";
-import { produce } from "@/engine/production";
 import { derivedOwner, tileId } from "@/engine/state";
 import { coastOceanMask, generateTerrain } from "@/engine/terrain";
 import { deriveTier } from "@/engine/upgrade";
@@ -24,6 +35,9 @@ export type ScenarioTile = {
   readonly owner: FactionId;
   readonly count: number;
   readonly isCastle: boolean;
+  // PRD §4.3 (v2.6): a seed House owned by `owner` (claimed even with count 0),
+  // populated at HOUSE_SEED_POP. Bootstraps the economy from tick 0.
+  readonly isHouse?: boolean;
 };
 
 export type ScriptedCommand = {
@@ -181,7 +195,17 @@ export function parseScenario(raw: unknown): ScenarioInput {
       if (typeof t.isCastle !== "boolean") {
         throw new Error(`scenario.initialState[${i}].isCastle: expected boolean`);
       }
-      const tile: ScenarioTile = { x, y, owner, count, isCastle: t.isCastle };
+      if (t.isHouse !== undefined && typeof t.isHouse !== "boolean") {
+        throw new Error(`scenario.initialState[${i}].isHouse: expected boolean`);
+      }
+      const tile: ScenarioTile = {
+        x,
+        y,
+        owner,
+        count,
+        isCastle: t.isCastle,
+        ...(t.isHouse === true ? { isHouse: true } : {}),
+      };
       return tile;
     },
   );
@@ -280,18 +304,32 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
       y: t.y,
       isCastle: t.isCastle,
       castleOwner: t.isCastle ? t.owner : null,
+      // PRD §4.3 (v2.6): seed House, claimed by its owner and pre-populated.
+      ...(t.isHouse === true
+        ? {
+            isHouse: true,
+            houseOwner: t.owner,
+            housePopulation: HOUSE_SEED_POP,
+          }
+        : {}),
       occupants,
       // Initial garrison's faction stamps the tile so derivedOwner reflects
       // colour even if the occupant later dies before someone else claims
-      // (and so a wiped enemy castle still needs break→capture, §3.6').
-      lastClaimedFaction: t.count > 0 ? t.owner : null,
+      // (and so a wiped enemy castle still needs break→capture, §3.6'). A seed
+      // House is claimed by its owner even with no starting garrison.
+      lastClaimedFaction: t.count > 0 || t.isHouse === true ? t.owner : null,
     });
   }
-  // PRD §3.9 (v1.6): generate seeded terrain. Castles + neutral camps stay on
-  // flat ground (and get a clear ring), and connectivity is guaranteed.
+  // PRD §3.9 (v1.6): generate seeded terrain. Castles + neutral camps + seed
+  // Houses stay on flat ground (and get a clear ring), and connectivity is
+  // guaranteed.
   const fixedPlains = new Set<TileId>();
   for (const [id, p] of provinces) {
-    if (p.isCastle || p.occupants.some((o) => o.faction === "NEUTRAL")) {
+    if (
+      p.isCastle ||
+      p.isHouse === true ||
+      p.occupants.some((o) => o.faction === "NEUTRAL")
+    ) {
       fixedPlains.add(id);
     }
   }
@@ -318,6 +356,20 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
     UESUGI: scenario.aiConfig.UESUGI,
     NEUTRAL: { kind: "idle" },
   };
+  // PRD §4.3 (v2.6): each faction starts solvent (enough gold for a couple of
+  // Houses) at the default tax rate; rule-AI factions take their fixed tax rate
+  // from their difficulty profile (the human keeps the default until they adjust
+  // it in the HUD).
+  const economy = makeEconomy(STARTING_GOLD, DEFAULT_TAX_PCT);
+  for (const faction of NON_NEUTRAL_FACTIONS) {
+    const mode = aiConfig[faction];
+    if (mode.kind === "rule") {
+      economy[faction] = {
+        ...economy[faction],
+        taxPct: RULE_PROFILES[mode.tier].taxPct,
+      };
+    }
+  }
   return {
     boardSize: scenario.boardSize,
     tick: 0,
@@ -325,6 +377,7 @@ export function buildInitialState(scenario: ScenarioInput): GameState {
     marchingStacks: [],
     attackOrders: [],
     aiConfig,
+    economy,
     defeated: new Set<FactionId>(),
     rngSeed: scenario.rngSeed >>> 0,
     nextMarchingId: 1,
@@ -338,11 +391,19 @@ export type FactionSnapshot = {
   readonly hasCastle: boolean;
   readonly marchingStacks: number;
   readonly marchingCount: number;
+  // PRD §4.3 (v2.6): economy readouts for balance analysis.
+  readonly gold: number;
+  readonly houses: number;
 };
 
 export type SubEvent =
   | {
-      readonly type: "production";
+      readonly type: "house_built";
+      readonly tile: TileId;
+      readonly faction: FactionId;
+    }
+  | {
+      readonly type: "house_spawn";
       readonly tile: TileId;
       readonly faction: FactionId;
       readonly count: number;
@@ -412,6 +473,7 @@ function provinceTotal(p: Province): number {
 function snapshotFactions(state: GameState): FactionSnapshot[] {
   const tiles = new Map<FactionId, number>();
   const counts = new Map<FactionId, number>();
+  const houses = new Map<FactionId, number>();
   const castles = new Set<FactionId>();
   for (const p of state.provinces.values()) {
     const owner = derivedOwner(p);
@@ -420,6 +482,9 @@ function snapshotFactions(state: GameState): FactionSnapshot[] {
     }
     for (const o of p.occupants) {
       counts.set(o.faction, (counts.get(o.faction) ?? 0) + o.amount);
+    }
+    if (p.isHouse === true && p.houseOwner !== null && p.houseOwner !== undefined) {
+      houses.set(p.houseOwner, (houses.get(p.houseOwner) ?? 0) + 1);
     }
     if (p.isCastle && p.castleOwner !== null && p.castleOwner !== "NEUTRAL") {
       for (const o of p.occupants) {
@@ -445,6 +510,8 @@ function snapshotFactions(state: GameState): FactionSnapshot[] {
       hasCastle: castles.has(faction),
       marchingStacks: marchTiles.get(faction) ?? 0,
       marchingCount: marchCounts.get(faction) ?? 0,
+      gold: state.economy[faction].gold,
+      houses: houses.get(faction) ?? 0,
     });
   }
   return out;
@@ -493,6 +560,12 @@ function stepWithEvents(state: GameState): {
       origin: "ai",
     });
   }
+  // PRD §4.3: an AI that built a House this tick (a tile that gained a house).
+  for (const [id, after] of s.provinces) {
+    if (after.isHouse !== true || after.houseOwner == null) continue;
+    if (beforeAi.provinces.get(id)?.isHouse === true) continue;
+    events.push({ type: "house_built", tile: id, faction: after.houseOwner });
+  }
 
   const beforeMove = s;
   s = advanceMarching(s);
@@ -509,24 +582,26 @@ function stepWithEvents(state: GameState): {
     });
   }
 
-  const beforeProd = s;
-  s = produce(s);
-  for (const after of s.provinces.values()) {
-    if (!after.isCastle) continue;
-    const owner = after.castleOwner;
-    if (owner === null || owner === "NEUTRAL") continue;
-    const prev = beforeProd.provinces.get(after.id);
-    if (prev === undefined) continue;
-    const before = prev.occupants.find((o) => o.faction === owner);
-    const now = after.occupants.find((o) => o.faction === owner);
-    if (before === undefined || now === undefined) continue;
-    if (now.amount > before.amount) {
-      events.push({
-        type: "production",
-        tile: after.id,
-        faction: owner,
-        count: now.amount,
-      });
+  // PRD §4.3: economy day — houses grow, pay tax, then spawn troop stacks. A
+  // house whose population dropped is one that spawned this tick.
+  if (isEconomyTick(s.tick)) {
+    s = growPopulation(s);
+    s = collectTax(s);
+    const beforeSpawn = s;
+    s = spawnFromHouses(s);
+    for (const [id, after] of s.provinces) {
+      if (after.isHouse !== true || after.houseOwner == null) continue;
+      const before = beforeSpawn.provinces.get(id);
+      if (before === undefined) continue;
+      const dropped = (before.housePopulation ?? 0) - (after.housePopulation ?? 0);
+      if (dropped > 0) {
+        events.push({
+          type: "house_spawn",
+          tile: id,
+          faction: after.houseOwner,
+          count: SPAWN_SIZE,
+        });
+      }
     }
   }
 

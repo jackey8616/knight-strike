@@ -226,8 +226,9 @@ export function cancelMarchingStack(
 
 // Add `amount` troops of `faction` onto a tile (merge with an existing same-
 // faction occupant, else create one) and stamp lastClaimedFaction = faction
-// (PRD §3.6' invariant). Used for both move-in (own target) and siege staging.
-function garrison(
+// (PRD §3.6' invariant). Used for move-in (own target), siege staging, and
+// House troop spawns (§4.3 / economy.ts).
+export function garrison(
   province: Province,
   faction: FactionId,
   amount: number,

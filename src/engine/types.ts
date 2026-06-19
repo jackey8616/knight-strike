@@ -28,6 +28,14 @@ export type Province = {
   // omit it; engine helpers treat absent as PLAINS. Generated per game (seeded)
   // and assigned at scenario load.
   readonly terrain?: Terrain;
+  // PRD §4.3 (v2.6) House economy. A House is a building on an owned tile that
+  // grows population, pays tax into its owner's treasury, and spawns troop
+  // stacks. Modelled as flags on the tile (like a castle), not a separate
+  // entity. Optional like `terrain` so existing fixtures omit them; engine
+  // helpers treat absent as "no house". An enemy capturing the tile razes it.
+  readonly isHouse?: boolean;
+  readonly houseOwner?: FactionId | null;
+  readonly housePopulation?: number;
   // PRD §3.6' (v1.4): invariant — at most one faction present at a time.
   // Units never share a tile with the enemy (combat is cross-edge).
   readonly occupants: readonly Occupant[];
@@ -80,6 +88,15 @@ export const AI_EASY: AiMode = { kind: "rule", tier: "easy" };
 export const AI_NORMAL: AiMode = { kind: "rule", tier: "normal" };
 export const AI_HARD: AiMode = { kind: "rule", tier: "hard" };
 
+// PRD §4.3 (v2.6): per-faction economy. `gold` is the treasury that funds House
+// construction; `taxPct` (0..30) is the rate Houses are taxed at — high tax
+// yields more gold now but slows population growth (§4.3). NEUTRAL is present
+// for total-record typing but never earns or spends.
+export type FactionEconomy = {
+  readonly gold: number;
+  readonly taxPct: number;
+};
+
 export type GameState = {
   readonly boardSize: number;
   readonly tick: number;
@@ -87,6 +104,7 @@ export type GameState = {
   readonly marchingStacks: readonly MarchingStack[];
   readonly attackOrders: readonly AttackOrder[];
   readonly aiConfig: Readonly<Record<FactionId, AiMode>>;
+  readonly economy: Readonly<Record<FactionId, FactionEconomy>>;
   readonly defeated: ReadonlySet<FactionId>;
   readonly rngSeed: number;
   readonly nextMarchingId: number;

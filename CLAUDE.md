@@ -2,7 +2,7 @@
 
 ## 1. 專案概要
 
-Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.1）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.6）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
 
 ## 2. 技術棧與版本
 
@@ -40,15 +40,15 @@ knight-strike/
 │   └── knight.png            # sprite 資源
 ├── src/
 │   ├── engine/               # 【純邏輯層】無 Pixi / DOM / GSAP 依賴
-│   │   ├── types.ts          # FactionId / Tier / Terrain / Province / Occupant / MarchingStack / AttackOrder / AiMode / GameState
+│   │   ├── types.ts          # FactionId / Tier / Terrain / Province（含 House 旗標）/ Occupant / MarchingStack / AttackOrder / AiMode / FactionEconomy / GameState（含 economy）
 │   │   ├── state.ts          # derivedOwner / isOwnClaimed / findOccupant
-│   │   ├── tick.ts           # step()：每 tick 結算順序（PRD §4.2）
+│   │   ├── tick.ts           # step()：每 tick 結算順序（含經濟日）（PRD §4.2）
 │   │   ├── upgrade.ts        # deriveTier()：兵力→tier（PRD §4.4）
-│   │   ├── production.ts     # produce()：self-replicate（PRD §4.3）
-│   │   ├── combat.ts         # resolveOrders()：cross-edge 戰鬥 + break→capture（PRD §4.6）
-│   │   ├── movement.ts       # findPath / dispatch / advanceMarching / cancelMarchingStack（PRD §4.5）
+│   │   ├── economy.ts        # buildHouse / growPopulation / collectTax / spawnFromHouses / setTaxPct / razeHouseAt / makeEconomy + 經濟常數（PRD §4.3）
+│   │   ├── combat.ts         # resolveOrders()：cross-edge 戰鬥 + break→capture + 攻佔房屋夷平（PRD §4.6 / §4.3）
+│   │   ├── movement.ts       # findPath / dispatch / garrison（export，供房屋產兵）/ advanceMarching / cancelMarchingStack（PRD §4.5）
 │   │   ├── terrain.ts        # generateTerrain / coastOceanMask / 不可通行 / 減傷（PRD §4.7）
-│   │   ├── ai.ts             # stepAi()：規則狀態機（PRD §5）
+│   │   ├── ai.ts             # stepAi()：規則狀態機（含建造房屋）（PRD §5）
 │   │   ├── ai-profile.ts     # RULE_PROFILES：難度旋鈕（PRD §5.3）
 │   │   ├── victory.ts        # applyDefeats / evaluateOutcome（PRD §7）
 │   │   └── util/             # rng (seedable)、helpers
@@ -219,12 +219,12 @@ PRD §8 是所有 AC（內容、編號）的單一真相。規範：
 
 模組 → AC 對照（AC 內容查 PRD §8）：
 
-- `production`（PRD §4.3）→ AC-03
+- `economy`（PRD §4.3）→ AC-03 / 27 / 28 / 29 / 30 / 31
 - `upgrade`（§4.4）→ AC-04
 - `movement`（§4.5）→ AC-05 / 07 / 08 / 09 / 14 / 15
-- `combat`（§4.6）→ AC-10 / 11 / 12 / 13
+- `combat`（§4.6 / §4.3）→ AC-10 / 11 / 12 / 13 / 31（攻佔房屋夷平）
 - `terrain`（§4.7）→ AC-16 / 17
-- `ai`（§5）→ AC-18 / 19 / 20 / 21
+- `ai`（§5）→ AC-18 / 19 / 20 / 21（含建房 §5.2）
 - `victory`（§7）→ AC-22
 - render / input / ui → AC-01 / 02 / 06 / 23 / 24
 
