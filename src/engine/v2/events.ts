@@ -1,5 +1,7 @@
 import type { FactionId, GameState, LevelEndResult, TileId } from "./types";
 
+export type { LevelEndResult } from "./types";
+
 export type DefeatCause = "TERRITORY_LOST" | "KING_KILLED" | "TIME_OUT";
 
 // PRD §5.2 — the cross-system AI Spectator event log. Append-only, NOT stored
@@ -133,4 +135,9 @@ export const ev = {
     kind: "nation.consumed_by_monster",
     nation,
   }),
+  nationDefeated: (nation: FactionId, cause: DefeatCause, killer?: FactionId | "MONSTER"): GameEvent =>
+    killer === undefined
+      ? { kind: "nation.defeated", nation, cause }
+      : { kind: "nation.defeated", nation, cause, killer },
+  levelCompleted: (result: LevelEndResult): GameEvent => ({ kind: "level.completed", result }),
 };

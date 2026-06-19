@@ -1,7 +1,7 @@
 import { getTier } from "./combat-tier";
 import { ev, type GameEvent, type StepResult } from "./events";
 import { parseTileId, vonNeumannNeighbors } from "./state";
-import type { GameState, TileId, Unit, UnitTier } from "./types";
+import type { FactionId, GameState, TileId, Unit, UnitTier } from "./types";
 
 // PRD §6.1 (v2.1) — damage is proportional to the attacker's population scaled
 // by a tier weight, so a larger force always wins and the gap widens each tick
@@ -127,11 +127,18 @@ export function resolveCombat(state: GameState): StepResult {
     if (!dead.has(u.id) && (newPop.get(u.id) ?? 0) <= 0) dead.add(u.id);
   }
 
-  // 5) build next units
+  // 5) build next units + accrue losses (for victory §3.3 battle efficiency)
   const nextUnits: Unit[] = [];
+  const lostBy = new Map<FactionId, number>();
+  const creditTo = new Map<FactionId, number>();
   for (const u of units) {
     if (dead.has(u.id)) {
       events.push(ev.combatUnitDestroyed(u.id, attacker.get(u.id) ?? null));
+      lostBy.set(u.owner, (lostBy.get(u.owner) ?? 0) + u.population);
+      const killer = byId.get(attacker.get(u.id) ?? "");
+      if (killer !== undefined) {
+        creditTo.set(killer.owner, (creditTo.get(killer.owner) ?? 0) + u.population);
+      }
       continue;
     }
     const np = newPop.get(u.id) ?? u.population;
@@ -144,7 +151,17 @@ export function resolveCombat(state: GameState): StepResult {
     }
   }
 
-  return { state: { ...state, units: nextUnits }, events };
+  let factions = state.factions;
+  if (lostBy.size > 0 || creditTo.size > 0) {
+    const f = { ...state.factions };
+    for (const [fac, lost] of lostBy) f[fac] = { ...f[fac], unitsLostTotal: f[fac].unitsLostTotal + lost };
+    for (const [fac, cred] of creditTo) {
+      f[fac] = { ...f[fac], enemyLossesCredited: f[fac].enemyLossesCredited + cred };
+    }
+    factions = f;
+  }
+
+  return { state: { ...state, units: nextUnits, factions }, events };
 }
 
 function clearStaleLocks(state: GameState): StepResult {
