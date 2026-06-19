@@ -87,7 +87,7 @@
 | BL-1103 | `scenarios/*` | v2 default / 經濟 / 戰鬥 / 怪物 / 結算 fixture；`sized.ts` v2 程序開局 | — | I | BL-1101 | todo |
 | BL-1104 | `playtest/integration.test.ts` | 經濟 → 戰鬥 → 勝負全流程整合回歸 | （整合） | I | BL-1103 | todo |
 | BL-1105 | `playtest/cli.ts` | `--log events` v2 事件輸出；`pnpm playtest default --runs 10` 綠 | AC-37 | I | BL-1102 | todo |
-| BL-1106 | cleanup | **刪 v1 `upgrade.ts` / `ai.ts` / `production.ts` 舊路徑**（此時 runner 已切 v2，build 不再依賴） | — | U | BL-1105 | todo |
+| BL-1106 | （改）保留 v1 為彩蛋 | **不刪 v1**——保留為 `?v1` 隱藏彩蛋（原型完整保存、可開啟）。v1 engine/render/input/ui + `main-v1.ts` 留著；`main.ts` 以 `?v1` URL 參數動態載入 v1。CI 的 `pnpm playtest`/`balance`（v1）暫保留或另切 v2:* | — | — | M13 | done |
 
 ## M12 — Opponent AI
 
