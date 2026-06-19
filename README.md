@@ -1,20 +1,22 @@
 # Knight Strike
 
-Web remake of the 2005 free Japanese title _国家大作戦_ (lm_exp): a 45° isometric, real-time-tick grid wargame. Your territory self-replicates troops every tick; you drag-dispatch garrisons to expand, siege, and conquer; the first faction to take every other castle wins. Four corner castles (you play **Tokugawa**) around a neutral camp, on seeded terrain — mountains and water block, forest defends — against a three-tier rule AI.
+Web remake of the 2005 free Japanese title _国家大作戦_ / Falcom's **Lord Monarch**: a 45° isometric, real-time-tick economy wargame. Build **houses** (100 gold) that grow **fields** and **population**, route tax back to your **castle**, spend the population into 100-strong armies, **stack them into a real force**, and march out to raze enemy castles. Manage upkeep, bridges and fences, and **monster nests** that drip out monster armies. Four corner castles (you play **Tokugawa**) against three economy-aware rule AIs; last nation standing wins.
 
-[`docs/PRD.md`](docs/PRD.md) is the single source of truth for game rules, numbers, and acceptance criteria. [`CLAUDE.md`](CLAUDE.md) is the engineering reference (file/module map, spec→implementation, conventions). This README only covers running, building, and the available scripts.
+[`docs/PRD.md`](docs/PRD.md) (v2.x) is the single source of truth for rules, numbers and acceptance criteria; [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) covers the opponent AI; [`docs/MILESTONES.md`](docs/MILESTONES.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md) track delivery; [`CLAUDE.md`](CLAUDE.md) is the engineering reference. This README only covers running, building and the scripts.
+
+> **Easter egg:** the original prototype (the v1 territory-claim game) is preserved, hidden — load the app with **`?v1`** to play it.
 
 ## Status
 
-- **Engine** — shipped (`src/engine/**`, full unit + integration tests).
-- **Rendering / input / UI** — shipped (Pixi.js v8 + GSAP).
-- **AI** — shipped: three-tier rule AI (`easy` / `normal` / `hard`); the default game runs `normal` opponents.
-- **Terrain** — shipped (seeded plains / mountain / water / forest, programmatic pixel-art textured tiles, selectable map shapes: Plateau / Island / Coast).
-- **Deploy** — `pnpm build:pages` produces a GitHub Pages dist; CI gate + deploy workflows under `.github/workflows/`.
+- **Engine** — shipped (`src/engine/v2/**`, pure logic, full unit + integration tests, ≥90% line coverage).
+- **AI** — shipped: economy-aware rule AI (`easy` / `normal` / `hard`); deterministic. Balance (even win-spread) is an ongoing tune.
+- **Render / input / UI** — playable (Pixi.js v8 iso board, DOM HUD/controls): build mode, tax slider, click-to-move, level-result screen. Sprite-art polish is a follow-up (current visuals are simple shapes).
+- **Headless** — `pnpm playtest:v2` runs scenarios / AI batches; `pnpm smoke` is a zero-dep CDP browser gate.
+- **Deploy** — `pnpm build:pages` → GitHub Pages; CI gate + deploy workflows under `.github/workflows/`.
 
 ## Requirements
 
-- Node 22 (`.nvmrc` locked; Vite 8 will fail on Node 18). Run `nvm use` after cloning.
+- Node 22 (`.nvmrc` locked; Vite will fail on Node 18). Run `nvm use` after cloning.
 - pnpm 8.x (see `packageManager` in `package.json`).
 
 ```sh
@@ -24,57 +26,50 @@ pnpm install
 
 ## Common commands
 
-| Script                          | When to use                                          |
-| ------------------------------- | ---------------------------------------------------- |
-| `pnpm dev`                      | Local dev server on http://localhost:5173 with HMR   |
-| `pnpm build`                    | Production build to `dist/` (base path `/`)          |
-| `pnpm build:pages`              | Same, base path `/knight-strike/` for GitHub Pages   |
-| `pnpm preview`                  | Serve `dist/` locally to verify the production build |
-| `pnpm test`                     | Vitest in watch mode                                 |
-| `pnpm test:run`                 | Run vitest once (CI mode)                            |
-| `pnpm test:coverage`            | Coverage report under `coverage/`                    |
-| `pnpm typecheck`                | `tsc --noEmit`                                       |
-| `pnpm lint`                     | ESLint + Prettier check (no auto-fix)                |
-| `pnpm format`                   | Prettier write                                       |
-| `pnpm playtest <scenario.json>` | Headless scenario runner (see below)                 |
-| `pnpm balance`                  | AI balance guard (deterministic 4-AI batch; CI)      |
+| Script | When to use |
+| --- | --- |
+| `pnpm dev` | Local dev server on http://localhost:5173 with HMR |
+| `pnpm build` | Production build to `dist/` (base path `/`) |
+| `pnpm build:pages` | Same, base path `/knight-strike/` for GitHub Pages |
+| `pnpm preview` | Serve `dist/` locally to verify the production build |
+| `pnpm test` / `pnpm test:run` | Vitest (watch / once) |
+| `pnpm test:coverage` | Coverage report under `coverage/` |
+| `pnpm typecheck` / `pnpm lint` / `pnpm format` | `tsc --noEmit` / ESLint / Prettier write |
+| `pnpm playtest:v2 <scenario> [--runs N] [--log]` | v2 headless scenario / AI batch runner (see below) |
+| `pnpm smoke` | Zero-dep headless-Chrome (CDP) UI smoke (manual; needs Chrome) |
+| `pnpm playtest` / `pnpm balance` | v1 (easter-egg) headless runner / balance guard |
 
 ## Playing
 
-- The player faction is fixed to **Tokugawa** (top-left corner of the iso board).
-- **Left-click + drag** from one of your tiles to a target to dispatch troops along the shortest path (highlighted; a red line means no valid route). Dragging to an enemy / neutral tile starts a **conquer-march** that sieges the line tile-by-tile.
-- The dispatch ratio (25 / 50 / 75 / 100 %) sets how much of the source garrison ships out; castles always keep at least 1 troop.
-- **Click a marching column** to cancel it — its troops drop onto the tile it's standing on.
-- **Space** pause/resume, **1–4** speed, **R** recentre camera, **Esc** cancel an in-flight drag, **WASD / arrow keys** pan. **Right-drag / wheel / two-finger** pan and zoom.
-- The HUD (tick + countdown + speed) sits bottom-centre; the faction panel (tile count / troops / castle status) bottom-left; hover any tile for ownership / tier / count in the top-centre; the map-size selector (11 / 15 / 19 / 27) is top-right.
+You are **Tokugawa**. Press **Start**, then use the bottom control bar:
 
-Rules in detail: PRD §4 (gameplay), §5 (AI), §7 (win/lose).
+- **Build mode** — pick **House** (click a tile where your unit stands), **Bridge** (a river/lava tile next to your unit) or **Fence** (a land tile next to your unit). **Select** mode: click a unit, then a tile to move it.
+- **Tax slider** (0–30 %) — higher tax funds armies but slows population growth; disconnected houses pay 0 % (and grow fastest).
+- **Pause / speed** buttons. Houses spawn 100-strong units automatically; stack your units on a tile to merge them into a big army, then march it onto an enemy castle to siege it.
+
+Rules in detail: PRD §4 (gameplay), §5 (AI), §7 (win/lose & scoring).
 
 ## Headless playtest
 
-`pnpm playtest <scenario.json>` runs a single scenario without rendering and prints a result line — handy for engine regression checks and (with a `rule`-tier AI) win-rate / game-length stats.
+`pnpm playtest:v2 <scenario>` runs a scenario without rendering and prints outcomes / win-rates / event counts.
 
 ```sh
-pnpm playtest src/scenarios/idle-target.json --runs 1 --max-ticks 100
-pnpm playtest src/scenarios/default.json --runs 10 --log events
+pnpm playtest:v2 player --runs 1 --max-ticks 500
+pnpm playtest:v2 spectator-4ai --runs 24 --max-ticks 2000   # 4-AI balance batch
 ```
 
-Scenario JSON format and AI modes: see [`CLAUDE.md`](CLAUDE.md) (§5 / §6) and `src/playtest/runner.ts`.
+Scenarios live in `src/playtest/v2/scenarios.ts`; the runner / scenario schema in `src/playtest/v2/runner.ts`.
 
 ## Deploying to GitHub Pages
 
 1. Push to `main`. The deploy workflow runs the CI gate (typecheck + lint + tests + build), then `pnpm build:pages`, and uploads `dist/` as a Pages artifact.
-2. The first time, enable Pages in repo settings → Pages → Source: "GitHub Actions".
-3. If your repo lives under a different sub-path, override `VITE_BASE_PATH` (e.g. `VITE_BASE_PATH=/my-fork/ pnpm build`) and adjust the workflow.
+2. First time: enable Pages in repo settings → Pages → Source: "GitHub Actions".
+3. Different sub-path? Override `VITE_BASE_PATH` (e.g. `VITE_BASE_PATH=/my-fork/ pnpm build`).
 
 ## Repo layout
 
-- `src/engine/` — pure logic; **no Pixi / DOM / GSAP** allowed (ESLint-enforced).
-- `src/render/` — Pixi.js v8 board / units / marching / combat / paths.
-- `src/input/` — pointer, keyboard, camera, dispatch gesture state machine.
-- `src/ui/` — HUD, faction panel, tile info, map-size, end screen (vanilla DOM).
-- `src/scenarios/` — JSON scenario configs + their TypeScript wrappers.
-- `src/playtest/` — headless CLI + scenario runner + integration tests.
-- `docs/PRD.md` — product spec (rules, numbers, ACs).
-- `docs/MILESTONES.md` — milestone breakdown (M1–M4) × AC coverage.
-- `CLAUDE.md` — engineering reference: file/module map, spec→implementation, conventions, tooling.
+- `src/engine/v2/` — pure v2 logic; **no Pixi / DOM / GSAP** (ESLint-enforced). `src/engine/*.ts` is the v1 engine (kept for the `?v1` easter egg).
+- `src/render/v2/`, `src/ui/v2/` — v2 Pixi board + DOM HUD/controls. `src/main.ts` boots v2 (or v1 on `?v1`).
+- `src/playtest/v2/` — v2 headless runner, scenarios, CLI.
+- `docs/` — `PRD.md` (spec), `AI-DESIGN.md`, `MILESTONES.md`, `BACKLOG.md`, `v2_spec/` (source).
+- `scripts/smoke/` — CDP browser smoke (`run.mjs` + `driver.mjs`).

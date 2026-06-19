@@ -36,13 +36,12 @@ jobs:
       - run: pnpm lint
       - run: pnpm test:coverage
       - run: pnpm build
-      # Headless smoke: the engine must run a full game to completion without
-      # crashing. Matches the milestone-done check in CLAUDE.md §6.
+      # v2 (primary game) headless smoke: the economy → AI → combat → victory
+      # loop must run a deterministic 4-AI batch to completion without crashing.
+      - run: pnpm playtest:v2 spectator-4ai --runs 5 --max-ticks 1500
+      # v1 (?v1 easter egg) headless smoke + balance guard — the prototype is
+      # kept, so it stays green too.
       - run: pnpm playtest src/scenarios/default.json --runs 10
-      # AI balance guard: a deterministic batch of all-AI games must stay
-      # balanced (no faction dominates / is shut out, games converge). Fails the
-      # build if a future AI-rule change skews the balance. See
-      # src/playtest/balance-check.ts.
       - run: pnpm balance
       # Engine coverage (§5.1 target ≥ 90%) is enforced at PR review, so surface
       # the report as an artifact rather than hard-failing the build on it.

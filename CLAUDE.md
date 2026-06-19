@@ -2,7 +2,9 @@
 
 ## 1. 專案概要
 
-Knight Strike 是日本 2005 年免費小品《国家大作戦》(lm_exp) 的 web 重製版：45° 斜俯視像素風、即時 tick（2s / tick）格狀戰棋，領地自然成長 → 拖曳派駐 / 征服行軍 → 佔領敵方主城獲勝。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)（目前版本 v2.1）**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+Knight Strike 是日本 2005 年免費小品《国家大作戦》/ Lord Monarch 的 web 重製版。**規格的單一真相來源是 [`docs/PRD.md`](docs/PRD.md)**，本文件只負責 coding conventions、工具鏈、工作流；任何玩法 / 數值 / 規則的疑問都回去查 PRD。
+
+> **⚠️ v2 重製狀態（重要）**：專案已**全面轉向 v2 經濟模型**（PRD v2.x — 房屋 / 田地 / 稅收 / 軍隊 / 征服 + 怪物，依 `docs/v2_spec/`）。**現役程式碼在 `src/engine/v2/`、`src/render/v2/`、`src/ui/v2/`、`src/playtest/v2/`**；`src/main.ts` 預設開 v2。原 **v1 原型**（領地自然成長 + 拖曳征服行軍，本節下方 §3 樹所述）**保留為 `?v1` 隱藏彩蛋**（`src/main-v1.ts` + `src/engine/*.ts` 等舊路徑，勿刪）。**本文件 §3 的檔案樹仍描述 v1 架構，尚待隨 v2 補完**——改 v2 code 時以 `src/*/v2/` 實際結構為準，並參 [`docs/AI-DESIGN.md`](docs/AI-DESIGN.md) / [`docs/BACKLOG.md`](docs/BACKLOG.md)。
 
 ## 2. 技術棧與版本
 
