@@ -263,7 +263,7 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
     expect(derivedOwner(r.state.provinces.get(T) as Province)).toBe("TOKUGAWA");
   });
 
-  it("[AC-31] breaking an enemy-claimed House tile razes it (population lost)", () => {
+  it("[AC-31] razing an enemy House is its own tick, before break/capture", () => {
     const house: Province = {
       id: T,
       x: 1,
@@ -284,10 +284,20 @@ describe("resolveOrders (v1.5 conquer-march)", () => {
       [order(F, T, "TOKUGAWA", 5, [], 1)],
       2,
     );
-    const t = resolveOrders(state).state.provinces.get(T) as Province;
-    expect(t.isHouse).toBe(false);
-    expect(t.houseOwner).toBe(null);
-    expect(t.housePopulation).toBe(0);
-    expect(t.lastClaimedFaction).toBe(null); // broken to neutral
+    // Tick 1: House razed (population lost), claim still TAKEDA, column intact,
+    // order kept.
+    const r1 = resolveOrders(state);
+    const t1 = r1.state.provinces.get(T) as Province;
+    expect(t1.isHouse).toBe(false);
+    expect(t1.houseOwner).toBe(null);
+    expect(t1.housePopulation).toBe(0);
+    expect(t1.lastClaimedFaction).toBe("TAKEDA"); // ground NOT taken yet
+    expect(colCount(r1.state, F, T)).toBe(5); // razing costs no troops
+    expect(r1.events.some((e) => e.kind === "raze")).toBe(true);
+
+    // Tick 2 (advance the clock): now houseless enemy claim → break to neutral.
+    const r2 = resolveOrders({ ...r1.state, tick: 3 });
+    const t2 = r2.state.provinces.get(T) as Province;
+    expect(t2.lastClaimedFaction).toBe(null); // broken
   });
 });
