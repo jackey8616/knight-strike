@@ -8,9 +8,11 @@ import {
   growthAmount,
   GROWTH_BASE,
   HOUSE_COST,
+  HOUSE_SEED_POP,
   isEconomyTick,
   makeEconomy,
   MAX_TAX_PCT,
+  MIN_GROWTH,
   razeHouseAt,
   setTaxPct,
   spawnFromHouses,
@@ -176,11 +178,14 @@ describe("economy: population growth (AC-28)", () => {
     expect(growthAmount(8, 0)).toBe(GROWTH_BASE + 8);
   });
 
-  it("[AC-28] max tax zeroes growth; growth scales linearly", () => {
-    expect(growthAmount(8, MAX_TAX_PCT)).toBe(0);
+  it("[AC-28] max tax slows growth to the MIN_GROWTH trickle (never fully stalls)", () => {
+    // High tax must not zero growth, or a max-tax House never reaches the spawn
+    // threshold and produces no troops while gold piles up.
+    expect(growthAmount(8, MAX_TAX_PCT)).toBe(MIN_GROWTH);
+    expect(growthAmount(0, MAX_TAX_PCT)).toBe(MIN_GROWTH);
     const half = Math.floor(MAX_TAX_PCT / 2);
     expect(growthAmount(8, half)).toBe(
-      Math.floor(((GROWTH_BASE + 8) * (MAX_TAX_PCT - half)) / MAX_TAX_PCT),
+      Math.max(MIN_GROWTH, Math.floor(((GROWTH_BASE + 8) * (MAX_TAX_PCT - half)) / MAX_TAX_PCT)),
     );
   });
 
@@ -246,6 +251,28 @@ describe("economy: house troop spawn (AC-30)", () => {
     patch(m, 1, 1, { isHouse: true, houseOwner: "TOKUGAWA", housePopulation: SPAWN_THRESHOLD - 1, lastClaimedFaction: "TOKUGAWA" });
     const state = makeState(m);
     expect(spawnFromHouses(state)).toBe(state);
+  });
+
+  it("[AC-30] a max-tax house still grows to threshold and spawns (no zero-growth stall)", () => {
+    // Regression: at 30% tax the old formula zeroed growth, so a house piled up
+    // gold but never reached the spawn threshold — no troops ever appeared.
+    const m = emptyBoard(3);
+    patch(m, 1, 1, {
+      isHouse: true,
+      houseOwner: "TOKUGAWA",
+      housePopulation: HOUSE_SEED_POP,
+      lastClaimedFaction: "TOKUGAWA",
+    });
+    let s = makeState(m, { economy: makeEconomy(0, MAX_TAX_PCT) });
+    let spawned = false;
+    for (let day = 0; day < 100 && !spawned; day++) {
+      s = growPopulation(s);
+      s = spawnFromHouses(s);
+      for (const p of s.provinces.values()) {
+        if (p.occupants.some((o) => o.faction === "TOKUGAWA")) spawned = true;
+      }
+    }
+    expect(spawned).toBe(true);
   });
 
   it("[AC-30] with no owned neighbour, spawns onto the house tile itself", () => {

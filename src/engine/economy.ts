@@ -173,12 +173,16 @@ export function buildHouse(
 
 // PRD §4.3: daily growth scales with surrounding owned territory and shrinks
 // with tax. At 0% tax a house with `ownedNeighbours` adjacent owned tiles grows
-// GROWTH_BASE + ownedNeighbours; growth scales linearly to 0 at MAX_TAX_PCT.
-// Integer math keeps it deterministic.
+// GROWTH_BASE + ownedNeighbours; growth scales down with tax but never below
+// MIN_GROWTH — so even at max tax a live House still creeps toward the spawn
+// threshold instead of stalling forever (a max-tax house would otherwise pile up
+// gold but never produce a single troop). Integer math keeps it deterministic.
+export const MIN_GROWTH = 1;
+
 export function growthAmount(ownedNeighbours: number, taxPct: number): number {
   const base = GROWTH_BASE + ownedNeighbours;
   const factor = Math.max(0, MAX_TAX_PCT - taxPct);
-  return Math.floor((base * factor) / MAX_TAX_PCT);
+  return Math.max(MIN_GROWTH, Math.floor((base * factor) / MAX_TAX_PCT));
 }
 
 function countOwnedMooreNeighbours(
