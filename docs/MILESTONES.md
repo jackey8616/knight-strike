@@ -2,7 +2,7 @@
 
 本文件把 [`PRD.md`](PRD.md)（v2.0）切成交付 milestone，給 PR 計劃用。**規格不在此重述**——所有玩法 / 數值 / 規則查 PRD；本文件只列「做什麼、涵蓋哪些 AC、怎麼判收、狀態」。工作佇列（更細的 task）見 [`BACKLOG.md`](BACKLOG.md)。工具鏈、命名、分層鐵則查 [`CLAUDE.md`](../CLAUDE.md)。
 
-> **PRD 同步基準：v2.1（Lord Monarch 經濟模型，全面取代 v1 原型）**。AC 編號用 PRD §9 的 `AC-01`..`AC-42`。**v1 原型 milestone（舊 M1–M4：count-tier engine / Pixi UI / playtest / deploy）已被取代**，封存於 git 標籤 `archive/prd-v2.5-prototype` 與 git log；下列 v2 milestone **延續 M5+ 編號**（branch 名 `feature/M5-...` 不與 v1 衝突）。
+> **PRD 同步基準：v2.2（Lord Monarch 經濟模型，全面取代 v1 原型）**。AC 編號用 PRD §9 的 `AC-01`..`AC-42`。**v1 原型 milestone（舊 M1–M4：count-tier engine / Pixi UI / playtest / deploy）已被取代**，封存於 git 標籤 `archive/prd-v2.5-prototype` 與 git log；下列 v2 milestone **延續 M5+ 編號**（branch 名 `feature/M5-...` 不與 v1 衝突）。
 
 ---
 
