@@ -23,7 +23,7 @@ export type Attack = {
   readonly damage: number;
 };
 
-export type CombatEventKind = "fight" | "break" | "capture";
+export type CombatEventKind = "fight" | "break" | "capture" | "raze";
 
 export type CombatEvent = {
   readonly from: TileId;
@@ -136,26 +136,38 @@ export function resolveOrders(state: GameState): CombatResult {
       kept.push(o);
       continue;
     }
+    const t = state.tick - o.startTick;
+
+    // PRD §4.3 (v2.10): razing a House is its own tick — first demolish the
+    // building (claim untouched), then break / capture the ground on later
+    // ticks. So taking an enemy House tile is raze → break → capture, slowing
+    // the pace of consuming enemy territory. Razing is a time cost only (the
+    // garrison is already gone here), so it spends no column troops — a small
+    // conquering column still finishes the capture afterwards.
+    if (toP.isHouse === true && toP.houseOwner !== o.faction) {
+      provinces.set(o.to, razeHouseAt(toP));
+      events.push({ from: o.from, to: o.to, kind: "raze", combatTick: t, baseDamage: 0, attacks: [] });
+      kept.push(o); // break / capture the now-houseless tile next tick
+      continue;
+    }
+
     const claimedBy = toP.lastClaimedFaction;
     if (claimedBy === o.faction) continue; // already ours → order complete
 
     const enemyClaim =
       claimedBy !== null && claimedBy !== "NEUTRAL" && !state.defeated.has(claimedBy);
-    const t = state.tick - o.startTick;
 
     if (enemyClaim) {
       const left = o.count - 1; // break costs 1
-      // PRD §4.3: breaking an enemy-claimed tile razes any House on it.
-      provinces.set(o.to, { ...razeHouseAt(toP), lastClaimedFaction: null });
+      provinces.set(o.to, { ...toP, lastClaimedFaction: null });
       events.push({ from: o.from, to: o.to, kind: "break", combatTick: t, baseDamage: 0, attacks: [] });
       if (left > 0) kept.push({ ...o, count: left }); // capture next tick
       continue;
     }
 
-    // Capture (claim → faction) then advance. Raze any leftover House (a
-    // defeated faction's inert House can sit on an unclaimed tile, §4.3).
+    // Capture (claim → faction) then advance.
     const remaining = o.count - 1;
-    provinces.set(o.to, { ...razeHouseAt(toP), lastClaimedFaction: o.faction });
+    provinces.set(o.to, { ...toP, lastClaimedFaction: o.faction });
     events.push({ from: o.from, to: o.to, kind: "capture", combatTick: t, baseDamage: 0, attacks: [] });
     if (remaining <= 0) continue; // tile claimed, no troops left to advance
     // Advance onto the captured tile as a marching column. `from` stays at
