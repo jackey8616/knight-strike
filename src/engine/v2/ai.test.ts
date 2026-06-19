@@ -125,6 +125,30 @@ describe("stepAi", () => {
     expect(order?.path.at(-1)).toBe(tileId(6, 6)); // heading for the enemy castle
   });
 
+  it("[AI economy] relocates to found a new house when it can't build in place", () => {
+    const s = createGameState({
+      boardSize: 7,
+      rngSeed: 1,
+      aiConfig: ai({ TAKEDA: "normal" }),
+      units: [unit("t1", "TAKEDA", 2, 2, 100)], // weak, standing on its own house tile
+      houses: [
+        {
+          id: "house:1",
+          owner: "TAKEDA",
+          tile: tileId(2, 2),
+          population: 50,
+          connectedToCastle: false,
+          lastGrowthDay: 0,
+          lastExpansionDay: 0,
+        },
+      ],
+      factions: goldFor("TAKEDA", 300),
+    });
+    const after = stepAi(s);
+    // tile occupied → can't build here → marches off to a build spot
+    expect(after.marchOrders.some((o) => o.unitId === "t1")).toBe(true);
+  });
+
   it("[idle] an idle faction never acts", () => {
     const s = createGameState({
       boardSize: 7,

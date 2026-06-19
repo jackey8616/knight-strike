@@ -8,10 +8,11 @@ export type AiProfile = {
   readonly attackRangeFactor: number; // attack scan radius = round(boardSize × this)
   readonly attackThreshold: number; // min army population to commit to an attack
   readonly taxRate: number; // fixed tax rate for this difficulty
+  readonly houseTarget: number; // grow the economy up to this many houses
 };
 
 export const RULE_PROFILES: Readonly<Record<RuleTier, AiProfile>> = {
-  easy: { evalInterval: 8, defenseRadius: 1, attackRangeFactor: 0.5, attackThreshold: 400, taxRate: 0 },
-  normal: { evalInterval: 5, defenseRadius: 2, attackRangeFactor: 1.0, attackThreshold: 250, taxRate: 0.15 },
-  hard: { evalInterval: 3, defenseRadius: 3, attackRangeFactor: 1.75, attackThreshold: 150, taxRate: 0.25 },
+  easy: { evalInterval: 8, defenseRadius: 1, attackRangeFactor: 0.5, attackThreshold: 800, taxRate: 0.1, houseTarget: 3 },
+  normal: { evalInterval: 5, defenseRadius: 2, attackRangeFactor: 1.0, attackThreshold: 600, taxRate: 0.15, houseTarget: 5 },
+  hard: { evalInterval: 3, defenseRadius: 3, attackRangeFactor: 1.75, attackThreshold: 400, taxRate: 0.2, houseTarget: 7 },
 };
