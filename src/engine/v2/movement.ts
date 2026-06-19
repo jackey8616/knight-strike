@@ -48,6 +48,38 @@ export function issueMarch(state: GameState, unitId: string, to: TileId): GameSt
   return { ...state, marchOrders: [...others, { unitId, path, idx: 0 }] };
 }
 
+// PRD §4.7 — co-located friendly units that are both idle (no task / lock /
+// march) merge into one army (population summed, lowest id kept). This is how a
+// nation builds a big army from 100-strong house spawns; it is NOT the combat
+// "no headcount merge" rule (that only forbids combining vs. an enemy).
+export function mergeFriendlyUnits(state: GameState): GameState {
+  const marching = new Set(state.marchOrders.map((o) => o.unitId));
+  const groups = new Map<string, Unit[]>();
+  for (const u of state.units) {
+    const key = `${u.owner}@${u.tile}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(u);
+    else groups.set(key, [u]);
+  }
+
+  let changed = false;
+  const out: Unit[] = [];
+  for (const group of groups.values()) {
+    const free = group.filter((u) => u.task === null && u.combatLock === null && !marching.has(u.id));
+    const busy = group.filter((u) => u.task !== null || u.combatLock !== null || marching.has(u.id));
+    out.push(...busy);
+    if (free.length <= 1) {
+      out.push(...free);
+      continue;
+    }
+    free.sort((a, b) => (a.id < b.id ? -1 : 1));
+    const base = free[0] as Unit;
+    out.push({ ...base, population: free.reduce((sum, u) => sum + u.population, 0) });
+    changed = true;
+  }
+  return changed ? { ...state, units: out } : state;
+}
+
 // PRD §4.7 — advance each marching unit one tile. A locked (fighting) unit holds
 // its order; an order whose next tile is impassable or enemy-occupied is dropped
 // (the unit stops and combat takes over); an order that reaches its end clears.

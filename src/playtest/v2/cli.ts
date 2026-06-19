@@ -21,11 +21,16 @@ function main(): void {
     return;
   }
 
+  const spectator = name.startsWith("spectator");
   const tally = new Map<string, number>();
   let totalTicks = 0;
   for (let i = 0; i < runs; i += 1) {
-    const r = runScenario({ ...scenario, rngSeed: scenario.rngSeed + i }, { maxTicks, emitEvents: logEvents });
-    const key = r.outcome.kind === "win" ? `win:${r.outcome.winner}` : r.outcome.kind;
+    const r = runScenario({ ...scenario, rngSeed: scenario.rngSeed + i }, { maxTicks, emitEvents: logEvents, spectator });
+    const key = spectator
+      ? (r.winner ?? "stalemate")
+      : r.outcome.kind === "win"
+        ? `win:${r.outcome.winner}`
+        : r.outcome.kind;
     tally.set(key, (tally.get(key) ?? 0) + 1);
     totalTicks += r.ticks;
     if (logEvents) console.log(`run ${i}: ${key} @ tick ${r.ticks} (${r.events?.length ?? 0} events)`);
