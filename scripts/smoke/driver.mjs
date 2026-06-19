@@ -1,46 +1,28 @@
-// Browser smoke driver — zero npm deps, talks to Chrome over the DevTools
-// Protocol (CDP) directly via Node's built-in WebSocket + fetch (both global in
-// Node 22). It assumes a Vite *dev* server (so the DEV-only `window.__ks` hook
-// in src/main.ts is present) and a headless Chrome already listening on
-// `--remote-debugging-port`. `run.mjs` is the orchestrator that boots both and
-// invokes this; nothing here downloads or launches anything.
+// v2 browser smoke driver — zero npm deps, talks to Chrome over CDP via Node's
+// global WebSocket + fetch. `run.mjs` boots a Vite dev server + headless Chrome
+// and invokes this; nothing here launches anything.
 //
-// Flow mirrors PR #21's manual verification: menu renders → Start (no reload) →
-// ticks advance → play to natural end → Restart rebuilds + plays to end again →
-// Main Menu → start a different board. The Restart/Main-Menu legs exercise the
-// main.ts teardown/rebuild that PR #21 refactored.
-//
-// A mobile guard (issue #26) sits between menu-render and Start: it emulates a
-// phone viewport + prefers-reduced-motion: reduce (what iOS Low Power Mode /
-// Android battery saver report) and asserts the "how to move" demo still
-// animates instead of falling back to a frozen `animation: none`.
+// Flow (PRD §8 AC-38..42): menu renders → Start (no reload) → engine ticks
+// (day advances) → entities render (castles/houses/units via window.__ks) →
+// player control bar (tax slider / build mode) works → ?v1 easter egg boots the
+// original prototype. Page exceptions are always fatal.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-
 const CDP = process.env.CDP_URL ?? "http://localhost:9222";
 const APP = process.env.APP_URL ?? "http://localhost:5173/";
 const SHOTS = process.env.SHOTS_DIR ?? path.join(here, ".shots");
-const DIFFICULTY = process.env.SMOKE_DIFFICULTY ?? "Easy";
-const SIZE = process.env.SMOKE_SIZE ?? "11";
-const SIZE2 = process.env.SMOKE_SIZE2 ?? "19";
-const END_TIMEOUT_MS = Number(process.env.SMOKE_END_TIMEOUT_MS ?? 300000);
 const STRICT_CONSOLE = process.env.SMOKE_STRICT_CONSOLE === "1";
-
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const stamp = () => new Date().toISOString().slice(11, 19);
 const log = (...a) => console.log(`[${stamp()}]`, ...a);
 
-// Uncaught page exceptions are always fatal (they're the breakage a smoke is
-// meant to catch). console.error is collected and reported, fatal only under
-// SMOKE_STRICT_CONSOLE=1 — dev builds can emit benign warnings.
 const pageExceptions = [];
 const consoleErrors = [];
-
 let ws;
 let nextId = 1;
 const pending = new Map();
@@ -52,7 +34,6 @@ function send(method, params = {}) {
     ws.send(JSON.stringify({ id, method, params }));
   });
 }
-
 function onMessage(raw) {
   const msg = JSON.parse(raw);
   if (msg.id && pending.has(msg.id)) {
@@ -66,68 +47,33 @@ function onMessage(raw) {
     const d = msg.params.exceptionDetails;
     pageExceptions.push("exception: " + (d.exception?.description || d.text));
   } else if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
-    consoleErrors.push(
-      "console.error: " +
-        (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" "),
-    );
+    consoleErrors.push("console.error: " + (msg.params.args || []).map((a) => a.value ?? a.description ?? "").join(" "));
   } else if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") {
     consoleErrors.push("log.error: " + msg.params.entry.text);
   }
 }
-
 async function evaluate(expression) {
-  const r = await send("Runtime.evaluate", {
-    expression,
-    returnByValue: true,
-    awaitPromise: true,
-  });
-  if (r.exceptionDetails)
-    throw new Error(
-      "eval: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text),
-    );
+  const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+  if (r.exceptionDetails) throw new Error("eval: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
   return r.result.value;
 }
-
 async function shot(name) {
   const r = await send("Page.captureScreenshot", { format: "png" });
-  const p = path.join(SHOTS, `${name}.png`);
-  fs.writeFileSync(p, Buffer.from(r.data, "base64"));
-  log("shot", p);
+  fs.writeFileSync(path.join(SHOTS, `${name}.png`), Buffer.from(r.data, "base64"));
+  log("shot", name);
 }
-
 async function waitFor(expr, timeoutMs, interval, label) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    let v = false;
     try {
-      v = await evaluate(expr);
+      if (await evaluate(expr)) return true;
     } catch {
       /* mid-navigation: retry */
     }
-    if (v) return true;
     await sleep(interval);
   }
   throw new Error("waitFor timeout: " + (label || expr));
 }
-
-const clickByText = (sel, text) =>
-  evaluate(
-    `(()=>{const b=[...document.querySelectorAll(${JSON.stringify(
-      sel,
-    )})].find(e=>e.textContent.trim()===${JSON.stringify(
-      text,
-    )});if(!b)return false;b.click();return true;})()`,
-  );
-
-// HUD speed buttons are labelled "1x".."4x"; max speed shortens the play-to-end
-// wait. Returns the clicked label (or null) so the caller can assert it took.
-const setMaxSpeed = () =>
-  evaluate(
-    `(()=>{const b=[...document.querySelectorAll('.ks-hud button')].find(e=>/4x/.test(e.textContent));if(b){b.click();return b.textContent.trim();}return null;})()`,
-  );
-
-const tick = () => evaluate(`window.__ks.getTickInfo().tick`);
-
 async function getPageWs() {
   for (let i = 0; i < 40; i++) {
     try {
@@ -135,13 +81,12 @@ async function getPageWs() {
       const page = targets.find((t) => t.type === "page");
       if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
     } catch {
-      /* CDP not up yet: retry */
+      /* CDP not up yet */
     }
     await sleep(500);
   }
   throw new Error("no page target on " + CDP);
 }
-
 function fail(message) {
   log("RESULT_ERROR:", message);
   log("PAGE_EXCEPTIONS:", JSON.stringify(pageExceptions));
@@ -161,154 +106,45 @@ function fail(message) {
   await send("Log.enable");
   log("CDP connected:", CDP);
 
-  // STEP 1 — menu renders.
+  // STEP 1 — menu renders (AC-38).
   await send("Page.navigate", { url: APP });
-  await waitFor(
-    `!!document.querySelector('.ks-menu') && getComputedStyle(document.querySelector('.ks-menu')).display!=='none'`,
-    30000,
-    500,
-    "menu visible",
-  );
+  await waitFor(`!!document.querySelector('.ks-menu')`, 30000, 500, "menu visible");
   const menu = await evaluate(
-    `(()=>{const m=document.querySelector('.ks-menu');return{title:[...m.querySelectorAll('div')].some(d=>d.textContent==='Knight Strike'),demoBox:!!m.querySelector('.ks-demo-area'),buttons:[...m.querySelectorAll('button')].map(b=>b.textContent.trim())};})()`,
+    `(()=>{const m=document.querySelector('.ks-menu');return{title:m.textContent.includes('Knight Strike'),start:[...m.querySelectorAll('button')].some(b=>b.textContent.trim()==='Start')};})()`,
   );
   log("STEP1 menu:", JSON.stringify(menu));
-  if (!menu.title || !menu.demoBox) fail("menu missing title or demo box");
-  await shot("01-menu");
+  if (!menu.title || !menu.start) fail("menu missing title or Start");
+  await shot("v2-01-menu");
 
-  // STEP 1b — mobile guard (issue #26). On a phone in Low Power Mode / battery
-  // saver the browser reports prefers-reduced-motion: reduce; the menu's "how to
-  // move" demo must still animate (it used to fall back to `animation: none`,
-  // freezing the unit on its destination tile). Emulate a phone viewport +
-  // reduced-motion, assert every demo element's keyframes are live, then restore
-  // desktop emulation for the remaining flow.
-  await send("Emulation.setDeviceMetricsOverride", {
-    width: 390,
-    height: 844,
-    deviceScaleFactor: 3,
-    mobile: true,
-  });
-  await send("Emulation.setEmulatedMedia", {
-    features: [{ name: "prefers-reduced-motion", value: "reduce" }],
-  });
-  await sleep(200);
-  const demo = await evaluate(
-    `(()=>{const g=s=>{const el=document.querySelector(s);if(!el)return null;const c=getComputedStyle(el);return{name:c.animationName,dur:c.animationDuration};};return{move:g('.ks-demo-unit-move'),atk:g('.ks-demo-unit-atk'),enemy:g('.ks-demo-enemy'),tap:g('.ks-demo-tap')};})()`,
+  // STEP 2 — Start → ticks advance, entities render (AC-40).
+  await evaluate(`[...document.querySelectorAll('.ks-menu button')].find(b=>b.textContent.trim()==='Start').click()`);
+  const day0 = await evaluate(`window.__ks.getTickInfo().day`);
+  await waitFor(`window.__ks.getTickInfo().day > ${day0}`, 15000, 300, "day advances");
+  const counts = await evaluate(
+    `(()=>{const s=window.__ks.getState();return{units:s.units.length,houses:s.houses.length,castles:[...s.provinces.values()].filter(p=>p.isCastle).length,day:s.day};})()`,
   );
-  log("STEP1b mobile reduced-motion demo:", JSON.stringify(demo));
-  for (const [el, v] of Object.entries(demo)) {
-    if (!v) fail(`demo element .${el} missing on mobile menu`);
-    if (v.name === "none" || v.dur === "0s")
-      fail(
-        `demo .${el} frozen under reduced-motion (name=${v.name}, dur=${v.dur}) — issue #26 regression`,
-      );
-  }
-  await shot("01b-mobile-menu");
-  await send("Emulation.clearDeviceMetricsOverride");
-  await send("Emulation.setEmulatedMedia", { features: [] });
+  log("STEP2 ticked + entities:", JSON.stringify(counts));
+  if (counts.castles < 4 || counts.houses < 1 || counts.units < 1) fail("entities missing: " + JSON.stringify(counts));
+  await shot("v2-02-game");
 
-  // STEP 2 — pick difficulty + size, Start with no reload.
-  if (!(await clickByText(".ks-menu button", DIFFICULTY)))
-    fail(`difficulty button ${DIFFICULTY} not found`);
-  if (!(await clickByText(".ks-menu button", SIZE))) fail(`size button ${SIZE} not found`);
-  await shot("02-selected");
-  if (!(await clickByText(".ks-menu button", "Start"))) fail("Start not found");
-  await waitFor(
-    `getComputedStyle(document.querySelector('.ks-menu')).display==='none' && !!window.__ks`,
-    20000,
-    300,
-    "game1 started",
+  // STEP 3 — player control bar: tax slider + build mode (AC-39/41).
+  const controls = await evaluate(
+    `(()=>{return{bar:!!document.querySelector('.ks-controls'),tax:!!document.querySelector('.ks-tax'),buildBtns:document.querySelectorAll('.ks-controls button').length};})()`,
   );
-  const g1 = await evaluate(
-    `(()=>{const s=window.__ks.getState();return{boardSize:s.boardSize,provinces:s.provinces.size,tick:s.tick};})()`,
-  );
-  log("STEP2 game1:", JSON.stringify(g1));
-  if (g1.boardSize !== Number(SIZE)) fail(`board size ${g1.boardSize} != ${SIZE}`);
-  await shot("03-game");
+  log("STEP3 controls:", JSON.stringify(controls));
+  if (!controls.bar || !controls.tax || controls.buildBtns < 4) fail("control bar/tax/build missing: " + JSON.stringify(controls));
+  await evaluate(`window.__ks.setTax(0.15)`);
+  const tax = await evaluate(`window.__ks.getState().factions.TOKUGAWA.taxRate`);
+  if (tax !== 0.15) fail("tax not applied: " + tax);
 
-  // STEP 2b — ticks advance.
-  log("STEP2 speed ->", await setMaxSpeed());
-  const t1 = await tick();
-  await sleep(2500);
-  const t2 = await tick();
-  log("STEP2 tick advance:", t1, "->", t2);
-  if (!(t2 > t1)) fail(`ticks did not advance (${t1} -> ${t2})`);
+  // STEP 4 — ?v1 easter egg boots the original prototype.
+  await send("Page.navigate", { url: APP + "?v1" });
+  await waitFor(`!!document.querySelector('.ks-menu') && !!document.querySelector('canvas')`, 30000, 500, "v1 prototype boots");
+  log("STEP4 ?v1 easter egg booted");
+  await shot("v2-03-v1-easter-egg");
 
-  // STEP 3 — play to natural end.
-  log(`waiting for end screen 1 (up to ${END_TIMEOUT_MS / 1000}s)...`);
-  await waitFor(
-    `!!document.querySelector('.ks-end') && getComputedStyle(document.querySelector('.ks-end')).display!=='none'`,
-    END_TIMEOUT_MS,
-    2000,
-    "end1",
-  );
-  const end1 = await evaluate(
-    `(()=>{const e=document.querySelector('.ks-end');return{title:e.querySelector('div')?.textContent,buttons:[...e.querySelectorAll('button')].map(b=>b.textContent.trim()),tick:window.__ks.getTickInfo().tick};})()`,
-  );
-  log("STEP3 end1:", JSON.stringify(end1));
-  await shot("04-end1");
-
-  // STEP 4 — Restart rebuilds the game (teardown path), plays to end again.
-  if (!(await clickByText(".ks-end button", "Restart"))) fail("Restart not found");
-  await waitFor(
-    `getComputedStyle(document.querySelector('.ks-end')).display==='none' && !!window.__ks && window.__ks.getTickInfo().tick < 6`,
-    20000,
-    200,
-    "restart fresh",
-  );
-  const g2 = await evaluate(
-    `(()=>{const s=window.__ks.getState();return{boardSize:s.boardSize,tick:s.tick};})()`,
-  );
-  log("STEP4 restarted:", JSON.stringify(g2));
-  if (g2.boardSize !== Number(SIZE)) fail("restart did not preserve config");
-  await shot("05-restart");
-
-  log("STEP4 speed ->", await setMaxSpeed());
-  log(`waiting for end screen 2 (up to ${END_TIMEOUT_MS / 1000}s)...`);
-  await waitFor(
-    `!!document.querySelector('.ks-end') && getComputedStyle(document.querySelector('.ks-end')).display!=='none'`,
-    END_TIMEOUT_MS,
-    2000,
-    "end2",
-  );
-  await shot("06-end2");
-
-  // STEP 5 — Main Menu returns, a different board starts fresh.
-  if (!(await clickByText(".ks-end button", "Main Menu"))) fail("Main Menu not found");
-  await waitFor(
-    `getComputedStyle(document.querySelector('.ks-menu')).display!=='none'`,
-    20000,
-    200,
-    "menu reappear",
-  );
-  await shot("07-menu2");
-
-  if (!(await clickByText(".ks-menu button", SIZE2))) fail(`size button ${SIZE2} not found`);
-  if (!(await clickByText(".ks-menu button", "Start"))) fail("Start not found");
-  await waitFor(
-    `getComputedStyle(document.querySelector('.ks-menu')).display==='none' && !!window.__ks`,
-    20000,
-    300,
-    "game2 start",
-  );
-  const g3 = await evaluate(
-    `(()=>{const s=window.__ks.getState();return{boardSize:s.boardSize,provinces:s.provinces.size};})()`,
-  );
-  log("STEP5 game2:", JSON.stringify(g3));
-  if (g3.boardSize !== Number(SIZE2)) fail(`board size ${g3.boardSize} != ${SIZE2}`);
-  await shot("08-game2");
-
-  log("CONSOLE_ERRORS:", JSON.stringify(consoleErrors));
-  if (pageExceptions.length) fail(`${pageExceptions.length} page exception(s)`);
-  if (STRICT_CONSOLE && consoleErrors.length)
-    fail(`${consoleErrors.length} console error(s) under STRICT`);
-  log("RESULT_DONE");
+  if (pageExceptions.length) fail("page exceptions: " + JSON.stringify(pageExceptions));
+  if (STRICT_CONSOLE && consoleErrors.length) fail("console errors (strict): " + JSON.stringify(consoleErrors));
+  log("RESULT_OK — v2 menu/start/ticks/entities/controls + ?v1 easter egg");
   process.exit(0);
-})().catch(async (e) => {
-  try {
-    await shot("99-error");
-  } catch {
-    /* ignore */
-  }
-  fail(e?.message ?? String(e));
-});
+})().catch((e) => fail(e.message));
