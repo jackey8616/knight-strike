@@ -77,11 +77,24 @@ function resolveChrome() {
     ["--yes", "@puppeteer/browsers", "install", "chrome@stable", "--path", cache],
     { encoding: "utf8" },
   );
-  const m = (out.stdout + out.stderr).match(
-    /(\/\S+(?:Google Chrome for Testing|chrome|chrome\.exe))\b/,
-  );
-  if (!m) throw new Error("could not resolve a Chrome binary");
-  return m[1];
+  // @puppeteer/browsers prints "<browser>@<version> <absolute path>". On macOS
+  // the path contains spaces ("Google Chrome for Testing.app/Contents/MacOS/…"),
+  // so capture everything after the version token to end of line. A `\S+` regex
+  // truncates at the first space and yields the `.app` bundle dir rather than the
+  // executable inside it, which then fails to spawn (ENOENT).
+  const m = (out.stdout + "\n" + out.stderr).match(/^\s*\S+@\S+\s+(\/.+?)\s*$/m);
+  if (!m) {
+    throw new Error(
+      "could not resolve a Chrome binary from install output:\n" +
+        out.stdout +
+        out.stderr,
+    );
+  }
+  const resolved = m[1];
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`resolved Chrome path does not exist: ${resolved}`);
+  }
+  return resolved;
 }
 
 const children = [];
