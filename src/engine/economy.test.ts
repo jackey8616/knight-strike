@@ -27,9 +27,11 @@ import {
 import { tileId } from "./state";
 import {
   AI_IDLE,
+  type AttackOrder,
   type FactionEconomy,
   type FactionId,
   type GameState,
+  type MarchingStack,
   type Occupant,
   type Province,
 } from "./types";
@@ -81,14 +83,16 @@ function makeState(
     economy?: Record<FactionId, FactionEconomy>;
     defeated?: ReadonlySet<FactionId>;
     boardSize?: number;
+    marchingStacks?: readonly MarchingStack[];
+    attackOrders?: readonly AttackOrder[];
   } = {},
 ): GameState {
   return {
     boardSize: opts.boardSize ?? 5,
     tick: opts.tick ?? 5,
     provinces,
-    marchingStacks: [],
-    attackOrders: [],
+    marchingStacks: opts.marchingStacks ?? [],
+    attackOrders: opts.attackOrders ?? [],
     aiConfig: {
       TOKUGAWA: AI_IDLE,
       TAKEDA: AI_IDLE,
@@ -411,6 +415,52 @@ describe("economy: army upkeep (AC-32)", () => {
     expect(factionUpkeep(state, "TOKUGAWA")).toBe(upkeepFee(200)); // only the over-cap one
     expect(factionUpkeep(state, "ODA")).toBe(upkeepFee(300));
     expect(factionUpkeep(state, "NEUTRAL")).toBe(0);
+  });
+
+  it("charges and starves over-cap troops in ANY status — parked, marching, sieging", () => {
+    const m = emptyBoard(2);
+    patch(m, 0, 0, { occupants: [occ("TOKUGAWA", 200)], lastClaimedFaction: "TOKUGAWA" });
+    const march: MarchingStack = {
+      id: "mstack:1", faction: "TOKUGAWA", count: 200,
+      path: [tileId(0, 0), tileId(1, 1)], idx: 0, dispatchedAtTick: 0,
+    };
+    const siege: AttackOrder = {
+      from: tileId(1, 1), to: tileId(1, 0), faction: "TOKUGAWA",
+      count: 200, route: [], startTick: 0,
+    };
+    // Solvent: pays the summed fee, no shrink anywhere.
+    const flush = makeState(m, {
+      economy: makeEconomy(1000, 15),
+      marchingStacks: [march],
+      attackOrders: [siege],
+    });
+    const paid = applyUpkeep(flush);
+    expect(paid.economy.TOKUGAWA.gold).toBe(1000 - upkeepFee(200) * 3);
+    expect(paid.marchingStacks[0]?.count).toBe(200);
+    expect(paid.attackOrders[0]?.count).toBe(200);
+
+    // Broke: every over-cap body starves toward the threshold (200 → 135).
+    const broke = makeState(m, {
+      economy: makeEconomy(0, 15),
+      marchingStacks: [march],
+      attackOrders: [siege],
+    });
+    const starved = applyUpkeep(broke);
+    const shrunk = 200 - Math.floor(160 / 4); // 135
+    expect(starved.provinces.get(tileId(0, 0))?.occupants[0]?.amount).toBe(shrunk);
+    expect(starved.marchingStacks[0]?.count).toBe(shrunk);
+    expect(starved.attackOrders[0]?.count).toBe(shrunk);
+  });
+
+  it("factionUpkeep counts marching and siege columns too", () => {
+    const m = emptyBoard(2);
+    patch(m, 0, 0, { occupants: [occ("TOKUGAWA", 200)], lastClaimedFaction: "TOKUGAWA" });
+    const state = makeState(m, {
+      economy: makeEconomy(0, 15),
+      marchingStacks: [{ id: "mstack:1", faction: "TOKUGAWA", count: 100, path: [tileId(0,0), tileId(1,1)], idx: 0, dispatchedAtTick: 0 }],
+      attackOrders: [{ from: tileId(1,1), to: tileId(1,0), faction: "TOKUGAWA", count: 80, route: [], startTick: 0 }],
+    });
+    expect(factionUpkeep(state, "TOKUGAWA")).toBe(upkeepFee(200) + upkeepFee(100) + upkeepFee(80));
   });
 
   it("house population is exempt — only garrison occupants are charged", () => {

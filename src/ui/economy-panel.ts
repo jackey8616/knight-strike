@@ -92,8 +92,8 @@ export function createEconomyPanel(
       upkeep.textContent = `⚔ −${upkeepPerDay}/day${starving ? " ⚠" : ""}`;
       upkeep.style.color = starving ? "#ff6b6b" : "#c9a23a";
       upkeep.title = starving
-        ? "Army upkeep exceeds your gold — over-cap garrisons are starving toward the cap. Spend or split them, or raise tax."
-        : "Army upkeep: garrisons stacked over the cap cost gold each day. Split or spend them to avoid starving.";
+        ? "Army upkeep exceeds your gold — your over-cap forces are starving toward the cap. Split or spend them, or raise tax."
+        : "Army upkeep: any force over the cap costs gold each day — parked, marching, or attacking. Split into smaller bands or spend them to avoid starving.";
     } else {
       upkeep.style.display = "none";
     }

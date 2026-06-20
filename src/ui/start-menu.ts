@@ -137,7 +137,7 @@ const HOW_TO_PLAY: readonly string[] = [
   "Goal: capture every enemy castle to win; you lose if your own castle falls.",
   "Economy: troops come only from Houses. Build one on your own tile (the Build House button, or press B) — it grows population, pays tax into your gold, and spawns troops. More gold builds more Houses.",
   "Your gold and a tax slider sit top-left: higher tax = more gold now but slower House growth.",
-  "Don't over-stack one tile: a garrison past the cap pays daily army upkeep (shown top-left); if you can't afford it, that army starves down. Spread your forces or keep them on the move.",
+  "Don't pile troops into one giant army: any force past the cap pays daily upkeep (shown top-left) whether it sits, marches, or attacks — if you can't afford it, it starves down. Keep your forces in smaller bands.",
   "Drag from one of your tiles to send troops — onto your land to reinforce, onto an enemy/neutral tile to conquer.",
   "Click a tile to inspect it; right-click a marching unit to cancel it (troops merge into the current tile).",
   "Space pause · 1–4 speed · right-drag / WASD pan · wheel zoom · R reset camera.",
