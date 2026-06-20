@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeEconomy } from "./economy";
+import { makeEconomy, UPKEEP_THRESHOLD } from "./economy";
 import { tileId } from "./state";
 import { step } from "./tick";
 import {
@@ -126,5 +126,23 @@ describe("step (tick orchestrator)", () => {
     expect(tT.occupants[0]?.faction).toBe("TOKUGAWA");
     expect(tT.occupants[0]?.amount ?? 0).toBeGreaterThanOrEqual(4);
     expect(out.marchingStacks).toHaveLength(0);
+  });
+
+  it("[AC-32] a broke faction's parked doom-stack starves toward the threshold via step()", () => {
+    const D = tileId(5, 5);
+    const provinces = castles();
+    // A 300-troop hoard parked on one owned tile, owner broke (default gold 0).
+    provinces.set(D, tile(D, [occ("TOKUGAWA", 300, 0, true)], { lastClaimedFaction: "TOKUGAWA" }));
+    const stack = (st: GameState): number =>
+      (st.provinces.get(D) as Province).occupants[0]?.amount ?? 0;
+
+    // Tick 3 is an economy day: one starvation step sheds floor((300−40)/4)=65.
+    let s = step(makeState(provinces, 3));
+    expect(stack(s)).toBe(235);
+    // Over many economy days it converges to the threshold and stops — never
+    // below, so starvation alone never empties the tile or loses the castle.
+    for (let i = 0; i < 120; i++) s = step(s);
+    expect(stack(s)).toBe(UPKEEP_THRESHOLD);
+    expect(s.defeated.has("TOKUGAWA")).toBe(false);
   });
 });

@@ -6,8 +6,10 @@ import { installResponsiveStyles } from "./responsive";
 // their own rate from difficulty (§5.3), so this only drives the player.
 export type EconomyPanel = {
   // Refresh the readouts each render. `taxPct` re-syncs the slider when it
-  // changes outside the panel (e.g. a fresh game on Restart).
-  update(gold: number, taxPct: number): void;
+  // changes outside the panel (e.g. a fresh game on Restart). `upkeepPerDay` is
+  // the player's current army upkeep (PRD §4.3): 0 hides the chip, > 0 shows it,
+  // and gold < upkeep flags it red (the over-cap garrisons will starve).
+  update(gold: number, taxPct: number, upkeepPerDay: number): void;
   destroy(): void;
 };
 
@@ -49,6 +51,13 @@ export function createEconomyPanel(
   gold.textContent = "⛁ 0";
   root.appendChild(gold);
 
+  // PRD §4.3: army-upkeep readout. Hidden until the player parks an over-cap
+  // garrison (no clutter for the common case), then shows the per-day drain so a
+  // doom-stack's cost — and impending starvation — is legible, not a mystery.
+  const upkeep = document.createElement("span");
+  upkeep.style.cssText = "font-weight: 600; display: none;";
+  root.appendChild(upkeep);
+
   const taxWrap = document.createElement("label");
   taxWrap.style.cssText = "display: flex; gap: 6px; align-items: center;";
   const taxLabel = document.createElement("span");
@@ -75,8 +84,19 @@ export function createEconomyPanel(
 
   parent.appendChild(root);
 
-  function update(goldAmount: number, taxPct: number): void {
+  function update(goldAmount: number, taxPct: number, upkeepPerDay: number): void {
     gold.textContent = `⛁ ${goldAmount}`;
+    if (upkeepPerDay > 0) {
+      const starving = goldAmount < upkeepPerDay;
+      upkeep.style.display = "";
+      upkeep.textContent = `⚔ −${upkeepPerDay}/day${starving ? " ⚠" : ""}`;
+      upkeep.style.color = starving ? "#ff6b6b" : "#c9a23a";
+      upkeep.title = starving
+        ? "Army upkeep exceeds your gold — over-cap garrisons are starving toward the cap. Spend or split them, or raise tax."
+        : "Army upkeep: garrisons stacked over the cap cost gold each day. Split or spend them to avoid starving.";
+    } else {
+      upkeep.style.display = "none";
+    }
     // Re-sync the slider only when the engine value diverges from the control
     // (e.g. a new game), never mid-drag — the input event already pushed those.
     if (Number(slider.value) !== taxPct) {

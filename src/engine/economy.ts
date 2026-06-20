@@ -28,6 +28,18 @@ export const GROWTH_BASE = 3;
 // tax / spawn numbers stay readable and the economy moves at a strategic pace.
 export const ECONOMY_INTERVAL_TICKS = 3;
 
+// ---- Army upkeep (PRD §4.3, anti-doom-stack) -------------------------------
+// A parked garrison above UPKEEP_THRESHOLD owes gold every economy-day, scaling
+// with its excess size; a faction that can't pay starves its over-threshold
+// garrisons back toward the threshold. Rescaled from the v2 reference
+// (`src/engine/v2/maintenance.ts`, threshold 2000 on v2's thousands-scale) to
+// v1's 3–30 troop scale: KING (30) and a little slack stay free, only abnormal
+// hoards pay — so a single-tile doom-stack carries a size-scaled gold cost
+// instead of being a free, unbounded, AI-proof army.
+export const UPKEEP_THRESHOLD = 40;
+export const UPKEEP_DIVISOR = 10;
+export const STARVE_DIVISOR = 4;
+
 // Ticks on which the economy (growth / tax / spawn) settles. Tick 0 is the
 // initial render-only frame, so the first economy day lands at tick
 // ECONOMY_INTERVAL_TICKS.
@@ -349,4 +361,97 @@ export function setTaxPct(
 export function razeHouseAt(p: Province): Province {
   if (p.isHouse !== true) return p;
   return { ...p, isHouse: false, houseOwner: null, housePopulation: 0 };
+}
+
+// ---- Army upkeep (PRD §4.3) ------------------------------------------------
+
+// Gold owed per economy-day by a single garrison of this size; 0 at/under the
+// threshold (mirrors v2 maintenanceFee, rescaled). The max(1) makes a just-over
+// garrison still owe something so the threshold is a hard line.
+export function upkeepFee(amount: number): number {
+  if (amount <= UPKEEP_THRESHOLD) return 0;
+  return Math.max(1, Math.floor((amount - UPKEEP_THRESHOLD) / UPKEEP_DIVISOR));
+}
+
+// PRD §4.3: total army upkeep `faction` owes this economy-day, summed over its
+// parked garrisons (the same per-garrison fee applyUpkeep charges, so the player
+// HUD readout and the actual charge never drift). Marching stacks / house
+// population are exempt by construction; NEUTRAL and defeated factions owe 0.
+export function factionUpkeep(state: GameState, faction: FactionId): number {
+  if (faction === "NEUTRAL" || state.defeated.has(faction)) return 0;
+  let total = 0;
+  for (const p of state.provinces.values()) {
+    for (const o of p.occupants) {
+      if (o.faction === faction) total += upkeepFee(o.amount);
+    }
+  }
+  return total;
+}
+
+// Broke-faction starvation: shed ~1/STARVE_DIVISOR of the excess (≥1) per
+// economy-day, converging toward the threshold but never below it — so
+// starvation alone never empties a tile or loses a castle (only enemy capture
+// does). Mirrors v2 starvationShrink.
+function starveShrink(amount: number): number {
+  const excess = amount - UPKEEP_THRESHOLD;
+  if (excess <= 0) return 0;
+  return Math.min(excess, Math.max(1, Math.floor(excess / STARVE_DIVISOR)));
+}
+
+// PRD §4.3 (anti-doom-stack): each economy-day, sum every faction's upkeep over
+// its PARKED garrisons above the threshold and debit the treasury. Marching
+// stacks (in transit / sieging) and House population are exempt — only a
+// standing garrison costs upkeep, so campaigning is free but hoarding is taxed.
+// A faction that can't cover its total empties its treasury and starves its
+// over-threshold garrisons toward the threshold. NEUTRAL and defeated factions
+// are exempt. Pure; deterministic.
+export function applyUpkeep(state: GameState): GameState {
+  const fees = new Map<FactionId, number>();
+  for (const p of state.provinces.values()) {
+    for (const o of p.occupants) {
+      if (o.faction === "NEUTRAL" || state.defeated.has(o.faction)) continue;
+      const fee = upkeepFee(o.amount);
+      if (fee > 0) fees.set(o.faction, (fees.get(o.faction) ?? 0) + fee);
+    }
+  }
+  if (fees.size === 0) return state;
+
+  const economy: Record<FactionId, FactionEconomy> = { ...state.economy };
+  const starving = new Set<FactionId>();
+  for (const [faction, fee] of fees) {
+    const gold = state.economy[faction].gold;
+    if (gold >= fee) {
+      economy[faction] = { ...economy[faction], gold: gold - fee };
+    } else {
+      economy[faction] = { ...economy[faction], gold: 0 };
+      starving.add(faction);
+    }
+  }
+
+  let provinces: Map<TileId, Province> | null = null;
+  if (starving.size > 0) {
+    for (const [id, p] of state.provinces) {
+      let changed = false;
+      const occupants: Occupant[] = [];
+      for (const o of p.occupants) {
+        const shrink = starving.has(o.faction) ? starveShrink(o.amount) : 0;
+        if (shrink > 0) {
+          changed = true;
+          occupants.push({ ...o, amount: o.amount - shrink });
+        } else {
+          occupants.push(o);
+        }
+      }
+      if (changed) {
+        if (provinces === null) provinces = new Map(state.provinces);
+        provinces.set(id, { ...p, occupants });
+      }
+    }
+  }
+
+  return {
+    ...state,
+    economy,
+    ...(provinces !== null ? { provinces } : {}),
+  };
 }
