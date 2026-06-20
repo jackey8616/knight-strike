@@ -139,8 +139,10 @@ function fail(message) {
   const tax = await evaluate(`window.__ks.getState().factions.TOKUGAWA.taxRate`);
   if (tax !== 0.15) fail("tax not applied: " + tax);
 
-  // STEP 4 — the DEFAULT (no param) boots the v1 game (the shipped default).
-  await send("Page.navigate", { url: APP });
+  // STEP 4 — the DEFAULT boots the v1 game (the shipped default). Pin ?seed=1 so
+  // the corner terrain is deterministic — STEP6 builds on a fixed tile that must
+  // be buildable plains.
+  await send("Page.navigate", { url: APP + "?seed=1" });
   await waitFor(`!!document.querySelector('.ks-menu') && !!document.querySelector('canvas')`, 30000, 500, "default v1 boots");
   log("STEP4 default (v1) booted");
   await shot("v2-03-default-v1");
@@ -167,20 +169,36 @@ function fail(message) {
   if (taxPct !== 25) fail("v1 tax slider not wired to engine: " + taxPct);
   await shot("v1-01-economy");
 
-  // STEP 6 — player builds a House. No tile is eligible at t=0 (castle can't
-  // host one, the seed House is taken), so claim an empty tile first, then build.
+  // STEP 6 — player builds a House. The adjacent (0,1) is blocked by the Moore-8
+  // house-spacing rule (PRD §4.3): the seed House at (1,0) sits in its ring. So
+  // build two tiles out at (0,2) (spacing-legal). That needs a garrison there, so
+  // first drop tax to 0 for fast growth, let the seed House spawn onto the castle
+  // (its only owned neighbour, +SPAWN_SIZE), then conquer-march the reinforced
+  // castle out to (0,2) and build. (?seed=1 keeps (0,1)/(0,2) buildable plains.)
   if ((await evaluate(`window.__ks.playerBuildHouse(0,0)`)) !== false) fail("build wrongly allowed on castle");
-  await evaluate(`window.__ks.setPaused(false)`);
-  await evaluate(`window.__ks.playerDispatch(0,0,0,1,1.0)`);
-  await waitFor(
-    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,1');return !!p&&p.occupants.length===1&&p.occupants[0].faction==='TOKUGAWA';})()`,
-    25000,
-    500,
-    "claim tile (0,1)",
+  if ((await evaluate(`window.__ks.playerBuildHouse(0,1)`)) !== false) fail("build wrongly allowed next to a House (Moore-8 spacing)");
+  await evaluate(
+    `(()=>{const sl=document.querySelector('.ks-economy input[type=range]');sl.value='0';sl.dispatchEvent(new Event('input',{bubbles:true}));})()`,
   );
-  const built = await evaluate(`window.__ks.playerBuildHouse(0,1)`);
+  await evaluate(`window.__ks.setPaused(false)`);
+  // Seed House (1,0) spawns onto the castle (0,0), reinforcing it past the 3 it
+  // starts with — enough to conquer two tiles and still leave a garrison.
+  await waitFor(
+    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,0');return !!p&&!!p.occupants[0]&&p.occupants[0].faction==='TOKUGAWA'&&p.occupants[0].amount>=10;})()`,
+    30000,
+    500,
+    "castle reinforced by House spawn",
+  );
+  await evaluate(`window.__ks.playerDispatch(0,0,0,2,1.0)`);
+  await waitFor(
+    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,2');return !!p&&p.occupants.length===1&&p.occupants[0].faction==='TOKUGAWA'&&p.occupants[0].amount>=1;})()`,
+    30000,
+    500,
+    "garrison (0,2)",
+  );
+  const built = await evaluate(`window.__ks.playerBuildHouse(0,2)`);
   const isHouse = await evaluate(
-    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,1');return p.isHouse===true&&p.houseOwner==='TOKUGAWA';})()`,
+    `(()=>{const p=window.__ks.getState().provinces.get('tile:0,2');return p.isHouse===true&&p.houseOwner==='TOKUGAWA';})()`,
   );
   log("STEP6 player build:", JSON.stringify({ built, isHouse }));
   if (!built || !isHouse) fail("v1 player build-house failed");
