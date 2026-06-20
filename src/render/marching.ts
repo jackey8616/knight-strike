@@ -18,13 +18,20 @@ import type {
 } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
-import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
-import type { TierTextures } from "./sprites";
+import { isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
+import type { FactionSprites } from "./faction-sprites";
 import { groundLiftPx } from "./terrain-height";
 
-// PRD §5.1: marching sprite is the regular tile sprite shrunk to 0.7× so it
-// reads as in-transit vs. garrisoned.
-const MARCHING_TILE_FRACTION = 0.225;
+// Marching sprite size as a multiple of TILE_WIDTH — a touch smaller than a
+// garrison (units.ts) so a column reads as in-transit. One value for all tiers.
+const MARCHING_TILE_FRACTION = 0.9;
+
+// NEUTRAL has no authored art → reuse a faction sprite desaturated via tint;
+// real factions render untinted (their art is full-colour).
+const NEUTRAL_TINT = 0x8a8a9a;
+function baseTint(faction: FactionId): number {
+  return faction === "NEUTRAL" ? NEUTRAL_TINT : 0xffffff;
+}
 const COUNT_TEXT_STYLE: TextStyleOptions = {
   fontFamily: "monospace",
   fontSize: 11,
@@ -85,7 +92,7 @@ function garrisonAmount(
 }
 
 export function createMarchingRenderer(
-  textures: TierTextures,
+  sprites: FactionSprites,
   events: MarchingRendererEvents = {},
 ): MarchingRenderer {
   const container = new Container();
@@ -116,10 +123,10 @@ export function createMarchingRenderer(
     node.zIndex = ix + iy + 0.25;
 
     const tier = deriveTier(v.count);
-    const texture = textures[tier];
+    const texture = sprites.get(v.faction, tier);
     const sprite = new Sprite(texture);
     sprite.anchor.set(0.5, 0.85);
-    sprite.tint = FACTION_COLORS[v.faction];
+    sprite.tint = baseTint(v.faction);
     sprite.scale.set(spriteScale(texture));
     node.addChild(sprite);
 
@@ -166,10 +173,10 @@ export function createMarchingRenderer(
 
     const label = String(v.count);
     if (gfx.count.text !== label) gfx.count.text = label;
-    const tint = FACTION_COLORS[v.faction];
+    const tint = baseTint(v.faction);
     if (gfx.sprite.tint !== tint) gfx.sprite.tint = tint;
     const tier = deriveTier(v.count);
-    const tierTex = textures[tier];
+    const tierTex = sprites.get(v.faction, tier);
     if (gfx.sprite.texture !== tierTex) {
       gfx.sprite.texture = tierTex;
       gfx.sprite.scale.set(spriteScale(tierTex));
