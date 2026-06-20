@@ -182,7 +182,7 @@ async function main() {
   }
 
   const code = await new Promise((resolve) => {
-    const driver = spawn(process.execPath, [path.join(here, "driver.mjs")], {
+    const driver = spawn(process.execPath, [path.join(here, process.env.SMOKE_DRIVER ?? "driver.mjs")], {
       stdio: "inherit",
       env: { ...process.env, APP_URL, CDP_URL },
     });
