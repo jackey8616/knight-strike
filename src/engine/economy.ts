@@ -373,6 +373,21 @@ export function upkeepFee(amount: number): number {
   return Math.max(1, Math.floor((amount - UPKEEP_THRESHOLD) / UPKEEP_DIVISOR));
 }
 
+// PRD §4.3: total army upkeep `faction` owes this economy-day, summed over its
+// parked garrisons (the same per-garrison fee applyUpkeep charges, so the player
+// HUD readout and the actual charge never drift). Marching stacks / house
+// population are exempt by construction; NEUTRAL and defeated factions owe 0.
+export function factionUpkeep(state: GameState, faction: FactionId): number {
+  if (faction === "NEUTRAL" || state.defeated.has(faction)) return 0;
+  let total = 0;
+  for (const p of state.provinces.values()) {
+    for (const o of p.occupants) {
+      if (o.faction === faction) total += upkeepFee(o.amount);
+    }
+  }
+  return total;
+}
+
 // Broke-faction starvation: shed ~1/STARVE_DIVISOR of the excess (≥1) per
 // economy-day, converging toward the threshold but never below it — so
 // starvation alone never empties a tile or loses a castle (only enemy capture

@@ -5,6 +5,7 @@ import {
   collectTax,
   DEFAULT_TAX_PCT,
   ECONOMY_INTERVAL_TICKS,
+  factionUpkeep,
   growPopulation,
   growthAmount,
   GROWTH_BASE,
@@ -399,6 +400,17 @@ describe("economy: army upkeep (AC-32)", () => {
     });
     // No live faction owes anything → state returned unchanged.
     expect(applyUpkeep(state)).toBe(state);
+  });
+
+  it("factionUpkeep sums a faction's per-garrison fees (HUD readout matches the charge)", () => {
+    const m = emptyBoard(3);
+    patch(m, 0, 0, { occupants: [occ("TOKUGAWA", 200)], lastClaimedFaction: "TOKUGAWA" });
+    patch(m, 1, 0, { occupants: [occ("TOKUGAWA", 30)], lastClaimedFaction: "TOKUGAWA" }); // under threshold
+    patch(m, 2, 0, { occupants: [occ("ODA", 300)], lastClaimedFaction: "ODA" });
+    const state = makeState(m, { economy: makeEconomy(0, 15) });
+    expect(factionUpkeep(state, "TOKUGAWA")).toBe(upkeepFee(200)); // only the over-cap one
+    expect(factionUpkeep(state, "ODA")).toBe(upkeepFee(300));
+    expect(factionUpkeep(state, "NEUTRAL")).toBe(0);
   });
 
   it("house population is exempt — only garrison occupants are charged", () => {

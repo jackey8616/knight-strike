@@ -1,4 +1,4 @@
-import { buildHouse, MAX_TAX_PCT, setTaxPct } from "@/engine/economy";
+import { buildHouse, factionUpkeep, MAX_TAX_PCT, setTaxPct } from "@/engine/economy";
 import {
   cancelMarchingStack,
   dispatch as engineDispatch,
@@ -200,6 +200,7 @@ function createGame(
     economyPanel.update(
       state.economy[PLAYER_FACTION].gold,
       state.economy[PLAYER_FACTION].taxPct,
+      factionUpkeep(state, PLAYER_FACTION),
     );
     refreshTileInfo();
     pushHudStatus();
