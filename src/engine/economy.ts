@@ -2,9 +2,11 @@ import { garrison } from "./movement";
 import { derivedOwner, findOccupant, tileId } from "./state";
 import { isImpassableTerrain } from "./terrain";
 import type {
+  AttackOrder,
   FactionEconomy,
   FactionId,
   GameState,
+  MarchingStack,
   Occupant,
   Province,
   TileId,
@@ -29,13 +31,15 @@ export const GROWTH_BASE = 3;
 export const ECONOMY_INTERVAL_TICKS = 3;
 
 // ---- Army upkeep (PRD §4.3, anti-doom-stack) -------------------------------
-// A parked garrison above UPKEEP_THRESHOLD owes gold every economy-day, scaling
-// with its excess size; a faction that can't pay starves its over-threshold
-// garrisons back toward the threshold. Rescaled from the v2 reference
-// (`src/engine/v2/maintenance.ts`, threshold 2000 on v2's thousands-scale) to
-// v1's 3–30 troop scale: KING (30) and a little slack stay free, only abnormal
-// hoards pay — so a single-tile doom-stack carries a size-scaled gold cost
-// instead of being a free, unbounded, AI-proof army.
+// Any troop body above UPKEEP_THRESHOLD owes gold every economy-day, scaling
+// with its excess size — REGARDLESS of status: a parked garrison, a marching
+// column, and a siege column are all charged the same, so a doom-stack can't
+// dodge upkeep by staying in motion. A faction that can't pay starves its
+// over-threshold bodies back toward the threshold. Rescaled from the v2
+// reference (`src/engine/v2/maintenance.ts`, threshold 2000 on v2's thousands-
+// scale) to v1's 3–30 troop scale: KING (30) and a little slack stay free, only
+// abnormal hoards pay — so a doom-stack carries a size-scaled gold cost whether
+// it sits, marches, or attacks, instead of being a free, AI-proof army.
 export const UPKEEP_THRESHOLD = 40;
 export const UPKEEP_DIVISOR = 10;
 export const STARVE_DIVISOR = 4;
@@ -373,10 +377,11 @@ export function upkeepFee(amount: number): number {
   return Math.max(1, Math.floor((amount - UPKEEP_THRESHOLD) / UPKEEP_DIVISOR));
 }
 
-// PRD §4.3: total army upkeep `faction` owes this economy-day, summed over its
-// parked garrisons (the same per-garrison fee applyUpkeep charges, so the player
-// HUD readout and the actual charge never drift). Marching stacks / house
-// population are exempt by construction; NEUTRAL and defeated factions owe 0.
+// PRD §4.3: total army upkeep `faction` owes this economy-day, summed over ALL
+// its troop bodies regardless of status — parked garrisons, marching columns,
+// and siege columns — using the same per-body fee applyUpkeep charges, so the
+// player HUD readout and the actual charge never drift. House population is
+// exempt (civilians, not troops); NEUTRAL and defeated factions owe 0.
 export function factionUpkeep(state: GameState, faction: FactionId): number {
   if (faction === "NEUTRAL" || state.defeated.has(faction)) return 0;
   let total = 0;
@@ -384,6 +389,12 @@ export function factionUpkeep(state: GameState, faction: FactionId): number {
     for (const o of p.occupants) {
       if (o.faction === faction) total += upkeepFee(o.amount);
     }
+  }
+  for (const m of state.marchingStacks) {
+    if (m.faction === faction) total += upkeepFee(m.count);
+  }
+  for (const o of state.attackOrders) {
+    if (o.faction === faction) total += upkeepFee(o.count);
   }
   return total;
 }
@@ -399,21 +410,25 @@ function starveShrink(amount: number): number {
 }
 
 // PRD §4.3 (anti-doom-stack): each economy-day, sum every faction's upkeep over
-// its PARKED garrisons above the threshold and debit the treasury. Marching
-// stacks (in transit / sieging) and House population are exempt — only a
-// standing garrison costs upkeep, so campaigning is free but hoarding is taxed.
-// A faction that can't cover its total empties its treasury and starves its
-// over-threshold garrisons toward the threshold. NEUTRAL and defeated factions
-// are exempt. Pure; deterministic.
+// ALL its troop bodies above the threshold — parked garrisons, marching columns,
+// AND siege columns — and debit the treasury. Status doesn't matter: a doom-
+// stack pays whether it sits, marches, or attacks, so it can't dodge the fee by
+// staying in motion. House population is exempt (civilians). A faction that
+// can't cover its total empties its treasury and starves ALL its over-threshold
+// bodies toward the threshold. NEUTRAL and defeated factions are exempt. Pure;
+// deterministic.
 export function applyUpkeep(state: GameState): GameState {
   const fees = new Map<FactionId, number>();
+  const addFee = (faction: FactionId, amount: number): void => {
+    if (faction === "NEUTRAL" || state.defeated.has(faction)) return;
+    const fee = upkeepFee(amount);
+    if (fee > 0) fees.set(faction, (fees.get(faction) ?? 0) + fee);
+  };
   for (const p of state.provinces.values()) {
-    for (const o of p.occupants) {
-      if (o.faction === "NEUTRAL" || state.defeated.has(o.faction)) continue;
-      const fee = upkeepFee(o.amount);
-      if (fee > 0) fees.set(o.faction, (fees.get(o.faction) ?? 0) + fee);
-    }
+    for (const o of p.occupants) addFee(o.faction, o.amount);
   }
+  for (const m of state.marchingStacks) addFee(m.faction, m.count);
+  for (const o of state.attackOrders) addFee(o.faction, o.count);
   if (fees.size === 0) return state;
 
   const economy: Record<FactionId, FactionEconomy> = { ...state.economy };
@@ -427,31 +442,52 @@ export function applyUpkeep(state: GameState): GameState {
       starving.add(faction);
     }
   }
+  if (starving.size === 0) return { ...state, economy };
 
+  // A broke faction starves every over-threshold body it holds, in whatever
+  // status — garrisons, marching columns, and siege columns alike.
   let provinces: Map<TileId, Province> | null = null;
-  if (starving.size > 0) {
-    for (const [id, p] of state.provinces) {
-      let changed = false;
-      const occupants: Occupant[] = [];
-      for (const o of p.occupants) {
-        const shrink = starving.has(o.faction) ? starveShrink(o.amount) : 0;
-        if (shrink > 0) {
-          changed = true;
-          occupants.push({ ...o, amount: o.amount - shrink });
-        } else {
-          occupants.push(o);
-        }
-      }
-      if (changed) {
-        if (provinces === null) provinces = new Map(state.provinces);
-        provinces.set(id, { ...p, occupants });
+  for (const [id, p] of state.provinces) {
+    let changed = false;
+    const occupants: Occupant[] = [];
+    for (const o of p.occupants) {
+      const shrink = starving.has(o.faction) ? starveShrink(o.amount) : 0;
+      if (shrink > 0) {
+        changed = true;
+        occupants.push({ ...o, amount: o.amount - shrink });
+      } else {
+        occupants.push(o);
       }
     }
+    if (changed) {
+      if (provinces === null) provinces = new Map(state.provinces);
+      provinces.set(id, { ...p, occupants });
+    }
   }
+
+  let marchingStacks: MarchingStack[] | null = null;
+  state.marchingStacks.forEach((m, i) => {
+    const shrink = starving.has(m.faction) ? starveShrink(m.count) : 0;
+    if (shrink > 0) {
+      if (marchingStacks === null) marchingStacks = [...state.marchingStacks];
+      marchingStacks[i] = { ...m, count: m.count - shrink };
+    }
+  });
+
+  let attackOrders: AttackOrder[] | null = null;
+  state.attackOrders.forEach((o, i) => {
+    const shrink = starving.has(o.faction) ? starveShrink(o.count) : 0;
+    if (shrink > 0) {
+      if (attackOrders === null) attackOrders = [...state.attackOrders];
+      attackOrders[i] = { ...o, count: o.count - shrink };
+    }
+  });
 
   return {
     ...state,
     economy,
     ...(provinces !== null ? { provinces } : {}),
+    ...(marchingStacks !== null ? { marchingStacks } : {}),
+    ...(attackOrders !== null ? { attackOrders } : {}),
   };
 }
