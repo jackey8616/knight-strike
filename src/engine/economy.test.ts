@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyUpkeep,
   buildHouse,
   collectTax,
   DEFAULT_TAX_PCT,
@@ -18,6 +19,9 @@ import {
   spawnFromHouses,
   SPAWN_SIZE,
   SPAWN_THRESHOLD,
+  upkeepFee,
+  UPKEEP_DIVISOR,
+  UPKEEP_THRESHOLD,
 } from "./economy";
 import { tileId } from "./state";
 import {
@@ -351,5 +355,62 @@ describe("economy: cadence", () => {
     expect(isEconomyTick(ECONOMY_INTERVAL_TICKS)).toBe(true);
     expect(isEconomyTick(ECONOMY_INTERVAL_TICKS + 1)).toBe(false);
     expect(isEconomyTick(ECONOMY_INTERVAL_TICKS * 2)).toBe(true);
+  });
+});
+
+describe("economy: army upkeep (AC-32)", () => {
+  it("upkeepFee is 0 at/under the threshold and ramps above it", () => {
+    expect(upkeepFee(UPKEEP_THRESHOLD)).toBe(0);
+    expect(upkeepFee(UPKEEP_THRESHOLD - 5)).toBe(0);
+    expect(upkeepFee(UPKEEP_THRESHOLD + 1)).toBe(1); // max(1, floor(1/DIV))
+    expect(upkeepFee(UPKEEP_THRESHOLD + UPKEEP_DIVISOR * 2)).toBe(2);
+  });
+
+  it("debits a solvent faction and leaves its garrison intact", () => {
+    const m = emptyBoard(2);
+    patch(m, 0, 0, { occupants: [occ("TOKUGAWA", 200)], lastClaimedFaction: "TOKUGAWA" });
+    const fee = upkeepFee(200);
+    const state = makeState(m, { economy: makeEconomy(500, 15) });
+    const next = applyUpkeep(state);
+    expect(next.economy.TOKUGAWA.gold).toBe(500 - fee);
+    expect(next.provinces.get(tileId(0, 0))?.occupants[0]?.amount).toBe(200);
+  });
+
+  it("a broke faction starves over-threshold garrisons toward (never below) the threshold", () => {
+    const m = emptyBoard(2);
+    patch(m, 0, 0, { occupants: [occ("TOKUGAWA", 200)], lastClaimedFaction: "TOKUGAWA" });
+    const state = makeState(m, { economy: makeEconomy(0, 15) });
+    let s = applyUpkeep(state);
+    expect(s.economy.TOKUGAWA.gold).toBe(0);
+    expect(s.provinces.get(tileId(0, 0))?.occupants[0]?.amount).toBe(200 - 40); // floor(160/4)
+    // Iterating converges to the threshold and stops (never below).
+    for (let i = 0; i < 50; i++) s = applyUpkeep(s);
+    expect(s.provinces.get(tileId(0, 0))?.occupants[0]?.amount).toBe(UPKEEP_THRESHOLD);
+  });
+
+  it("exempts NEUTRAL, defeated factions, and at-threshold garrisons", () => {
+    const m = emptyBoard(3);
+    patch(m, 0, 0, { occupants: [occ("NEUTRAL", 300)] });
+    patch(m, 1, 0, { occupants: [occ("ODA", 300)], lastClaimedFaction: "ODA" });
+    patch(m, 2, 0, { occupants: [occ("TOKUGAWA", UPKEEP_THRESHOLD)], lastClaimedFaction: "TOKUGAWA" });
+    const state = makeState(m, {
+      economy: makeEconomy(0, 15),
+      defeated: new Set<FactionId>(["ODA"]),
+    });
+    // No live faction owes anything → state returned unchanged.
+    expect(applyUpkeep(state)).toBe(state);
+  });
+
+  it("house population is exempt — only garrison occupants are charged", () => {
+    const m = emptyBoard(2);
+    patch(m, 0, 0, {
+      isHouse: true,
+      houseOwner: "TOKUGAWA",
+      housePopulation: 500,
+      occupants: [occ("TOKUGAWA", 10)],
+      lastClaimedFaction: "TOKUGAWA",
+    });
+    const state = makeState(m, { economy: makeEconomy(100, 15) });
+    expect(applyUpkeep(state)).toBe(state); // garrison 10 < threshold, pop 500 ignored
   });
 });

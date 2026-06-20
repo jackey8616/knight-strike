@@ -1,6 +1,7 @@
 import { stepAi } from "./ai";
 import { resolveOrders } from "./combat";
 import {
+  applyUpkeep,
   collectTax,
   growPopulation,
   isEconomyTick,
@@ -17,7 +18,10 @@ import { applyDefeats } from "./victory";
 //   3. economy — only on economy "days" (isEconomyTick):
 //      a. growPopulation (houses grow, scaled by owned territory, minus tax)
 //      b. collectTax (live houses pay floor(pop × taxPct/100) into the treasury)
-//      c. spawnFromHouses (houses at/over the threshold spawn a troop stack)
+//      c. applyUpkeep (parked garrisons over the threshold pay army upkeep out
+//         of the gold just collected; can't pay → starve, §4.3) — before spawn
+//         so a freshly-spawned stack isn't billed the day it appears.
+//      d. spawnFromHouses (houses at/over the threshold spawn a troop stack)
 //   4. combat (resolveOrders: cross-edge step-function + break→capture; a
 //      captured House tile is razed, §4.3)
 //   5. defeats (faction without castleOwner occupant on its own castle → defeated)
@@ -31,6 +35,7 @@ export function step(state: GameState): GameState {
   if (isEconomyTick(s.tick)) {
     s = growPopulation(s);
     s = collectTax(s);
+    s = applyUpkeep(s);
     s = spawnFromHouses(s);
   }
   s = resolveOrders(s).state;

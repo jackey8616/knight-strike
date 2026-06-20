@@ -2,6 +2,7 @@ import { stepAi } from "@/engine/ai";
 import { RULE_PROFILES } from "@/engine/ai-profile";
 import { resolveOrders } from "@/engine/combat";
 import {
+  applyUpkeep,
   collectTax,
   DEFAULT_TAX_PCT,
   growPopulation,
@@ -591,6 +592,9 @@ function stepWithEvents(state: GameState): {
   if (isEconomyTick(s.tick)) {
     s = growPopulation(s);
     s = collectTax(s);
+    // PRD §4.3: pay army upkeep out of the gold just collected, before spawns
+    // (a freshly-spawned stack isn't billed the same day it appears).
+    s = applyUpkeep(s);
     const beforeSpawn = s;
     s = spawnFromHouses(s);
     for (const [id, after] of s.provinces) {
