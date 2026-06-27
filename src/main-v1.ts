@@ -19,9 +19,9 @@ import { createPointerController } from "@/input/pointer";
 import { buildInitialState } from "@/playtest/runner";
 import { createRenderApp } from "@/render/app";
 import { createBoardRenderer } from "@/render/board";
+import { loadFactionSprites, type FactionSprites } from "@/render/faction-sprites";
 import { createMarchingRenderer } from "@/render/marching";
 import { createPathRenderer } from "@/render/paths";
-import { createTierTextures } from "@/render/sprites";
 import { createUnitsRenderer } from "@/render/units";
 import {
   makeScenario,
@@ -46,7 +46,6 @@ const PLAYER_FACTION: FactionId = "TOKUGAWA";
 type Speed = 1 | 2 | 3 | 4;
 
 type RenderApp = Awaited<ReturnType<typeof createRenderApp>>;
-type TierTextures = ReturnType<typeof createTierTextures>;
 
 type GameHooks = {
   // Replay with the same config + seed (End Screen "Restart", PRD §6.2.2).
@@ -61,7 +60,7 @@ type GameHooks = {
 // Restart / Main Menu without a page reload (PRD §6.2.1).
 function createGame(
   render: RenderApp,
-  tierTextures: TierTextures,
+  sprites: FactionSprites,
   config: StartConfig,
   seed: number,
   hooks: GameHooks,
@@ -115,10 +114,10 @@ function createGame(
   );
   render.app.stage.addChild(board.container);
 
-  const units = createUnitsRenderer(state, tierTextures);
+  const units = createUnitsRenderer(state, sprites);
   board.container.addChild(units.container);
 
-  const marching = createMarchingRenderer(tierTextures, {
+  const marching = createMarchingRenderer(sprites, {
     onCancel: (stackId) => {
       // Only the player faction can cancel its own marching stacks; AI / NEUTRAL
       // stacks are ignored at the engine layer too, but keep the UI honest.
@@ -477,13 +476,13 @@ async function bootstrap(): Promise<void> {
   // Persistent shell: the Pixi app, tier textures and the Start Menu outlive
   // individual games so size / difficulty can change without a page reload.
   const render = await createRenderApp(container);
-  const tierTextures = createTierTextures(render.app);
+  const sprites = await loadFactionSprites();
 
   let teardownGame: (() => void) | null = null;
 
   function startGame(config: StartConfig, seed: number): void {
     teardownGame?.();
-    teardownGame = createGame(render, tierTextures, config, seed, {
+    teardownGame = createGame(render, sprites, config, seed, {
       onRestart: () => startGame(config, seed),
       onMainMenu: () => {
         teardownGame?.();

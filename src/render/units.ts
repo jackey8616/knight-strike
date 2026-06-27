@@ -10,10 +10,10 @@ import { gsap } from "gsap";
 import type { FactionId, GameState, Tier, TileId } from "@/engine/types";
 import { deriveTier } from "@/engine/upgrade";
 
-import { FACTION_COLORS, isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
+import { isoX, isoY, TILE_HEIGHT, TILE_WIDTH } from "./board";
 import { playCombatBump } from "./combat";
 import { groundLiftPx } from "./terrain-height";
-import type { TierTextures } from "./sprites";
+import type { FactionSprites } from "./faction-sprites";
 
 const TIER_RANK: Readonly<Record<Tier, number>> = {
   SOLDIER: 0,
@@ -22,17 +22,24 @@ const TIER_RANK: Readonly<Record<Tier, number>> = {
   KING: 3,
 };
 
-// PRD §5.1: per-tier silhouettes ship via `sprites.ts`; we keep a modest scale
-// ramp so higher tiers also visually loom larger. Capped under 1.0 so even
-// King sprites stay slightly smaller than the tile diamond — at 1.0 the
-// crown extended high enough to overlap the row above, making the board
-// feel crowded once production filled it with garrisons.
+// Display size of a unit sprite as a multiple of TILE_WIDTH (the authored art is
+// downscaled to this on the board). The ramp makes higher tiers loom larger; the
+// mounted Knight is widened a touch. These are the main tuning knob for "how big
+// do the new sprites read vs. crowding the board" — adjust freely.
 const TIER_TILE_FRACTION: Readonly<Record<Tier, number>> = {
-  SOLDIER: 0.2,
-  KNIGHT: 0.25,
-  QUEEN: 0.3,
-  KING: 0.35,
+  SOLDIER: 1.0,
+  KNIGHT: 1.2,
+  QUEEN: 1.1,
+  KING: 1.3,
 };
+
+// NEUTRAL bandits have no authored art, so they reuse a faction sprite knocked
+// back to a desaturated grey-blue via tint. Real factions render untinted
+// (white = no-op) since the art is already full-colour.
+const NEUTRAL_TINT = 0x8a8a9a;
+function baseTint(faction: FactionId): number {
+  return faction === "NEUTRAL" ? NEUTRAL_TINT : 0xffffff;
+}
 
 const UPGRADE_FLASH_COLOR = 0xffe480;
 const UPGRADE_FLASH_DURATION_S = 0.3;
@@ -77,10 +84,10 @@ function createUnitGfx(
   y: number,
   owner: FactionId,
   count: number,
-  textures: TierTextures,
+  sprites: FactionSprites,
 ): UnitGfx {
   const tier = deriveTier(count);
-  const texture = textures[tier];
+  const texture = sprites.get(owner, tier);
   const node = new Container();
   // Sit on the rolling ground surface (PRD §6.1) so units ride the hills.
   node.position.set(isoX(x, y), isoY(x, y) - groundLiftPx(x, y));
@@ -89,8 +96,9 @@ function createUnitGfx(
   node.zIndex = x + y + 0.5;
 
   const sprite = new Sprite(texture);
-  sprite.anchor.set(0.5, 0.8);
-  sprite.tint = FACTION_COLORS[owner];
+  // Anchor at the feet (≈85% down) so the figure stands on the tile centre.
+  sprite.anchor.set(0.5, 0.85);
+  sprite.tint = baseTint(owner);
   node.addChild(sprite);
 
   const text = new BitmapText({ text: "", style: COUNT_TEXT_STYLE });
@@ -142,7 +150,7 @@ function playUpgradeFx(sprite: Sprite, baseScale: number): void {
 
 export function createUnitsRenderer(
   initial: GameState,
-  textures: TierTextures,
+  sprites: FactionSprites,
 ): UnitsRenderer {
   const container = new Container();
   container.sortableChildren = true;
@@ -216,13 +224,13 @@ export function createUnitsRenderer(
           province.y,
           renderFaction,
           shownTotal,
-          textures,
+          sprites,
         );
         container.addChild(gfx.node);
         units.set(province.id, gfx);
       }
 
-      const tierTexture = textures[tier];
+      const tierTexture = sprites.get(renderFaction, tier);
       const targetScale = tierScale(tier, tierTexture);
       // Only touch GPU-facing props when they actually change — redundant
       // writes mark the sprite dirty and break Pixi's batching every frame.
@@ -230,7 +238,7 @@ export function createUnitsRenderer(
         gfx.sprite.texture = tierTexture;
         gfx.sprite.scale.set(targetScale);
       }
-      const tint = FACTION_COLORS[renderFaction];
+      const tint = baseTint(renderFaction);
       if (gfx.sprite.tint !== tint) gfx.sprite.tint = tint;
       const label = shownTotal > 0 ? String(shownTotal) : "";
       if (gfx.count.text !== label) gfx.count.text = label;
